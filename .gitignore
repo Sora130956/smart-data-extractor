@@ -61,3 +61,6 @@ tmp/
 /output/
 *.local.json
 *.local.txt
+
+# 学习笔记与开发日志（个人学习材料，不提交到仓库）
+docs/study/
