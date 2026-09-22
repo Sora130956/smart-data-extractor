@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-第 2 步（可行性分析、技术选型）— 已完成，准备进入第 3 步
+第 4 步（实现计划）— 已完成，准备进入第 5 步
 
 ## 需求一句话（Who / What / Why）
 
@@ -78,11 +78,45 @@
 
 ## 验收标准
 
-（第 3 步填写后引用 `docs/acceptance.md`）
+详见 `docs/acceptance.md`（5 条可脚本检查的标准）
+
+| AC | 场景 | 核心检查点 |
+|----|------|-----------||
+| AC-1 | 三个预制场景 | 字段完整性（Contact 12 字段、Invoice/Lead ≥6 字段） |
+| AC-2 | 自定义 schema | 输出字段集与输入 schema 严格一致，缺失返回 null |
+| AC-3 | Confidence + Validation | confidence ∈ [0.0, 1.0]，格式校验拦截无效 email/phone |
+| AC-4 | Cost Tracking + 并发 | 每条有 `tokens_used` / `cost_usd`，批量有聚合，Semaphore(5) 限并发 |
+| AC-5 | 离线测试 | 删除 `OPENAI_API_KEY` 后 pytest 全过，零 API 成本 |
+
+**通过标准**：5/5 通过 → 部署；4/5 → 评估是否阻塞；≤3/5 → 返回实现。
 
 ## 实现计划
 
-（第 4 步填写后引用 `docs/plan.md`）
+详见 `docs/plan.md`（8 个阶段，7 天完成）
+
+**模块拆分**（按包组织，依赖单向）：
+- 底层：`config.py` + `validators/`（formats）
+- 模型层：`models/`（base / contact / invoice / lead / dynamic）
+- 场景层：`presets/`（base / contact / invoice / lead + PRESETS 注册表）
+- 业务层：`extraction/`（agent / extractor / batch / cost）
+- 入口层：`api/`（routes / schemas / create_app）+ `cli.py`
+
+依赖方向：`config → validators → models → presets → extraction → api / cli`（不允许反向 import）
+
+**实现顺序**（按依赖关系）：
+1. Day 1：基础设施（config + models + validator）
+2. Day 2：核心提取逻辑（presets + extractor + cost_tracker）
+3. Day 3：批量处理与并发控制（asyncio.Semaphore）
+4. Day 4：FastAPI 端点（/extract + /batch_extract + /health）
+5. Day 5 上午：CLI 入口
+6. Day 5 下午：运行全部 AC 验收，修复失败项
+7. Day 6：Docker + Render 部署
+8. Day 7：Demo 视频 + README + Proposal 模板
+
+**关键约束**：
+- 每个模块完成后写单测再进入下一个
+- 全部单测用 `TestModel`（离线，零成本）
+- 只在冒烟测试时调真实 API（< 10 次，< $0.01）
 
 ## 模块清单
 
@@ -90,8 +124,10 @@
 
 ## 下一步动作
 
-进入第 3 步：产出 `docs/acceptance.md`，写 3-5 条可量化、可脚本检查的验收标准，
-与用户评审通过后才能进入第 4 步（实现计划）。**在此之前不写任何实现代码。**
+**等待用户评审 `docs/plan.md`。**
+
+评审通过后进入第 5 步：按计划开始实现（Day 1 → 基础设施层）。
+**遵守 CLAUDE.md 硬性规则：每个模块完成后写单测再进入下一个，验证后才能声称完成。**
 
 ## 决策摘要
 
