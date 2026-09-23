@@ -40,6 +40,17 @@ def _resolve_cost(usage: RunUsage, *, model: Any, model_ref: str | None) -> floa
     return calculate_cost(usage, model_ref=_resolve_model_ref(model, model_ref))
 
 
+def _compose_instructions(base: str, extra: str | None) -> str:
+    """Append caller instructions after the non-negotiable base rules.
+
+    The base rules (missing -> null, confidence 0.0-1.0) always come first so
+    a caller cannot accidentally override the confidence contract.
+    """
+    if not extra:
+        return base
+    return f"{base}\n\nAdditional instructions from the caller:\n{extra}"
+
+
 def _resolve_model_ref(model: Any, model_ref: str | None) -> str:
     """Resolve a genai-prices model ref from an explicit ref or the model.
 
@@ -60,6 +71,7 @@ async def extract_data(
     *,
     model: Any = None,
     model_ref: str | None = None,
+    instructions: str | None = None,
 ) -> dict:
     """Extract structured data from a single text.
 
@@ -72,6 +84,8 @@ async def extract_data(
         model: Optional model override (TestModel for offline tests).
             When None, the configured model from settings is used.
         model_ref: Optional genai-prices ref override for cost tracking.
+        instructions: Optional caller instructions, appended after the base
+            rules of whichever prompt is in effect (preset or dynamic).
 
     Returns:
         {"data": {...}, "tokens_used": {"input": int, "output": int},
@@ -86,22 +100,34 @@ async def extract_data(
 
     if preset is not None:
         p = get_preset(preset)
-        if model is None:
-            # Production path: cached agent (shared pool + shared limiter)
-            agent = get_preset_agent(p.name, get_settings().model)
+        if model is None and instructions is None:
+            # Production default: cached agent (shared pool + shared limiter)
+            agent = get_preset_agent(p.name, get_settings().model) #NOTE 使用预定义的数据模型，由于prompt、字段什么的都是固定的，所以agent可以缓存
         else:
-            agent = build_agent(p.model_class, model=model, instructions=p.prompt_template)
+            # Caller instructions make the agent uncacheable (unbounded key
+            # space) -> build fresh; injected models keep the test path.
+            final = _compose_instructions(p.prompt_template, instructions)
+            if model is None:
+                agent = build_agent(
+                    p.model_class,
+                    model=get_settings().model,
+                    instructions=final,
+                    limiter=shared_concurrency_limiter(),
+                )
+            else:
+                agent = build_agent(p.model_class, model=model, instructions=final)
     else:
-        output_type = create_dynamic_model(schema_dict)
+        output_type = create_dynamic_model(schema_dict) #NOTE 根据用户自定义数据模型，在运行时动态创建创建BaseModel
+        final = _compose_instructions(DYNAMIC_PROMPT, instructions) #NOTE 用户可选的自定义prompt已实现：追加在基础规则之后，帮助LLM理解业务含义
         if model is None:
             agent = build_agent(
                 output_type,
                 model=get_settings().model,
-                instructions=DYNAMIC_PROMPT,
+                instructions=final,
                 limiter=shared_concurrency_limiter(),
             )
         else:
-            agent = build_agent(output_type, model=model, instructions=DYNAMIC_PROMPT)
+            agent = build_agent(output_type, model=model, instructions=final)
 
     result = await agent.run(text)
     usage = result.usage

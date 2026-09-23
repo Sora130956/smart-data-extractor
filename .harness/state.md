@@ -129,6 +129,12 @@
 - [ ] Phase 7（Day 6）：Docker + Render 部署
 - [ ] Phase 8（Day 7）：Demo 视频 + README + Proposal 模板
 
+## 可视化约定（docs/view/）
+
+- `docs/view/day{N}-project-tree.html`（项目理解树）与 `day{N}-dependency-graph.html`（包依赖+调用点图）按天版本化
+- 每个 Phase 结束或结构变化时：**基于上一版文件演进**生成新版本（day2 → day3 …），不覆盖旧版，浏览器直接打开可看
+- 依赖图连线上必须标注实际调用的函数/属性（如 `get_preset()`），次级依赖（如 agent.py 读 config.max_concurrency）在包 docstring 登记
+
 ## 下一步动作
 
 **Phase 3：实现 `extraction/batch.py`**——`batch_extract(texts, preset, schema_dict)`，asyncio.gather 并发，聚合 total_cost_usd / total_tokens。**注意 D-006 设计变更：限流已由 agent 层的共享 `ConcurrencyLimiter` 承担，batch.py 不再手写 Semaphore**。先写 `tests/extraction/test_batch.py`（TDD）。

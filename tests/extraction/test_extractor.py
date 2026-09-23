@@ -7,7 +7,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from smart_data_extractor.extraction import extract_data
-from smart_data_extractor.extraction.extractor import _resolve_cost
+from smart_data_extractor.extraction.extractor import _compose_instructions, _resolve_cost
 from smart_data_extractor.models import Contact
 
 
@@ -79,6 +79,31 @@ async def test_extract_unknown_preset_raises(test_model):
     """An unregistered preset name raises ValueError."""
     with pytest.raises(ValueError, match="nope"):
         await extract_data("some text", preset="nope", model=test_model)
+
+
+async def test_extract_accepts_caller_instructions(test_model):
+    """The optional instructions kwarg composes with the base prompt, offline."""
+    result = await extract_data(
+        "Jane Doe, jane@startup.io",
+        preset="contact",
+        model=test_model,
+        instructions="The text may be in German.",
+    )
+    assert set(result["data"]) == set(Contact.model_fields)
+
+
+def test_compose_instructions_appends_caller_section():
+    """Caller instructions come after the non-negotiable base rules."""
+    base = "BASE RULES"
+    out = _compose_instructions(base, "Text is in German")
+    assert out.startswith(base)
+    assert "Text is in German" in out
+    assert out != base
+
+
+def test_compose_instructions_none_returns_base():
+    """No caller instructions -> base prompt unchanged."""
+    assert _compose_instructions("BASE", None) == "BASE"
 
 
 def test_resolve_cost_prefers_framework_cost(test_model):

@@ -28,8 +28,9 @@ def create_dynamic_model(schema_dict: Dict[str, Any], model_name: str = "Dynamic
         
     Example:
         >>> schema = {
-        ...     "product_name": {"type": "string", "required": True},
-        ...     "price": {"type": "number", "required": False}
+        ...     "product_name": {"type": "string", "required": True}, #NOTE 用户自定义的字段需要支持自己填写description，帮助LLM明确字段的业务含义
+        ...     "price": {"type": "number", "required": False,
+        ...               "description": "unit price in USD, not the total"}
         ... }
         >>> Model = create_dynamic_model(schema)
         >>> instance = Model(product_name="iPhone", price=999.0)
@@ -46,12 +47,16 @@ def create_dynamic_model(schema_dict: Dict[str, Any], model_name: str = "Dynamic
         # Determine if field is required
         is_required = field_spec.get("required", False)
         
-        if is_required:
-            # Required field: type without Optional
-            field_definitions[field_name] = (field_type, ...)
-        else:
-            # Optional field: wrapped in Optional with None default
-            field_definitions[field_name] = (Optional[field_type], None)
+        # Required: bare type + Ellipsis default; optional: Optional + None.
+        annotation = field_type if is_required else Optional[field_type]
+        default = ... if is_required else None
+        # Optional per-field description is forwarded to the LLM via the
+        # model's JSON schema; it does not affect validation semantics.
+        description = field_spec.get("description")
+        field_definitions[field_name] = (
+            annotation,
+            Field(default, description=description) if description else default,
+        )
         
         # Add confidence field for each data field
         confidence_field_name = f"{field_name}_confidence"

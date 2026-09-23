@@ -70,6 +70,6 @@ def get_preset_agent(preset_name: str, model_ref: str) -> Agent:
         model_ref,
         output_type=p.model_class,
         instructions=p.prompt_template,
-        model_settings=ModelSettings(temperature=0),
-        max_concurrency=shared_concurrency_limiter(),
+        model_settings=ModelSettings(temperature=0),# NOTE 数据提取工作，temperature设置为0
+        max_concurrency=shared_concurrency_limiter(), # NOTE ConcurrencyLimiter 控制全局agent并发。如果单纯设置max_concurrency=5,则每个agent的并发是单独控制的，没有意义
     )

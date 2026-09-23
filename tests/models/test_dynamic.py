@@ -138,6 +138,24 @@ def test_create_dynamic_model_custom_name():
     assert Model.__name__ == "CustomModel"
 
 
+def test_create_dynamic_model_field_description():
+    """Optional per-field description lands on the Pydantic field (sent to the LLM)."""
+    schema = {
+        "price": {"type": "number", "required": True, "description": "unit price in USD"},
+        "note": {"type": "string", "required": False},
+    }
+
+    Model = create_dynamic_model(schema)
+
+    assert Model.model_fields["price"].description == "unit price in USD"
+    assert Model.model_fields["note"].description is None
+    # Description must not change required/optional semantics.
+    with pytest.raises(ValidationError):
+        Model()
+    instance = Model(price=1.0)
+    assert instance.note is None
+
+
 def test_create_dynamic_model_serialization():
     """Test model serialization to dict."""
     schema = {
