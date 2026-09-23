@@ -12,7 +12,7 @@
 ```
 src/smart_data_extractor/
 ├── __init__.py             # 对外导出：extract_data / batch_extract / PRESETS
-├── config.py               # 配置（API key / model / MAX_CONCURRENCY）
+├── config.py               # 配置（API key / model / max_concurrency）
 │
 ├── models/                 # 纯数据模型，不含业务逻辑
 │   ├── __init__.py         # 统一导出 Contact / Invoice / Lead / create_dynamic_model
@@ -37,7 +37,7 @@ src/smart_data_extractor/
 │   ├── __init__.py         # 导出 extract_data / batch_extract
 │   ├── agent.py            # Agent 构造（model 选择 + output_type 绑定）
 │   ├── extractor.py        # extract_data 单条提取
-│   ├── batch.py            # batch_extract 并发批量（Semaphore）
+│   ├── batch.py            # batch_extract 并发批量（限流由 agent 层共享 ConcurrencyLimiter 承担）
 │   └── cost.py             # calculate_cost（genai_prices 封装）
 │
 ├── api/                    # FastAPI 入口
@@ -91,7 +91,7 @@ validators ──▶ models ──▶ presets ──▶ extraction ──▶ api
 
 - 读取 `OPENAI_API_KEY`（或 `.env`）
 - 默认 model = `"openai:gpt-4o-mini"`
-- 并发控制：`MAX_CONCURRENCY = 5`
+- 并发控制：`max_concurrency: int = 5`（pydantic-settings 字段，由 extraction/agent.py 的共享 ConcurrencyLimiter 消费）
 
 **依赖**：无
 **验收**：`from smart_data_extractor.config import get_api_key` 可正常读取环境变量
@@ -189,19 +189,20 @@ def test_extract_contact_preset():
 
 #### 3.1 `extraction/batch.py` —— 批量提取
 
-**新增函数**：
+**新增函数**（Day 2 设计变更，D-006：不再手写 Semaphore，全局限流由 agent 层共享的 `ConcurrencyLimiter(settings.max_concurrency)` 承担）：
 ```python
 async def batch_extract(
     texts: list[str],
-    preset: str | None,
-    schema_dict: dict | None
+    preset: str | None = None,
+    schema_dict: dict | None = None,
+    *,
+    model: Any = None,  # 测试注入缝（同 extract_data）
 ) -> dict:
-    sem = asyncio.Semaphore(MAX_CONCURRENCY)
-    async def _extract_one(text):
-        async with sem:
-            return await extract_data(text, preset, schema_dict)
-    
-    results = await asyncio.gather(*[_extract_one(t) for t in texts])
+    # 并发安全来源：extract_data 内部的生产 Agent 全部共享同一个
+    # ConcurrencyLimiter，gather 任意多条也不会突破全局上限。
+    results = await asyncio.gather(
+        *[extract_data(t, preset, schema_dict, model=model) for t in texts]
+    )
     total_cost = sum(r["cost_usd"] for r in results)
     total_tokens = {"input": sum(...), "output": sum(...)}
     return {"results": results, "total_cost_usd": total_cost, "total_tokens": total_tokens}
@@ -212,9 +213,9 @@ async def batch_extract(
 ```python
 async def test_batch_extract():
     texts = ["text1", "text2", "text3"]
-    result = await batch_extract(texts, preset="contact")
+    result = await batch_extract(texts, preset="contact", model=TestModel())  # 离线
     assert len(result["results"]) == 3
-    assert result["total_cost_usd"] > 0
+    assert result["total_cost_usd"] >= 0
 ```
 
 ---
