@@ -1,4 +1,4 @@
-﻿# 决策记录（ADR）
+# 决策记录（ADR）
 
 > 记录"为什么选 A 不选 B"。每做一个影响后续开发的技术/设计决策，追加一条。
 
@@ -102,3 +102,49 @@
   - Confidence Score 实现方式确定：把 `xxx_confidence: float = Field(ge=0.0, le=1.0)` 作为 schema 字段让 LLM 自评，不读 logprobs
   - 成本追踪无需自建价格表，直接复用 genai-prices
   - 所有单测零 API 成本，可进 CI
+
+---
+
+## D-005：提取层用模型注入做离线测试
+
+- **日期**：2026-09-23
+- **状态**：已接受
+- **背景**：
+  - `extract_data` 需要打 OpenAI 才能跑，但 workspace 测试纪律要求"测试不得打真实网络"且"禁止 mock 被测对象本身"
+  - `genai_prices.calc_price` 返回 `Decimal`，与返回值契约（JSON 可序列化 float）不符
+- **决策**：
+  - `extract_data(text, preset, schema_dict, *, model=None, model_ref=None)`：`model` 为依赖注入缝——测试传 `TestModel()`，生产传 None 时回落到 `settings.model`
+  - 注入非字符串 model 且未给 `model_ref` 时，成本按 `DEFAULT_MODEL_REF = "gpt-4o-mini"` 计价（与默认生产模型一致，已在代码注释和 review R-1 中记录漂移风险）
+  - `calculate_cost` 内部 `float(...)` 转换后返回
+- **理由（为什么不选备选方案）**：
+  - 备选 A：respx 拦截真实 HTTP → 放弃。TestModel 在 agent 层即可离线产出结构化输出+usage，无需走到 HTTP 层，更简单且 D-004 已定调"单测统一用 TestModel"
+  - 备选 B：测试里 monkeypatch 环境变量伪造 API key 再跑真实 model → 放弃。仍然打网络，违反纪律
+  - 备选 C：cost 直接返回 Decimal → 放弃。FastAPI/JSON 序列化 Decimal 行为不一致（可能序列化为字符串），破坏 API 响应契约
+- **影响**：
+  - 单测全程无需 `OPENAI_API_KEY`（已验证：删环境变量后 98/98 通过）
+  - 未来 CLI/API 入口调用 `extract_data` 时不传 `model` 即可，生产路径不受影响
+
+---
+
+## D-006：并发限流、成本来源与 Agent 缓存（用户四问驱动）
+
+- **日期**：2026-09-23
+- **状态**：已接受
+- **背景**：
+  - 用户 review Phase 2 代码时提出四问，核实后发现三处可改进：
+    1. pydantic-ai 2.46 的 `RunUsage.cost` 由框架自动按 genai_prices 填充（无价目模型才为 None），自写 calculate_cost 属重复劳动
+    2. `Agent(max_concurrency=...)` 支持传入可跨 agent 共享的 `ConcurrencyLimiter`，比手写 Semaphore 更优
+    3. 字符串 model 构造是 eager 的（立即建 provider + AsyncOpenAI client），每次调用新建 Agent 会丢失连接池
+- **决策**：
+  - 成本：`_resolve_cost` 优先用 `usage.cost`，`calculate_cost` 仅作无价目模型（如 TestModel）的 fallback
+  - 限流：`shared_concurrency_limiter()`（lru_cache 单例，`ConcurrencyLimiter(settings.max_concurrency)`）注入所有生产 Agent；Phase 3 batch.py 不再手写 Semaphore
+  - 缓存：`get_preset_agent(preset_name, model_ref)` 用 `functools.lru_cache` 缓存生产 Agent（key 天然有界：3 预设 × 少数模型）；注入模型与动态 schema 路径不缓存
+  - 顺带：所有提取 Agent 统一 `ModelSettings(temperature=0)`（确定性输出）
+- **理由（为什么不选备选方案）**：
+  - 备选 A：保留手写 Semaphore → 放弃。每次新建 Agent 时各 Semaphore/limiter 互不感知，等于没有全局限流；共享 limiter 才是全局语义且带 observability
+  - 备选 B：自维护 agent 缓存 dict → 放弃。lru_cache 是标准库，key 有界无需淘汰策略，不引第三方依赖
+  - 备选 C：动态 schema 也缓存 → 放弃。用户 schema 无界，缓存即内存泄漏
+- **影响**：
+  - Phase 3 设计变更：batch.py 只做 `asyncio.gather`，限流由 agent 层承担
+  - `DEFAULT_MODEL_REF` 仅在 fallback 路径生效（review R-1 已标记缓解）
+  - 测试基建新增：`fake_openai_env` fixture（假 key + 三层 cache_clear），支撑生产路径的离线构建测试

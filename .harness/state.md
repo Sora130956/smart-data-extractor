@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-第 4 步（实现计划）— 已完成，准备进入第 5 步
+第 5 步（生成 → validate → review）— Phase 2 已完成，准备进入 Phase 3
 
 ## 需求一句话（Who / What / Why）
 
@@ -120,14 +120,18 @@
 
 ## 模块清单
 
-（第 4 步后展开）
+- [x] Phase 1（Day 1，commit ad4c705）：`config.py`、`validators/`（formats）、`models/`（base/contact/invoice/lead/dynamic）— 84 测试
+- [x] Phase 2（Day 2）：`presets/`（base/contact/invoice/lead + PRESETS 注册表 + get_preset）、`extraction/`（agent/extractor/cost + extract_data）— 新增 14 测试，共 98 全绿；离线（删 OPENAI_API_KEY）全绿；review 记录 `docs/review.md`
+- [ ] Phase 3（Day 3）：`extraction/batch.py`（Semaphore 并发批量）
+- [ ] Phase 4（Day 4）：`api/`（/health + /extract + /batch_extract）
+- [ ] Phase 5（Day 5 上午）：`cli.py`（Typer）
+- [ ] Phase 6（Day 5 下午）：AC-1~AC-5 验收 + fixtures/
+- [ ] Phase 7（Day 6）：Docker + Render 部署
+- [ ] Phase 8（Day 7）：Demo 视频 + README + Proposal 模板
 
 ## 下一步动作
 
-**等待用户评审 `docs/plan.md`。**
-
-评审通过后进入第 5 步：按计划开始实现（Day 1 → 基础设施层）。
-**遵守 CLAUDE.md 硬性规则：每个模块完成后写单测再进入下一个，验证后才能声称完成。**
+**Phase 3：实现 `extraction/batch.py`**——`batch_extract(texts, preset, schema_dict)`，asyncio.gather 并发，聚合 total_cost_usd / total_tokens。**注意 D-006 设计变更：限流已由 agent 层的共享 `ConcurrencyLimiter` 承担，batch.py 不再手写 Semaphore**。先写 `tests/extraction/test_batch.py`（TDD）。
 
 ## 决策摘要
 
@@ -141,4 +145,14 @@
 ### D-004: 锁定 pydantic-ai 2.46 API 写法
 - 决策：以 `spike_feasibility.py` 为唯一 API 参考，不照抄原计划文档代码片段
 - 理由：2.46 存在 4 处破坏性变更（output_type / result.output / result.usage 属性 / 内置价格表）
+- 详见：`.harness/decisions.md`
+
+### D-005: 提取层用模型注入做离线测试
+- 决策：`extract_data(..., model=...)` 依赖注入模型实例（测试传 TestModel），生产默认取 settings.model；genai_prices 的 Decimal 统一转 float 返回
+- 理由：符合 workspace 测试纪律（注入 fake 而非 mock 被测对象）；注入路径下 cost 按 DEFAULT_MODEL_REF=gpt-4o-mini 计价
+- 详见：`.harness/decisions.md`
+
+### D-006: 并发限流、成本来源与 Agent 缓存（用户四问驱动）
+- 决策：成本优先用框架自动填充的 `usage.cost`（calculate_cost 降级为 fallback）；限流用跨 agent 共享的 `ConcurrencyLimiter`（Phase 3 不再手写 Semaphore）；生产预设 Agent 用 lru_cache 缓存复用连接池；统一 temperature=0
+- 理由：usage.cost 由 pydantic-ai 自动填充属权威来源；每次新建 Agent 会丢连接池且各自限流等于没有全局限流
 - 详见：`.harness/decisions.md`
