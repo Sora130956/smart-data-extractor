@@ -167,3 +167,27 @@
 - **影响**：
   - Phase 4 设计 `/batch_extract` 响应 DTO 时必须回答：单条失败是整批 500 还是返回部分结果 + error 字段
   - 若选部分容错，`batch_extract` 需加参数（如 `return_exceptions: bool = False`），保持默认行为向后兼容
+
+---
+
+## D-008：API 契约——批量部分容错 + instructions 双端点暴露 + 错误分层
+
+- **日期**：2026-09-24
+- **状态**：已接受
+- **来源**：Phase 4 设计对齐（D-007 遗留问题 + plan 的 DTO 未覆盖 extract_data 已有的 instructions 参数，经用户拍板）
+- **背景**：
+  - D-007 把批量失败语义推迟到 Phase 4 定义 API 响应契约时回答
+  - Day 2 应用户要求给 `extract_data` 加了 `instructions`（客户自定义说明），但 plan 阶段 4 的 DTO 设计（`{text, preset?, schema?}`）早于该特性
+- **决策**：
+  1. `/batch_extract` 采用**部分容错**：HTTP 200，`results` 每项统一形状 `{data, tokens_used, cost_usd, error}`，失败条 `data=None` + `error="ExcType: msg"` + 用量/成本归零，聚合只计成功条，响应新增 `succeeded` / `failed` 计数；`batch_extract` 加 `return_exceptions: bool = False`（默认 fail-fast 向后兼容），API 层固定传 True
+  2. `instructions` 在 `/extract` 和 `/batch_extract` 都暴露为可选字段；`batch_extract` 同步加透传参数（R-5 注明的向后兼容扩展）
+  3. 错误分层：请求形状错误（both/neither、未知 preset、schema 字段缺 `type` 键）在 DTO `model_validator` 收口 → 422；提取层业务 `ValueError` → 400；其余异常 → 500
+- **理由（为什么不选备选方案）**：
+  - 备选 A：批量 fail-fast 整批 500 → 放弃。不符合 D-003 的 Fallback Handling 定位；客户传 100 条不该因 1 条 API 抖动全丢
+  - 备选 B：未知 preset 也由路由捕获 ValueError 返回 400 → 放弃。preset 成员性是请求形状问题，DTO 校验（422，FastAPI/pydantic 标准语义）比路由 try/except 更薄更一致
+  - 备选 C：DTO 字段直接命名 `schema` → 放弃。会遮蔽 `BaseModel.schema`，用 `schema_` + `Field(alias="schema")` 保持外部契约不变
+- **影响**：
+  - `schemas.py` 引入 `api → presets` 依赖（单向，合规）
+  - DTO 的 schema 形状校验与 `models.dynamic` 的 `{"fields": ...}` 双形状约定保持一致
+  - HTTP 消费者永远走容错模式，契约稳定；CLI（Phase 5）作为库调用方可自选语义
+  - `batch_extract` 双模式返回形状差异已登记为 R-9

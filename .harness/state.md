@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-第 5 步（生成 → validate → review）— Phase 3 已完成，准备进入 Phase 4
+第 5 步（生成 → validate → review）— Phase 4 已完成，准备进入 Phase 5
 
 ## 需求一句话（Who / What / Why）
 
@@ -123,7 +123,7 @@
 - [x] Phase 1（Day 1，commit ad4c705）：`config.py`、`validators/`（formats）、`models/`（base/contact/invoice/lead/dynamic）— 84 测试
 - [x] Phase 2（Day 2）：`presets/`（base/contact/invoice/lead + PRESETS 注册表 + get_preset）、`extraction/`（agent/extractor/cost + extract_data）— 新增 14 测试，共 98 全绿；离线（删 OPENAI_API_KEY）全绿；review 记录 `docs/review.md`
 - [x] Phase 3（Day 3）：`extraction/batch.py`（batch_extract：asyncio.gather 并发 + total_cost_usd/total_tokens 聚合，限流由 agent 层共享 ConcurrencyLimiter 承担）— 新增 6 测试，共 115 全绿；离线全绿；review 记录 `docs/review.md`（R-4 转 D-007）
-- [ ] Phase 4（Day 4）：`api/`（/health + /extract + /batch_extract）
+- [x] Phase 4（Day 4）：`api/`（schemas/routes/create_app：/health + /extract + /batch_extract）+ `batch_extract` 容错扩展（return_exceptions + instructions 透传）— 新增 12 测试（batch 3 + api 9），共 127 全绿；离线全绿；review 记录 `docs/review.md`（R-7~R-9）
 - [ ] Phase 5（Day 5 上午）：`cli.py`（Typer）
 - [ ] Phase 6（Day 5 下午）：AC-1~AC-5 验收 + fixtures/
 - [ ] Phase 7（Day 6）：Docker + Render 部署
@@ -137,7 +137,7 @@
 
 ## 下一步动作
 
-**Phase 4：实现 `api/`**——`schemas.py`（ExtractRequest/BatchExtractRequest 等 DTO）+ `routes.py`（/health + /extract + /batch_extract）+ `create_app()`。测试用 `httpx.AsyncClient` + `dependency_overrides` 注入 fake extractor，不打真实网络。**注意 D-007 遗留问题：设计 /batch_extract 响应契约时必须回答"单条失败是整批 500 还是部分结果 + error 字段"。** 先写 `tests/api/test_routes.py`（TDD）。
+**Phase 5（Day 5 上午）：实现 `cli.py`**——Typer 命令：`extract --text/--input-file --preset/--schema [--instructions]`、`batch --input batch.jsonl --output results.json`。测试用 `typer.testing.CliRunner`，通过 monkeypatch 注入 fake extract_data/batch_extract（同 API 测试的 DI 纪律，不打真实网络）。在 `pyproject.toml` 配 `[project.scripts]`（注意现有 `smart-data-extractor = "smart_data_extractor:main"` 占位需对齐到 cli app）。先写 `tests/test_cli.py`（TDD）。
 
 ## 决策摘要
 
@@ -166,4 +166,9 @@
 ### D-007: batch 层失败语义——保持 fail-fast
 - 决策：`batch_extract` 维持裸 `asyncio.gather`（fail-fast）；per-item 容错（error 字段、部分成功聚合口径）推迟到 Phase 4 定义 API 响应契约时统一设计
 - 理由：容错口径属返回契约变更，应由传输层需求驱动；batch 层单方面决定会导致 Phase 4 返工
-- 详见：`.harness/decisions.md`（来源：Phase 3 review R-4）
+- 详见：`.harness/decisions.md`（来源：Phase 3 review R-4）— **已由 D-008 闭环**
+
+### D-008: API 契约——批量部分容错 + instructions 双端点暴露 + 错误分层
+- 决策：/batch_extract 用部分容错（200 + 统一形状 error 字段 + succeeded/failed 计数，聚合只计成功），`batch_extract` 加 `return_exceptions`（默认 fail-fast 向后兼容）；instructions 在 /extract 和 /batch_extract 都暴露；错误分层 422（DTO 形状）/400（业务 ValueError）/500
+- 理由：符合 D-003 Fallback Handling 定位；DTO 校验前置让路由保持薄；schema 字段用 alias 避免遮蔽 BaseModel.schema
+- 详见：`.harness/decisions.md`（来源：Phase 4 设计对齐，用户拍板）

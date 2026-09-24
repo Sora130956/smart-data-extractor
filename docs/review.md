@@ -68,3 +68,27 @@
 ### 结论
 
 无必须修复项，Phase 3 通过 review。R-4 已升级为 D-007 跟踪。
+
+---
+
+## Phase 4 review（2026-09-24，api/ 包 + batch 容错扩展）
+
+### 检查过程
+
+- 依赖方向：`api → extraction`（routes.py 调 extract_data / batch_extract）、`api → presets`（schemas.py 查 PRESETS 成员），均为上层→下层，无反向 import ✅
+- D-007 闭环：批量失败语义经用户拍板为部分容错，`batch_extract` 加 `return_exceptions`（默认 False 保持 fail-fast 向后兼容），API 层固定传 True ✅
+- 测试纪律：API 测试全程 `dependency_overrides` 注入 fake（httpx.ASGITransport，零网络）；batch 新测试用 monkeypatch 替换模块级依赖 `extract_data`（打的是依赖缝，非被测对象本身）；改坏 `succeeded=len(items)-failed` 为 `len(items)` 后 `test_batch_partial_failure_contract` 变红（assert 3 == 2），还原后全绿 ✅
+- 离线：删除 `OPENAI_API_KEY` 后 127/127 通过；plugins 行含 asyncio-1.4.0（AUTO），无 RuntimeWarning ✅
+- 冒烟：`app.openapi()` 确认 /health /extract /batch_extract 三端点注册（注意：FastAPI 0.141 的 `app.routes` 里 include_router 是惰性 `_IncludedRouter`，直接看 app.routes 会误以为路由缺失）✅
+
+### 已记录问题
+
+| # | 级别 | 问题 | 处理 |
+|---|------|------|------|
+| R-7 | 仅供参考 | routes 里 `ValueError → 400` 的兜底在 DTO 校验（422）之后几乎不可达；而 `create_dynamic_model` 对极端字段名（如 `model_` 前缀、非法标识符）抛的非 ValueError 异常会 500。 | 暂不处理：DTO 已挡住形状错误，深层 pydantic 异常属低频边界；400 兜底保留作安全网。若 Day 6 冒烟发现真实案例再收敛 |
+| R-8 | 仅供参考 | 批量 error 字段透传异常类型名 + 消息（`"ValueError: ..."`），客户端可见内部异常类型。 | 暂不处理：extraction 层的异常消息均为受控文本（不含路径/key），对 MVP 客户反而可读；若未来接入含敏感信息的异常需收敛为固定文案 |
+| R-9 | 仅供参考 | `batch_extract` 双模式返回形状不一致：fail-fast 模式的结果项无 `error` 键，容错模式有。 | 已缓解：docstring 明确两种模式的形状；HTTP 消费者永远走容错模式（routes.py 固定传参），契约稳定；CLI（Phase 5）按需自选 |
+
+### 结论
+
+无必须修复项，Phase 4 通过 review。D-007 随本次契约落地闭环，新增 D-008 记录 API 契约决策。
