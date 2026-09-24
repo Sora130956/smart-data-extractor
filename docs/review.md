@@ -92,3 +92,30 @@
 ### 结论
 
 无必须修复项，Phase 4 通过 review。D-007 随本次契约落地闭环，新增 D-008 记录 API 契约决策。
+
+---
+
+## Phase 5 review（2026-09-24，cli.py + [project.scripts] 对齐）
+
+### 检查过程
+
+- 依赖方向：`cli → extraction`（cli.py 只 import extract_data / batch_extract，未触碰 presets/config），无反向 import ✅
+- TDD：先写 `tests/test_cli.py`（14 个测试）确认 RED（`ModuleNotFoundError: smart_data_extractor.cli`），再实现至 GREEN ✅
+- 测试纪律：CliRunner + monkeypatch 替换 cli 模块级的 `extract_data` / `batch_extract`（打依赖缝，非被测对象，同 test_batch.py 模式）；断言针对 CLI 的接线结果（fake 收到的参数、stdout/stderr/输出文件内容、退出码）✅
+- 突变自证：`batch` 的 `failed = sum(...)` 改为 `failed = 0` → `test_batch_exit_1_when_any_item_failed` 变红（assert 0 == 1），还原后 141 全绿 ✅
+- 离线：子进程删除 `OPENAI_API_KEY` 后 141/141 通过（CLI 测试本身不构建 agent，fakes 全程注入）✅
+- 冒烟：`uv run smart-data-extractor --help` 渲染 extract/batch 两命令；缺 --preset/--schema → 干净 usage error + exit 2，零网络 ✅
+- click 8.5 行为核验：CliRunner 的 stdout/stderr 分离捕获，`result.output` 为合并流——JSON 断言用 `result.stdout`，错误/汇总断言用 `result.stderr`，避免版本歧义 ✅
+- CLI 契约（新增 D-009）：batch 固定容错模式（D-008 授权库调用方自选）；退出码 0/1/2 分层对应 API 的 200/400/422；stdout 只放数据 JSON、stderr 放汇总与错误，保证 `| jq` 可用 ✅
+
+### 已记录问题
+
+| # | 级别 | 问题 | 处理 |
+|---|------|------|------|
+| R-10 | 仅供参考 | `batch --input` 的 JSONL 格式一行一条 text，无法表达含换行的多行文本；且行内容不做 JSON 反转义。 | 暂不处理：help 已注明 one text per non-blank line；多行文本属 D-001 Week 2+ 扩展（文件输入解析），需要时换 JSON 数组输入格式即可 |
+| R-11 | 仅供参考 | 命令内 `asyncio.run` 自建事件循环：若未来把 CLI app 嵌入已有 loop 的宿主（notebook 等）会冲突；命令只捕获 `ValueError`，网络/深层异常会带 traceback 崩出（exit 1）。 | 暂不处理：CLI 是独立进程入口，不存在外层 loop；traceback 对 MVP 排障反而有价值；Day 6 冒烟若发现高频真实异常再收敛 |
+| R-12 | 仅供参考 | `--input-file` 读取后 `.strip()` 会去掉首尾空白（含有意义的尾随空格）；stdout 的 JSON dump 默认 `ensure_ascii=True`，非 ASCII 字段显示为 `\uXXXX`。 | 暂不处理：对提取场景首尾空白无害；`\uXXXX` 仍是合法 JSON，解析后等价，且保证 stdout 编码安全 |
+
+### 结论
+
+无必须修复项，Phase 5 通过 review。CLI 契约决策登记为 D-009。

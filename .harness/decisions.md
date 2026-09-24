@@ -191,3 +191,28 @@
   - DTO 的 schema 形状校验与 `models.dynamic` 的 `{"fields": ...}` 双形状约定保持一致
   - HTTP 消费者永远走容错模式，契约稳定；CLI（Phase 5）作为库调用方可自选语义
   - `batch_extract` 双模式返回形状差异已登记为 R-9
+
+---
+
+## D-009：CLI 契约——容错批量 + 退出码分层 + 数据/诊断流分离
+
+- **日期**：2026-09-24
+- **状态**：已接受
+- **来源**：Phase 5 实现（D-008 遗留的"CLI 自选语义"问题 + plan 5.1 未定义退出码与输出流）
+- **背景**：
+  - D-008 授权 CLI 作为库调用方自选 batch 失败语义，但未定选哪种
+  - plan 5.1 只定义了命令形状（extract/batch 的参数），未定义退出码、stdout/stderr 分工、部分失败时的行为
+  - CLI 的典型消费方式是脚本管道（`smart-data-extractor batch ... | jq`），输出流纪律直接决定可用性
+- **决策**：
+  1. `batch` 固定走容错模式（`return_exceptions=True`）：部分结果照常写出（`--output` 文件或 stdout），任一条失败 → exit 1
+  2. 退出码分层：0 成功（批量=全部条目成功）；1 业务错误（未知 preset、schema 形状错误）或批量部分失败；2 用法错误（--text/--input-file 与 --preset/--schema 的组合冲突、空 JSONL、schema 非法 JSON/非对象）——与 API 的 200/400/422 分层一一对应
+  3. stdout 只放数据（结果 JSON）；stderr 放诊断（批量汇总行、错误消息）——保证管道可解析
+  4. 入口名沿用 `smart-data-extractor`（对齐 pyproject 现有占位），指向 `smart_data_extractor.cli:app`
+- **理由（为什么不选备选方案）**：
+  - 备选 A：batch 走 fail-fast（默认模式）→ 放弃。一条 API 抖动丢整批结果，违背 D-003 Fallback Handling 定位；API 已选容错，CLI 双标无理由
+  - 备选 B：汇总与 JSON 同打 stdout → 放弃。`| jq` 立即解析失败；数据/诊断分流是 CLI 惯例（curl -s / wget -q 同理）
+  - 备选 C：脚本名用 plan 5.1 写的 `extractor` → 放弃。与项目名/镜像名脱节，`smart-data-extractor` 自解释且占位已存在
+- **影响**：
+  - Phase 8 README/Demo 按 0/1/2 退出码与流分工展示用法
+  - plan 5.1 的 `extractor` 命令名与实际 `smart-data-extractor` 存在文档偏差，以本决策为准
+  - R-9（batch 双模式形状差异）对 CLI 无影响：CLI 永远走容错模式，结果项恒有 `error` 键

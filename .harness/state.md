@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-第 5 步（生成 → validate → review）— Phase 4 已完成，准备进入 Phase 5
+第 5 步（生成 → validate → review）— Phase 5 已完成，准备进入 Phase 6
 
 ## 需求一句话（Who / What / Why）
 
@@ -124,7 +124,7 @@
 - [x] Phase 2（Day 2）：`presets/`（base/contact/invoice/lead + PRESETS 注册表 + get_preset）、`extraction/`（agent/extractor/cost + extract_data）— 新增 14 测试，共 98 全绿；离线（删 OPENAI_API_KEY）全绿；review 记录 `docs/review.md`
 - [x] Phase 3（Day 3）：`extraction/batch.py`（batch_extract：asyncio.gather 并发 + total_cost_usd/total_tokens 聚合，限流由 agent 层共享 ConcurrencyLimiter 承担）— 新增 6 测试，共 115 全绿；离线全绿；review 记录 `docs/review.md`（R-4 转 D-007）
 - [x] Phase 4（Day 4）：`api/`（schemas/routes/create_app：/health + /extract + /batch_extract）+ `batch_extract` 容错扩展（return_exceptions + instructions 透传）— 新增 12 测试（batch 3 + api 9），共 127 全绿；离线全绿；review 记录 `docs/review.md`（R-7~R-9）
-- [ ] Phase 5（Day 5 上午）：`cli.py`（Typer）
+- [x] Phase 5（Day 5 上午）：`cli.py`（Typer：extract/batch 两命令，契约见 D-009——容错批量 + 退出码 0/1/2 分层 + stdout 数据/stderr 诊断分流）+ `[project.scripts]` 对齐为 `smart-data-extractor = "smart_data_extractor.cli:app"` — 新增 14 测试，共 141 全绿；离线全绿；突变自证通过；review 记录 `docs/review.md`（R-10~R-12，新增 D-009）
 - [ ] Phase 6（Day 5 下午）：AC-1~AC-5 验收 + fixtures/
 - [ ] Phase 7（Day 6）：Docker + Render 部署
 - [ ] Phase 8（Day 7）：Demo 视频 + README + Proposal 模板
@@ -137,7 +137,7 @@
 
 ## 下一步动作
 
-**Phase 5（Day 5 上午）：实现 `cli.py`**——Typer 命令：`extract --text/--input-file --preset/--schema [--instructions]`、`batch --input batch.jsonl --output results.json`。测试用 `typer.testing.CliRunner`，通过 monkeypatch 注入 fake extract_data/batch_extract（同 API 测试的 DI 纪律，不打真实网络）。在 `pyproject.toml` 配 `[project.scripts]`（注意现有 `smart-data-extractor = "smart_data_extractor:main"` 占位需对齐到 cli app）。先写 `tests/test_cli.py`（TDD）。
+**Phase 6（Day 5 下午）：AC-1~AC-5 全量验收**——① 创建 `fixtures/`（contact_sample.txt / invoice_sample.txt / lead_sample.txt，plan 6.1 有示例内容）；② 按 `docs/acceptance.md` 逐条运行验收命令并留存输出证据（离线项为主）；③ 失败项回到对应模块修复后重跑；④ 真实 API 冒烟（可选，< 10 次调用 < $0.01，验证 R-2 的 instructions 送达）；⑤ 完成后更新本文件与 `docs/review.md`。
 
 ## 决策摘要
 
@@ -172,3 +172,8 @@
 - 决策：/batch_extract 用部分容错（200 + 统一形状 error 字段 + succeeded/failed 计数，聚合只计成功），`batch_extract` 加 `return_exceptions`（默认 fail-fast 向后兼容）；instructions 在 /extract 和 /batch_extract 都暴露；错误分层 422（DTO 形状）/400（业务 ValueError）/500
 - 理由：符合 D-003 Fallback Handling 定位；DTO 校验前置让路由保持薄；schema 字段用 alias 避免遮蔽 BaseModel.schema
 - 详见：`.harness/decisions.md`（来源：Phase 4 设计对齐，用户拍板）
+
+### D-009: CLI 契约——容错批量 + 退出码分层 + 数据/诊断流分离
+- 决策：batch 固定容错模式（部分结果仍写出，任一失败 exit 1）；退出码 0/1/2 分层对应 API 200/400/422；stdout 只放数据 JSON、stderr 放汇总与错误；入口名沿用 `smart-data-extractor` → `cli:app`
+- 理由：CLI 面向脚本管道消费，数据/诊断必须分流；退出码是脚本判断批处理结果的唯一手段；D-008 已授权自选语义
+- 详见：`.harness/decisions.md`（来源：Phase 5 实现，plan 5.1 的 `extractor` 命令名与之偏差，以本决策为准）
