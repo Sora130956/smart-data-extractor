@@ -119,3 +119,29 @@
 ### 结论
 
 无必须修复项，Phase 5 通过 review。CLI 契约决策登记为 D-009。
+
+---
+
+## Phase 6 review（2026-09-24，AC 全量验收 + 修复）
+
+### 检查过程
+
+- 验收翻译：acceptance.md 的 bash/jq 脚本拟稿于 stdin 管道 CLI + 真实 API，落地为 `tests/test_acceptance.py`（14 测试：AC-1×5 / AC-2×3 / AC-3×4 / AC-4×3）——公共入口 `extract_data`/`batch_extract` + TestModel 注入（D-005），格式校验/缺失字段语义在模型层直接断言 ✅
+- 文档漂移修正（acceptance.md）：① 字段名拟稿与实现不一致（title/linkedin→job_title/website、total_amount/items→total/line_items、industry/interested_product→BANT 十字段）；② AC-4 的 `Semaphore(5)` 拟稿被 D-006 的全局 `ConcurrencyLimiter` 取代；③ 命令名 `extractor`→`smart-data-extractor`，stdin 管道→`--input-file`（D-009）✅
+- AC-3 语义差距（本阶段唯一实现修复）：原实现字段校验失败只置 `None`，不归零 confidence。修复：`ConfidenceBase` 加 `model_validator(mode="after")`——任何为 `None` 的字段，配对 `_confidence` 归 0.0；preset 与动态模型经继承同享；写入走 `__dict__` 绕过 `validate_assignment` 递归 ✅
+- 测试基建：`fake_openai_env` 从 `tests/extraction/test_agent.py` 提升到 `tests/conftest.py` 共享（AC-4 离线断言 limiter 需要假 key 环境 + cache_clear）✅
+- TDD：先 RED（3 failed / 11 passed：AC-3 归零×2 + AC-4 settings 假 key×1）→ 修复后 14/14 ✅
+- 突变自证：validator 归零语句改为 `pass` → 3 个测试变红（2 验收 + 1 模型），还原后全绿 ✅
+- 全套：155 passed / 2 skipped（integration 默认 skip）；删除 `OPENAI_API_KEY` 后同样 155 passed / 2 skipped——AC-5 证据 ✅
+- 冒烟（可选）：`tests/test_integration.py` 就绪，`RUN_INTEGRATION=1` 触发 2 次真实调用（< $0.01），验证 R-2 的 instructions 送达与生产路径（settings 模型 + 缓存 agent + 真实 usage/cost）
+
+### 已记录问题
+
+| # | 级别 | 问题 | 处理 |
+|---|------|------|------|
+| R-13 | 仅供参考 | `ConfidenceBase` 归零 validator 会把"LLM 主动漏提"的字段 confidence 也压到 0.0——null 与"提取失败"不可区分（无第三态）。 | 暂不处理：与 AC-3 的 null⇒0.0 契约一致，消费方拿 null 即视为未提取；三态语义（null / 低置信 / 高置信）属 Week 2+ 扩展 |
+| R-14 | 仅供参考 | 真实 API 冒烟（test_integration.py）尚未在本次会话执行（需用户 key 与授权）。 | 待用户拍板：`RUN_INTEGRATION=1 OPENAI_API_KEY=sk-... uv run pytest tests/test_integration.py -v`，2 次调用 < $0.01 |
+
+### 结论
+
+AC-1~AC-5 全部通过（5/5），Phase 6 完成。唯一实现变更（confidence 归零）有测试锁定、突变自证与全套无回归。

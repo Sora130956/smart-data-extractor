@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day5 · 验收映射图 — smart-data-extractor</title>
+<!-- 版本: day5-acceptance-map (Phase 6 完成时) · 首个验收视图 · 后续版本命名 day{N}-acceptance-map.html -->
+<!-- Phase 6 变化: fixtures/ + tests/test_acceptance.py(14) + tests/conftest.py + tests/test_integration.py(2, 默认skip) + ConfidenceBase 归零 validator -->
+<style>
+  body { margin: 0; padding: 24px; background: #fff; font-family: "SF Pro Text","PingFang SC",system-ui,sans-serif; }
+  .page { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .meta { font-size: 12px; color: #52525B; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="page">
+<h1>验收映射图 · Day 5（Phase 6）</h1>
+<div class="meta">docs/acceptance.md 的 AC-1~AC-5 → 离线测试 → 覆盖模块 · 155 passed / 2 skipped（integration 默认 skip）· 删 OPENAI_API_KEY 后同样全绿（AC-5）</div>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #F7F7F8; --surface-muted: #EFEFF2;
+  --text: #171717; --text-muted: #52525B;
+  --border: rgba(23,23,23,0.12);
+  --brand: #0FDC78; --brand-soft: #E5FFF2; --brand-text: #004D26;
+  --amber-soft: #FFF7E6; --amber-text: #6B4E00;
+  --radius: 8px; --radius-card: 12px; --radius-full: 999px;
+  --spacer-4: 4px; --spacer-8: 8px; --spacer-12: 12px; --spacer-16: 16px; --spacer-20: 20px;
+  --font-sans: "SF Pro Text","PingFang SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono: "JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --weight-regular: 400; --weight-medium: 500; --weight-strong: 600;
+  --text-caption: 12px/18px; --text-body: 14px/20px; --text-title: 16px/24px; --text-code: 13px/20px;
+}
+:root[data-widget-theme="dark"] {
+  color-scheme: dark;
+  --surface: #171717; --surface-muted: #262626;
+  --text: #E5E5E5; --text-muted: #A1A1AA;
+  --border: rgba(229,229,229,0.12);
+  --brand: #32F08C; --brand-soft: #004D26; --brand-text: #E5FFF2;
+  --amber-soft: #3A2E00; --amber-text: #FFE9B8;
+}
+.widget { color: var(--text); background: transparent; font: var(--weight-regular) var(--text-body) var(--font-sans); }
+.amap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--spacer-20); }
+.amap-legend { display: flex; flex-wrap: wrap; gap: var(--spacer-8); margin-bottom: var(--spacer-16); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); }
+.amap-legend span { border: 1px solid var(--border); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); background: var(--surface-muted); }
+.amap-legend .ok { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-text); }
+.amap-legend .opt { border-color: rgba(107,78,0,0.35); background: var(--amber-soft); color: var(--amber-text); }
+.ac { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: var(--spacer-12) var(--spacer-16); margin-bottom: var(--spacer-12); }
+.ac:last-child { margin-bottom: 0; }
+.ac-head { display: flex; align-items: baseline; gap: var(--spacer-8); flex-wrap: wrap; }
+.ac-id { font: var(--weight-strong) var(--text-code) var(--font-mono); color: var(--brand-text); background: var(--brand-soft); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); }
+.ac-title { font: var(--weight-medium) var(--text-body) var(--font-sans); color: var(--text); }
+.ac-then { font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); margin: var(--spacer-4) 0 var(--spacer-8); }
+.row { display: flex; gap: var(--spacer-12); align-items: flex-start; flex-wrap: wrap; }
+.row-label { font: var(--weight-medium) var(--text-caption) var(--font-sans); color: var(--text-muted); min-width: 44px; padding-top: var(--spacer-4); }
+.tests { display: flex; flex-wrap: wrap; gap: var(--spacer-4); flex: 1; min-width: 240px; }
+.t { font: var(--weight-regular) var(--text-code) var(--font-mono); font-size: 12px; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); background: var(--surface-muted); }
+.t.opt { border-color: rgba(107,78,0,0.35); background: var(--amber-soft); color: var(--amber-text); }
+.mods { display: flex; flex-wrap: wrap; gap: var(--spacer-4); flex: 1; min-width: 240px; }
+.m { font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); border: 1px dashed var(--border); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); }
+.fix { margin-top: var(--spacer-8); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); border-left: 3px solid var(--brand); padding-left: var(--spacer-12); }
+.fix b { color: var(--text); font-weight: var(--weight-medium); }
+.amap-note { margin-top: var(--spacer-16); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); }
+.amap-note b { color: var(--text); font-weight: var(--weight-medium); }
+</style>
+<div class="widget" data-dynamic-ui-widget data-template="comparison">
+  <div class="amap">
+    <div class="amap-legend">
+      <span class="ok">✅ 全部通过（离线，TestModel 注入 D-005）</span>
+      <span class="opt">⏳ 可选真实 API（RUN_INTEGRATION=1，2 次调用 &lt; $0.01）</span>
+      <span>虚线胶囊 = 覆盖的生产模块</span>
+    </div>
+
+    <div class="ac">
+      <div class="ac-head"><span class="ac-id">AC-1</span><span class="ac-title">三个预制场景的结构化输出</span></div>
+      <div class="ac-then">Then：返回 JSON 含全部预定义字段 + confidence + cost；Contact 恰 12 键，Invoice/Lead ≥6 业务字段</div>
+      <div class="row"><span class="row-label">测试</span><div class="tests">
+        <span class="t">test_ac1_preset_output_matches[contact]</span>
+        <span class="t">test_ac1_preset_output_matches[invoice]</span>
+        <span class="t">test_ac1_preset_output_matches[lead]</span>
+        <span class="t">test_ac1_field_completeness</span>
+      </div></div>
+      <div class="row"><span class="row-label">覆盖</span><div class="mods">
+        <span class="m">extraction/extractor.py</span><span class="m">presets/</span><span class="m">models/contact·invoice·lead</span><span class="m">fixtures/ 3 样本</span>
+      </div></div>
+    </div>
+
+    <div class="ac">
+      <div class="ac-head"><span class="ac-id">AC-2</span><span class="ac-title">自定义 JSON Schema 动态提取</span></div>
+      <div class="ac-then">Then：输出字段集与 schema 严格一致（+ _confidence 孪生，D-004）；缺失可选字段 → null 而非编造；required 缺失 → ValidationError</div>
+      <div class="row"><span class="row-label">测试</span><div class="tests">
+        <span class="t">test_ac2_dynamic_output_matches_schema</span>
+        <span class="t">test_ac2_missing_optional_field_is_null</span>
+        <span class="t">test_ac2_required_field_enforced</span>
+      </div></div>
+      <div class="row"><span class="row-label">覆盖</span><div class="mods">
+        <span class="m">models/dynamic.py · create_dynamic_model()</span><span class="m">extraction/extractor.py（schema_dict 路径）</span>
+      </div></div>
+    </div>
+
+    <div class="ac">
+      <div class="ac-head"><span class="ac-id">AC-3</span><span class="ac-title">Confidence Score + Validation Rules</span></div>
+      <div class="ac-then">Then：confidence ∈ [0.0, 1.0]；email/phone/website/date 格式校验失败 → 字段 null 且配对 confidence 0.0</div>
+      <div class="row"><span class="row-label">测试</span><div class="tests">
+        <span class="t">test_ac3_invalid_email_intercepted</span>
+        <span class="t">test_ac3_invalid_phone_website_date_intercepted</span>
+        <span class="t">test_ac3_absent_fields_default_to_zero_confidence</span>
+        <span class="t">test_ac3_confidence_bounds_through_extraction</span>
+      </div></div>
+      <div class="row"><span class="row-label">覆盖</span><div class="mods">
+        <span class="m">models/base.py · ConfidenceBase</span><span class="m">validators/formats.py</span><span class="m">models/contact·invoice field_validator</span>
+      </div></div>
+      <div class="fix"><b>Phase 6 修复</b>：ConfidenceBase 新增 model_validator(mode="after")——任何为 null 的字段，配对 _confidence 归 0.0；preset 与动态模型经继承同享；写入走 __dict__ 绕过 validate_assignment 递归。突变自证：归零改 pass → 3 测试变红。</div>
+    </div>
+
+    <div class="ac">
+      <div class="ac-head"><span class="ac-id">AC-4</span><span class="ac-title">Cost Tracking 与批量处理限流</span></div>
+      <div class="ac-then">Then：每条有 tokens_used / cost_usd；批量聚合 total_cost_usd / total_tokens；全局 ConcurrencyLimiter 上限 = max_concurrency（默认 5，D-006 取代拟稿 Semaphore(5)）</div>
+      <div class="row"><span class="row-label">测试</span><div class="tests">
+        <span class="t">test_ac4_single_record_cost_and_tokens</span>
+        <span class="t">test_ac4_batch_aggregates_over_fixture_texts</span>
+        <span class="t">test_ac4_global_concurrency_cap</span>
+      </div></div>
+      <div class="row"><span class="row-label">覆盖</span><div class="mods">
+        <span class="m">extraction/cost.py · usage.cost 优先</span><span class="m">extraction/batch.py · 聚合</span><span class="m">extraction/agent.py · shared_concurrency_limiter()</span><span class="m">config.py · max_concurrency</span>
+      </div></div>
+    </div>
+
+    <div class="ac">
+      <div class="ac-head"><span class="ac-id">AC-5</span><span class="ac-title">离线测试可运行（零 API 成本）</span></div>
+      <div class="ac-then">Then：删除 OPENAI_API_KEY 后 pytest 全过，无网络请求</div>
+      <div class="row"><span class="row-label">证据</span><div class="tests">
+        <span class="t">全套 155 passed / 2 skipped（删 KEY 后复跑同结果）</span>
+        <span class="t">tests/conftest.py · fake_openai_env（假 key + 三层 cache_clear，Phase 6 提升共享）</span>
+      </div></div>
+      <div class="row"><span class="row-label">覆盖</span><div class="mods">
+        <span class="m">整套 tests/（9 个测试文件）</span><span class="m">pydantic-ai TestModel 注入缝</span>
+      </div></div>
+    </div>
+
+    <div class="ac">
+      <div class="ac-head"><span class="ac-id">冒烟</span><span class="ac-title">真实 API 冒烟（可选，R-14 待用户拍板）</span></div>
+      <div class="ac-then">验证 R-2 的 instructions 真实送达 + 生产路径（settings 模型 + 缓存 agent + 真实 usage/cost）；RUN_INTEGRATION=1 触发，默认 skip</div>
+      <div class="row"><span class="row-label">测试</span><div class="tests">
+        <span class="t opt">test_real_contact_extraction</span>
+        <span class="t opt">test_real_instructions_are_delivered</span>
+      </div></div>
+      <div class="row"><span class="row-label">覆盖</span><div class="mods">
+        <span class="m">extraction/ 全链路（无注入，settings.model）</span><span class="m">OpenAI gpt-4o-mini</span>
+      </div></div>
+    </div>
+
+    <div class="amap-note">
+      <b>同套证据链</b>：TDD RED（3 failed / 11 passed）→ GREEN（14/14）→ 全套 155/2 → 删 KEY 离线复跑 → 突变自证（validator 归零禁用 → 3 red）→ 还原全绿。
+      <b>文档漂移修正</b>（acceptance.md）：字段名 title/linkedin/total_amount/items → job_title/website/total/line_items；Semaphore(5) → ConcurrencyLimiter（D-006）；命令名 extractor → smart-data-extractor（D-009）。
+    </div>
+  </div>
+</div>
+</div>
+</body>
+</html>
