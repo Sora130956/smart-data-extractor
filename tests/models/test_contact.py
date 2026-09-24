@@ -41,8 +41,8 @@ def test_contact_email_validation():
     """Test email validation sets field to None and confidence to 0.0 on invalid."""
     contact = Contact(email="invalid-email", email_confidence=0.8)
     assert contact.email is None
-    # Note: confidence is NOT automatically zeroed by validator, that's the model layer's job
-    # For now, validator only returns None for the field
+    # ConfidenceBase's model_validator coerces the paired confidence to 0.0
+    assert contact.email_confidence == 0.0
 
 
 def test_contact_email_normalization():
