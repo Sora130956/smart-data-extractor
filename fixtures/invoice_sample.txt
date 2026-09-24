@@ -1,0 +1,1 @@
+Invoice #INV-001, Date: 2024-01-15, Vendor: Acme Corp, Total: $1,500.00, Tax: $150.00
