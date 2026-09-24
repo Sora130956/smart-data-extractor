@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-第 5 步（生成 → validate → review）— Phase 2 已完成，准备进入 Phase 3
+第 5 步（生成 → validate → review）— Phase 3 已完成，准备进入 Phase 4
 
 ## 需求一句话（Who / What / Why）
 
@@ -122,7 +122,7 @@
 
 - [x] Phase 1（Day 1，commit ad4c705）：`config.py`、`validators/`（formats）、`models/`（base/contact/invoice/lead/dynamic）— 84 测试
 - [x] Phase 2（Day 2）：`presets/`（base/contact/invoice/lead + PRESETS 注册表 + get_preset）、`extraction/`（agent/extractor/cost + extract_data）— 新增 14 测试，共 98 全绿；离线（删 OPENAI_API_KEY）全绿；review 记录 `docs/review.md`
-- [ ] Phase 3（Day 3）：`extraction/batch.py`（Semaphore 并发批量）
+- [x] Phase 3（Day 3）：`extraction/batch.py`（batch_extract：asyncio.gather 并发 + total_cost_usd/total_tokens 聚合，限流由 agent 层共享 ConcurrencyLimiter 承担）— 新增 6 测试，共 115 全绿；离线全绿；review 记录 `docs/review.md`（R-4 转 D-007）
 - [ ] Phase 4（Day 4）：`api/`（/health + /extract + /batch_extract）
 - [ ] Phase 5（Day 5 上午）：`cli.py`（Typer）
 - [ ] Phase 6（Day 5 下午）：AC-1~AC-5 验收 + fixtures/
@@ -137,7 +137,7 @@
 
 ## 下一步动作
 
-**Phase 3：实现 `extraction/batch.py`**——`batch_extract(texts, preset, schema_dict)`，asyncio.gather 并发，聚合 total_cost_usd / total_tokens。**注意 D-006 设计变更：限流已由 agent 层的共享 `ConcurrencyLimiter` 承担，batch.py 不再手写 Semaphore**。先写 `tests/extraction/test_batch.py`（TDD）。
+**Phase 4：实现 `api/`**——`schemas.py`（ExtractRequest/BatchExtractRequest 等 DTO）+ `routes.py`（/health + /extract + /batch_extract）+ `create_app()`。测试用 `httpx.AsyncClient` + `dependency_overrides` 注入 fake extractor，不打真实网络。**注意 D-007 遗留问题：设计 /batch_extract 响应契约时必须回答"单条失败是整批 500 还是部分结果 + error 字段"。** 先写 `tests/api/test_routes.py`（TDD）。
 
 ## 决策摘要
 
@@ -162,3 +162,8 @@
 - 决策：成本优先用框架自动填充的 `usage.cost`（calculate_cost 降级为 fallback）；限流用跨 agent 共享的 `ConcurrencyLimiter`（Phase 3 不再手写 Semaphore）；生产预设 Agent 用 lru_cache 缓存复用连接池；统一 temperature=0
 - 理由：usage.cost 由 pydantic-ai 自动填充属权威来源；每次新建 Agent 会丢连接池且各自限流等于没有全局限流
 - 详见：`.harness/decisions.md`
+
+### D-007: batch 层失败语义——保持 fail-fast
+- 决策：`batch_extract` 维持裸 `asyncio.gather`（fail-fast）；per-item 容错（error 字段、部分成功聚合口径）推迟到 Phase 4 定义 API 响应契约时统一设计
+- 理由：容错口径属返回契约变更，应由传输层需求驱动；batch 层单方面决定会导致 Phase 4 返工
+- 详见：`.harness/decisions.md`（来源：Phase 3 review R-4）

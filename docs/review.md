@@ -45,3 +45,26 @@
 ### 结论
 
 四处质询全部落实，无遗留必须修复项。
+
+---
+
+## Phase 3 review（2026-09-23，extraction/batch.py）
+
+### 检查过程
+
+- 依赖方向：`batch.py` 仅 import 同层 `extractor.py`，无反向 import ✅
+- D-006 合规：batch.py 无手写 Semaphore，限流完全由 agent 层共享 `ConcurrencyLimiter` 承担 ✅
+- 测试纪律：TestModel 依赖注入；先 RED（ImportError）后 GREEN；改坏 `total_tokens` 聚合后 `test_batch_aggregates_cost_and_tokens` 变红（assert 0 == 156），还原后全绿 ✅
+- 离线：删除 `OPENAI_API_KEY` 后 115/115 通过 ✅
+
+### 已记录问题
+
+| # | 级别 | 问题 | 处理 |
+|---|------|------|------|
+| R-4 | 建议修改 | `asyncio.gather` 未用 `return_exceptions=True`：生产中单条文本失败（如 API 抖动）会让整批抛异常；且 gather 传播首个异常时**不取消**其余任务，后台任务仍消耗 token。 | **暂不处理，转 D-007**：plan 3.1 明确 plain gather；加 `return_exceptions` 需引入 per-item error 字段，属于返回契约变更，应留到 Phase 4 定义 API 响应契约时统一设计，batch 层不单方面做决定 |
+| R-5 | 仅供参考 | `batch_extract` 未透传 `extract_data` 的 `model_ref` / `instructions` 参数。 | 暂不处理：plan 3.1 签名只有 `model` 注入缝；Phase 4 API 需要时加参是向后兼容扩展 |
+| R-6 | 仅供参考 | TestModel 输出不回显输入文本，离线无法验证"results 顺序与输入顺序一致"；顺序正确性依赖 `asyncio.gather` 的语义保证。 | 暂不处理：gather 保序是框架契约，已在 batch.py 注释中登记 |
+
+### 结论
+
+无必须修复项，Phase 3 通过 review。R-4 已升级为 D-007 跟踪。

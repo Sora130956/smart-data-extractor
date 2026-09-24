@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day3 · 包依赖与调用点图 — smart-data-extractor</title>
+<!-- 版本: day3 (Phase 3 完成时) · 基于 day2-dependency-graph.html 演进 · 后续版本命名 day{N}-dependency-graph.html -->
+<!-- Day3 变化: extraction 新增包内模块 batch.py（batch_extract），包级结构不变；入口层可用函数变为 extract_data / batch_extract 两个 -->
+<style>
+  body { margin: 0; padding: 24px; background: #fff; font-family: "SF Pro Text","PingFang SC",system-ui,sans-serif; }
+  .page { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .meta { font-size: 12px; color: #52525B; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="page">
+<h1>包依赖与调用点图 · Day 3</h1>
+<div class="meta">箭头 = import 依赖方向（A → B：A 依赖 B）· 连线胶囊 = 实际调用的函数/属性 · 绿虚线 = 运行时主路径 · Day3：extraction 内部新增 batch.py → extractor.py 的 await extract_data() 调用（包内边，不单独画出）</div>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #F7F7F8; --surface-muted: #EFEFF2;
+  --text: #171717; --text-muted: #52525B;
+  --border: rgba(23,23,23,0.12);
+  --brand: #0FDC78; --brand-soft: #E5FFF2; --brand-text: #004D26;
+  --radius: 8px; --radius-card: 12px; --radius-full: 999px;
+  --spacer-4: 4px; --spacer-8: 8px; --spacer-12: 12px; --spacer-16: 16px; --spacer-20: 20px;
+  --font-sans: "SF Pro Text","PingFang SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono: "JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --weight-regular: 400; --weight-medium: 500;
+  --text-caption: 12px/18px; --text-body: 14px/20px; --text-code: 13px/20px;
+}
+:root[data-widget-theme="dark"] {
+  color-scheme: dark;
+  --surface: #171717; --surface-muted: #262626;
+  --text: #E5E5E5; --text-muted: #A1A1AA;
+  --border: rgba(229,229,229,0.12);
+  --brand: #32F08C; --brand-soft: #004D26; --brand-text: #E5FFF2;
+}
+.widget { color: var(--text); background: transparent; font: var(--weight-regular) var(--text-body) var(--font-sans); }
+.depg { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--spacer-20); }
+.th { fill: var(--text); font: var(--weight-medium) var(--text-code) var(--font-mono); }
+.ts { fill: var(--text-muted); font: var(--weight-regular) var(--text-caption) var(--font-sans); }
+.tl { fill: var(--text-muted); font: var(--weight-regular) var(--text-caption) var(--font-mono); }
+.arr { stroke: var(--text-muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+.arr-planned { stroke: var(--text-muted); stroke-width: 1.5; stroke-dasharray: 4 4; stroke-linecap: round; fill: none; }
+.arr-main { stroke: var(--brand); stroke-width: 1.5; stroke-dasharray: 6 4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+g.c-neutral > rect.box { fill: var(--surface); stroke: var(--border); }
+g.c-brand > rect.box { fill: var(--surface); stroke: var(--brand); stroke-width: 2; }
+.c-brand > .th { fill: var(--brand-text); }
+g.c-ext > rect.box { fill: var(--surface-muted); stroke: var(--text-muted); stroke-dasharray: 4 4; }
+.c-ext > .th { fill: var(--text-muted); }
+rect.cap { fill: var(--surface); stroke: var(--border); }
+.depg-legend { display: flex; flex-wrap: wrap; gap: var(--spacer-16); margin-top: var(--spacer-12); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); align-items: center; }
+.depg-legend .sw { display: inline-block; width: 28px; height: 0; border-top: 2px solid var(--text-muted); vertical-align: middle; margin-right: var(--spacer-4); }
+.depg-legend .sw.main { border-top: 2px dashed var(--brand); }
+.depg-legend .sw.planned { border-top: 2px dashed var(--text-muted); }
+</style>
+<div class="widget" data-dynamic-ui-widget data-template="architecture-elements">
+  <div class="depg">
+    <svg viewBox="0 0 720 410" width="100%" height="auto" role="img" aria-label="包依赖与调用点关系图">
+      <defs>
+        <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M1 1 L7 4 L1 7 Z" fill="var(--text-muted)"></path>
+        </marker>
+        <marker id="ahg" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M1 1 L7 4 L1 7 Z" fill="var(--brand)"></path>
+        </marker>
+      </defs>
+
+      <!-- edges -->
+      <path class="arr-planned" d="M360 80 V112" marker-end="url(#ah)"></path>
+      <path class="arr" d="M270 144 H95 V220" marker-end="url(#ah)"></path>
+      <path class="arr" d="M360 172 V220" marker-end="url(#ah)"></path>
+      <path class="arr" d="M390 172 V208 H590 V220" marker-end="url(#ah)"></path>
+      <path class="arr" d="M170 254 H264" marker-end="url(#ah)"></path>
+      <path class="arr" d="M360 282 V330" marker-end="url(#ah)"></path>
+      <path class="arr-main" d="M450 160 H700 V364 H686" marker-end="url(#ahg)"></path>
+
+      <!-- edge call-site labels -->
+      <rect class="cap" x="372" y="88" width="238" height="20" rx="999"></rect>
+      <text class="tl" x="491" y="102" text-anchor="middle">extract_data() / batch_extract()</text>
+      <rect class="cap" x="130" y="116" width="100" height="20" rx="999"></rect>
+      <text class="tl" x="180" y="130" text-anchor="middle">get_preset()</text>
+      <rect class="cap" x="178" y="190" width="170" height="20" rx="999"></rect>
+      <text class="tl" x="263" y="204" text-anchor="middle">create_dynamic_model()</text>
+      <rect class="cap" x="430" y="180" width="114" height="20" rx="999"></rect>
+      <text class="tl" x="487" y="194" text-anchor="middle">settings.model</text>
+      <rect class="cap" x="173" y="218" width="93" height="20" rx="999"></rect>
+      <text class="tl" x="220" y="232" text-anchor="middle">model_class</text>
+      <rect class="cap" x="372" y="292" width="121" height="20" rx="999"></rect>
+      <text class="tl" x="433" y="306" text-anchor="middle">field_validator</text>
+      <rect class="cap" x="540" y="132" width="121" height="20" rx="999"></rect>
+      <text class="tl" x="600" y="146" text-anchor="middle">agent.run(text)</text>
+
+      <!-- nodes -->
+      <g class="c-ext">
+        <rect class="box" x="270" y="24" width="180" height="56" rx="8"></rect>
+        <text class="th" x="360" y="48" text-anchor="middle">api/ · cli.py</text>
+        <text class="ts" x="360" y="68" text-anchor="middle">入口层 · Phase 4-5 待建</text>
+      </g>
+      <g class="c-brand">
+        <rect class="box" x="270" y="116" width="180" height="56" rx="8"></rect>
+        <text class="th" x="360" y="140" text-anchor="middle">extraction/</text>
+        <text class="ts" x="360" y="160" text-anchor="middle">Agent · 提取 · 批量 · 成本</text>
+      </g>
+      <g class="c-neutral">
+        <rect class="box" x="20" y="226" width="150" height="56" rx="8"></rect>
+        <text class="th" x="95" y="250" text-anchor="middle">presets/</text>
+        <text class="ts" x="95" y="270" text-anchor="middle">场景与 prompt 绑定</text>
+      </g>
+      <g class="c-neutral">
+        <rect class="box" x="270" y="226" width="180" height="56" rx="8"></rect>
+        <text class="th" x="360" y="250" text-anchor="middle">models/</text>
+        <text class="ts" x="360" y="270" text-anchor="middle">数据模型 + 置信度</text>
+      </g>
+      <g class="c-neutral">
+        <rect class="box" x="500" y="226" width="180" height="56" rx="8"></rect>
+        <text class="th" x="590" y="250" text-anchor="middle">config.py</text>
+        <text class="ts" x="590" y="270" text-anchor="middle">类型安全配置</text>
+      </g>
+      <g class="c-neutral">
+        <rect class="box" x="270" y="336" width="180" height="56" rx="8"></rect>
+        <text class="th" x="360" y="360" text-anchor="middle">validators/</text>
+        <text class="ts" x="360" y="380" text-anchor="middle">格式校验（最底层）</text>
+      </g>
+      <g class="c-ext">
+        <rect class="box" x="500" y="336" width="180" height="56" rx="8"></rect>
+        <text class="th" x="590" y="360" text-anchor="middle">OpenAI API</text>
+        <text class="ts" x="590" y="380" text-anchor="middle">gpt-4o-mini · 外部</text>
+      </g>
+    </svg>
+    <div class="depg-legend">
+      <span><span class="sw"></span>import 依赖（A → B：A 依赖 B）</span>
+      <span><span class="sw main"></span>运行时主路径（LLM 调用）</span>
+      <span><span class="sw planned"></span>计划未建 / 外部系统</span>
+      <span>连线上的胶囊 = 实际调用的函数 / 属性</span>
+    </div>
+  </div>
+</div>
+</div>
+</body>
+</html>

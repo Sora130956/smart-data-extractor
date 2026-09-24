@@ -148,3 +148,22 @@
   - Phase 3 设计变更：batch.py 只做 `asyncio.gather`，限流由 agent 层承担
   - `DEFAULT_MODEL_REF` 仅在 fallback 路径生效（review R-1 已标记缓解）
   - 测试基建新增：`fake_openai_env` fixture（假 key + 三层 cache_clear），支撑生产路径的离线构建测试
+
+---
+
+## D-007：batch 层失败语义——保持 fail-fast，per-item 容错留给 API 层
+
+- **日期**：2026-09-23
+- **状态**：已接受
+- **来源**：Phase 3 review（R-4）
+- **背景**：
+  - `batch_extract` 用裸 `asyncio.gather`：任一条文本失败（生产中的 API 抖动、限流 429 等）会让整批抛异常，调用方拿不到任何部分结果
+  - 且 gather 传播首个异常时不取消其余任务，后台任务继续消耗 token
+  - 备选方案 `return_exceptions=True` 需要每条结果带 error 字段，属于返回契约变更
+- **决策**：batch 层维持 fail-fast；per-item 容错（返回契约里加 error 字段、部分成功的聚合口径）推迟到 Phase 4 定义 `/batch_extract` API 响应契约时统一设计
+- **理由（为什么不选备选方案）**：
+  - 备选 A：现在就在 batch 层加 `return_exceptions=True` → 放弃。返回契约（结果项可能是异常对象）应由传输层需求驱动，batch 层单方面决定会导致 Phase 4 返工；且 MVP 的 CLI/API 调用方尚不存在，容错口径无实际约束
+  - 备选 B：加 `asyncio.shield` 或手动取消剩余任务 → 放弃。增加复杂度却不解决契约问题；fail-fast 下后台任务消耗少量 token 在 MVP 预算内可接受（单条 < $0.0005）
+- **影响**：
+  - Phase 4 设计 `/batch_extract` 响应 DTO 时必须回答：单条失败是整批 500 还是返回部分结果 + error 字段
+  - 若选部分容错，`batch_extract` 需加参数（如 `return_exceptions: bool = False`），保持默认行为向后兼容

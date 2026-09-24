@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day3 · 项目理解树 — smart-data-extractor</title>
+<!-- 版本: day3 (Phase 3 完成时) · 基于 day2-project-tree.html 演进 · 后续版本命名 day{N}-project-tree.html -->
+<style>
+  body { margin: 0; padding: 24px; background: #fff; font-family: "SF Pro Text","PingFang SC",system-ui,sans-serif; }
+  .page { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .meta { font-size: 12px; color: #52525B; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="page">
+<h1>项目理解树 · Day 3</h1>
+<div class="meta">根 = 项目定位 · 第 1 层 = 包职责 · 第 2 层 = 模块职责 · 「决策」标签可展开 · Day3 变化：extraction 新增 batch.py</div>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #F7F7F8; --surface-muted: #EFEFF2;
+  --text: #171717; --text-muted: #52525B;
+  --border: rgba(23,23,23,0.12);
+  --brand: #0FDC78; --brand-soft: #E5FFF2; --brand-text: #004D26; --brand-on: #004D26;
+  --radius: 8px; --radius-card: 12px; --radius-full: 999px;
+  --spacer-4: 4px; --spacer-8: 8px; --spacer-12: 12px; --spacer-16: 16px; --spacer-20: 20px; --spacer-24: 24px;
+  --font-sans: "SF Pro Text","PingFang SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono: "JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --weight-regular: 400; --weight-medium: 500; --weight-strong: 600;
+  --text-caption: 12px/18px; --text-body: 14px/20px; --text-title: 16px/24px; --text-code: 13px/20px;
+}
+:root[data-widget-theme="dark"] {
+  color-scheme: dark;
+  --surface: #171717; --surface-muted: #262626;
+  --text: #E5E5E5; --text-muted: #A1A1AA;
+  --border: rgba(229,229,229,0.12);
+  --brand: #32F08C; --brand-soft: #004D26; --brand-text: #E5FFF2;
+}
+.widget { color: var(--text); background: transparent; font: var(--weight-regular) var(--text-body) var(--font-sans); }
+.ptree { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--spacer-20); }
+.ptree-legend { display: flex; flex-wrap: wrap; gap: var(--spacer-8); margin-bottom: var(--spacer-16); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); }
+.ptree-legend span { border: 1px solid var(--border); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); background: var(--surface-muted); }
+.tree, .tree ul { list-style: none; margin: 0; padding-left: var(--spacer-24); position: relative; }
+.tree { padding-left: 0; }
+.tree ul::before { content: ""; position: absolute; left: 8px; top: 0; bottom: 14px; border-left: 1px solid var(--border); }
+.tree li { position: relative; padding: var(--spacer-4) 0; }
+.tree li::before { content: ""; position: absolute; left: -16px; top: 20px; width: 16px; border-top: 1px solid var(--border); }
+.tree > li::before { display: none; }
+.node { display: inline-block; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: var(--spacer-8) var(--spacer-12); }
+.node .nn { display: block; font: var(--weight-medium) var(--text-code) var(--font-mono); color: var(--text); }
+.node .nr { display: block; font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); }
+.node.root { border: 2px solid var(--brand); }
+.node.root .nn { font: var(--weight-medium) var(--text-title) var(--font-sans); color: var(--brand-text); }
+.node.root .nr { color: var(--brand-text); }
+.node.new { border: 1px solid var(--brand); background: var(--brand-soft); }
+.dec { margin-top: var(--spacer-4); }
+.dec summary { display: inline-block; cursor: pointer; list-style: none; font: var(--weight-medium) var(--text-caption) var(--font-sans); color: var(--brand-text); background: var(--brand-soft); border-radius: var(--radius-full); padding: var(--spacer-4) var(--spacer-12); }
+.dec summary::-webkit-details-marker { display: none; }
+.dec .dec-body { margin-top: var(--spacer-4); font: var(--weight-regular) var(--text-caption) var(--font-sans); color: var(--text-muted); max-width: 520px; }
+.dec .dec-body b { color: var(--text); font-weight: var(--weight-medium); }
+</style>
+<div class="widget" data-dynamic-ui-widget data-template="tree-flow">
+  <div class="ptree">
+    <div class="ptree-legend">
+      <span>绿框 = 项目根（定位）</span>
+      <span>绿底 = Day3 新增模块</span>
+      <span>第 1 层 = 包职责</span>
+      <span>第 2 层 = 模块职责</span>
+      <span>「决策」标签 = 可展开的核心设计</span>
+    </div>
+    <ul class="tree">
+      <li>
+        <div class="node root">
+          <span class="nn">smart-data-extractor</span>
+          <span class="nr">LLM 驱动的数据提取：非结构化纯文本 → 带置信度评分 + 成本追踪的结构化数据（Upwork portfolio MVP，CLI + FastAPI 双入口）</span>
+        </div>
+        <ul>
+          <li>
+            <div class="node pkg">
+              <span class="nn">config.py</span>
+              <span class="nr">类型安全配置：pydantic-settings 读取 OPENAI_API_KEY / model / max_concurrency</span>
+            </div>
+            <ul>
+              <li>
+                <div class="node">
+                  <span class="nn">get_settings()</span>
+                  <span class="nr">lru_cache 单例，自动加载 .env</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>Day1</b>：弃用 os.getenv 裸读，改 pydantic-settings——类型安全 + 单例 + 测试可 cache_clear。</div></details>
+                </div>
+              </li>
+            </ul>
+          </li>
+          <li>
+            <div class="node pkg">
+              <span class="nn">validators/</span>
+              <span class="nr">格式校验最底层：email / phone / url / date 正则与归一化，无效 → None</span>
+            </div>
+            <ul>
+              <li>
+                <div class="node">
+                  <span class="nn">formats.py</span>
+                  <span class="nr">纯函数，被 models 的 field_validator 调用</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>置信度三级链</b>：LLM 自评 → validator 置 None → 业务层修正。校验失败时字段为 None、confidence 归 0.0。</div></details>
+                </div>
+              </li>
+            </ul>
+          </li>
+          <li>
+            <div class="node pkg">
+              <span class="nn">models/</span>
+              <span class="nr">纯数据模型，无业务逻辑；每个字段配对 xxx_confidence ∈ [0,1]</span>
+            </div>
+            <ul>
+              <li>
+                <div class="node">
+                  <span class="nn">base.py · ConfidenceBase</span>
+                  <span class="nr">统一 model_config + 置信度字段约定</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>Day1</b>：extra=forbid 防拼写错误；validate_assignment 运行时赋值也校验。基类只为统一配置与扩展点，不过度设计。</div></details>
+                </div>
+              </li>
+              <li>
+                <div class="node">
+                  <span class="nn">contact.py / invoice.py / lead.py</span>
+                  <span class="nr">三个预制场景模型（invoice 含嵌套 line_items）</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>Lead 按 BANT 重构</b>（Day1）：job_title=Authority、budget_range=Budget、timeline=Timeline、notes=Need，符合 CRM 行业标准。</div></details>
+                </div>
+              </li>
+              <li>
+                <div class="node">
+                  <span class="nn">dynamic.py · create_dynamic_model()</span>
+                  <span class="nr">用户 JSON schema → 运行时 Pydantic 模型</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>Day1</b>：选 create_model() 而非 StructuredDict——类型安全、实例化即验证、与预制模型 API 一致。</div></details>
+                </div>
+              </li>
+            </ul>
+          </li>
+          <li>
+            <div class="node pkg">
+              <span class="nn">presets/</span>
+              <span class="nr">预制场景 = 模型 + prompt 绑定；PRESETS 注册表 + get_preset()</span>
+            </div>
+            <ul>
+              <li>
+                <div class="node">
+                  <span class="nn">base.py · Preset</span>
+                  <span class="nr">frozen dataclass：name / model_class / prompt_template</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>Day2</b>：模型与 prompt 绑定在同一对象，防「改模型忘改 prompt」；注册表 dict 由 preset.name 派生，key 不漂移。</div></details>
+                </div>
+              </li>
+              <li>
+                <div class="node">
+                  <span class="nn">contact.py / invoice.py / lead.py</span>
+                  <span class="nr">场景 prompt：缺失 → null，confidence 0.0-1.0 自评</span>
+                </div>
+              </li>
+            </ul>
+          </li>
+          <li>
+            <div class="node pkg">
+              <span class="nn">extraction/</span>
+              <span class="nr">核心业务层：Agent 构造、单条/批量提取、成本追踪（API/CLI 的唯一入口）</span>
+            </div>
+            <ul>
+              <li>
+                <div class="node">
+                  <span class="nn">agent.py</span>
+                  <span class="nr">build_agent 新鲜实例 / get_preset_agent 缓存实例 / 共享限流器</span>
+                  <details class="dec"><summary>决策 D-006</summary><div class="dec-body"><b>lru_cache 缓存生产 Agent</b>（key = preset+model_ref，天然有界；动态 schema 不缓存防泄漏）；<b>共享 ConcurrencyLimiter</b> 做全局限流（替代手写 Semaphore）；统一 temperature=0 求确定性。</div></details>
+                </div>
+              </li>
+              <li>
+                <div class="node">
+                  <span class="nn">extractor.py · extract_data()</span>
+                  <span class="nr">单条提取，返回 data + tokens_used + cost_usd</span>
+                  <details class="dec"><summary>决策 D-005 / D-006</summary><div class="dec-body"><b>model 注入缝</b>：测试传 TestModel 离线跑，生产回落 settings.model，配置读取延迟到真正需要时；<b>成本优先取 usage.cost</b>（框架自动填充），calculate_cost 仅作无价目模型 fallback。</div></details>
+                </div>
+              </li>
+              <li>
+                <div class="node new">
+                  <span class="nn">batch.py · batch_extract()</span>
+                  <span class="nr">批量提取：asyncio.gather 并发 + total_cost_usd / total_tokens 聚合</span>
+                  <details class="dec"><summary>决策 D-006 / D-007</summary><div class="dec-body"><b>不手写 Semaphore</b>（Day3）：限流由 agent 层共享 ConcurrencyLimiter 承担，gather 任意多条也不突破全局上限；<b>fail-fast</b>（Day3）：单条失败整批抛异常，per-item 容错（error 字段、部分成功聚合口径）留到 Phase 4 定义 API 响应契约时统一设计。</div></details>
+                </div>
+              </li>
+              <li>
+                <div class="node">
+                  <span class="nn">cost.py · calculate_cost()</span>
+                  <span class="nr">genai_prices 封装，Decimal → float（JSON 契约）</span>
+                  <details class="dec"><summary>决策</summary><div class="dec-body"><b>边界收敛</b>：第三方库的 Decimal 怪癖在封装层消化，不泄漏到 API 响应契约。</div></details>
+                </div>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</div>
+</div>
+</body>
+</html>
