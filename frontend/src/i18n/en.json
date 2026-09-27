@@ -1,0 +1,56 @@
+{
+  "app": {
+    "title": "Smart Data Extractor",
+    "tagline": "LLM-powered structured document extraction"
+  },
+  "header": {
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "language": "EN / 中文",
+    "history": "History",
+    "github": "GitHub"
+  },
+  "stats": {
+    "sources": "Sources",
+    "extracted": "Extracted",
+    "failed": "Failed",
+    "avgConfidence": "Avg Confidence",
+    "totalCost": "Total Cost"
+  },
+  "upload": {
+    "title": "Drop files here, or click to browse",
+    "hint": "PDF / image / text files · multiple files supported · parsing, OCR and splitting all happen on the server",
+    "dropActive": "Release to add these files",
+    "pending": "Queued",
+    "uploaded": "Uploaded",
+    "remove": "Remove"
+  },
+  "config": {
+    "mode": "Mode",
+    "modePreset": "Preset",
+    "modeCustom": "Custom Schema",
+    "preset": "Preset",
+    "presetContact": "Contact",
+    "presetInvoice": "Invoice",
+    "presetLead": "Lead",
+    "instructions": "Extra instructions (optional)",
+    "start": "Start Extraction",
+    "starting": "Extracting…"
+  },
+  "results": {
+    "title": "Extraction Results",
+    "filterAll": "All",
+    "filterHigh": "High Confidence",
+    "filterReview": "Need Review",
+    "exportJson": "Export All JSON",
+    "exportExcel": "Export Excel (Coming)",
+    "emptyTitle": "No extractions yet",
+    "emptyBody": "Add files or paste text above, pick a preset, then run Start Extraction. Every field comes back with its own confidence score."
+  },
+  "confidence": {
+    "high": "High",
+    "medium": "Medium",
+    "low": "Needs review"
+  }
+}

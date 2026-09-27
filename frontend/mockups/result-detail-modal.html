@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Smart Data Extractor — 结果详情弹窗原型</title>
+<style>
+  :root {
+    --surface: #ffffff;
+    --surface-muted: #f8fafc;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --brand: #059669;
+    --accent: #0ea5e9;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --radius: 8px;
+    --radius-card: 12px;
+  }
+  :root[data-theme="dark"] {
+    --surface: #0f172a;
+    --surface-muted: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --brand: #10b981;
+    --accent: #38bdf8;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --error: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px;
+    background: rgba(15, 23, 42, .45);
+    color: var(--text);
+    font: 14px/20px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .modal {
+    max-width: 680px; margin: 0 auto;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-card); overflow: hidden;
+    box-shadow: 0 20px 48px rgba(0,0,0,.28);
+  }
+  .btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: var(--radius); padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { background: var(--surface-muted); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .spacer { flex: 1; }
+
+  .head { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .head .title { font-size: 16px; line-height: 24px; font-weight: 600; }
+  .head .sub { font-size: 12px; line-height: 18px; color: var(--text-muted); }
+  .close { border: none; background: none; color: var(--text-muted); font-size: 16px; cursor: pointer; }
+
+  .alert {
+    display: flex; align-items: flex-start; gap: 8px;
+    margin: 14px 18px 0; padding: 10px 12px;
+    border: 1px solid var(--warning); border-radius: var(--radius);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    font-size: 13px;
+  }
+  .alert b { color: var(--warning); }
+
+  .fields { margin: 14px 18px 0; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+  .frow { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .frow:last-child { border-bottom: none; }
+  .frow .k { width: 140px; flex: none; font-size: 13px; color: var(--text-muted); }
+  .frow .v { flex: 1; font-size: 13px; word-break: break-word; }
+  .frow .v .prov { display: block; font-size: 12px; line-height: 18px; color: var(--text-muted); margin-top: 2px; }
+  .frow .v .null { color: var(--text-muted); font-style: italic; }
+  .cbadge {
+    flex: none; width: 58px; text-align: center;
+    font-size: 12px; line-height: 18px; border-radius: 999px; padding: 1px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .cbadge.high { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+  .cbadge.mid  { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
+  .cbadge.low  { background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error); }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 14px 18px 0;
+           background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+  .stat { background: var(--surface); padding: 10px 14px; }
+  .stat .label { font-size: 12px; line-height: 18px; color: var(--text-muted); }
+  .stat .value { font-size: 14px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  .raw { margin: 14px 18px 0; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+  .raw-head { display: flex; align-items: center; padding: 8px 14px; background: var(--surface-muted);
+              border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+  pre { margin: 0; padding: 12px 14px; max-height: 220px; overflow: auto;
+        font: 13px/20px ui-monospace, "SFMono-Regular", Consolas, monospace; background: var(--surface); }
+
+  .foot { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--border); margin-top: 14px; }
+
+  .note { max-width: 680px; margin: 12px auto 0; font-size: 12px; line-height: 18px; color: #cbd5e1; }
+</style>
+</head>
+<body>
+<div class="modal">
+
+  <div class="head">
+    <div>
+      <div class="title">Extraction Result — Page 3</div>
+      <div class="sub">invoices_batch.pdf · preset: invoice (modified)</div>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn" onclick="toggleTheme()">◐</button>
+    <button class="btn">Copy JSON</button>
+    <button class="btn">Export JSON</button>
+    <button class="btn" disabled>Export Excel (Coming)</button>
+    <button class="close">✕</button>
+  </div>
+
+  <div class="alert">
+    <span>⚠️</span>
+    <div><b>需人工复核</b> — 2 个字段置信度低于 0.70（<code>date</code>、<code>tax</code>）。模型对缺失值返回 null 而非猜测，请人工确认原始文档。</div>
+  </div>
+
+  <div class="fields">
+    <div class="frow">
+      <span class="k">invoice_number</span>
+      <span class="v">INV-2024-003<span class="prov">source: page 3, line 2</span></span>
+      <span class="cbadge high">0.95</span>
+    </div>
+    <div class="frow">
+      <span class="k">date</span>
+      <span class="v"><span class="null">null</span><span class="prov">未在文档中找到明确日期</span></span>
+      <span class="cbadge low">0.41</span>
+    </div>
+    <div class="frow">
+      <span class="k">vendor</span>
+      <span class="v">Initech LLC<span class="prov">source: page 3, header</span></span>
+      <span class="cbadge high">0.93</span>
+    </div>
+    <div class="frow">
+      <span class="k">total</span>
+      <span class="v">2410.00<span class="prov">source: page 3, total row</span></span>
+      <span class="cbadge high">0.90</span>
+    </div>
+    <div class="frow">
+      <span class="k">tax</span>
+      <span class="v">180.00<span class="prov">⚠ total ≠ subtotal + tax，数值需核对</span></span>
+      <span class="cbadge low">0.58</span>
+    </div>
+    <div class="frow">
+      <span class="k">currency</span>
+      <span class="v">USD<span class="prov">source: page 3, total row</span></span>
+      <span class="cbadge mid">0.78</span>
+    </div>
+    <div class="frow">
+      <span class="k">line_items</span>
+      <span class="v">3 items — Consulting (1 × 2000.00), Support (1 × 230.00), Shipping (1 × 0.00)</span>
+      <span class="cbadge mid">0.82</span>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="label">Input Tokens</div><div class="value">892</div></div>
+    <div class="stat"><div class="label">Output Tokens</div><div class="value">356</div></div>
+    <div class="stat"><div class="label">Cost</div><div class="value">$0.0002</div></div>
+    <div class="stat"><div class="label">Avg Confidence</div><div class="value">0.74</div></div>
+    <div class="stat"><div class="label">Fields</div><div class="value">7 (1 null)</div></div>
+    <div class="stat"><div class="label">Elapsed</div><div class="value">1.8s</div></div>
+  </div>
+
+  <div class="raw">
+    <div class="raw-head">Raw JSON</div>
+<pre>{
+  "index": "Page 3",
+  "data": {
+    "invoice_number": "INV-2024-003",
+    "date": null,
+    "vendor": "Initech LLC",
+    "total": 2410.00,
+    "tax": 180.00,
+    "currency": "USD",
+    "line_items": [
+      { "description": "Consulting", "quantity": 1, "unit_price": 2000.00 },
+      { "description": "Support",    "quantity": 1, "unit_price": 230.00 },
+      { "description": "Shipping",   "quantity": 1, "unit_price": 0.00 }
+    ]
+  },
+  "confidence": {
+    "invoice_number": 0.95,
+    "date": 0.41,
+    "vendor": 0.93,
+    "total": 0.90,
+    "tax": 0.58,
+    "currency": 0.78,
+    "line_items": 0.82
+  },
+  "tokens_used": { "input": 892, "output": 356 },
+  "cost_usd": 0.0002,
+  "error": null
+}</pre>
+  </div>
+
+  <div class="foot">
+    <span class="spacer"></span>
+    <button class="btn">Close</button>
+    <button class="btn">Retry This Item</button>
+  </div>
+
+</div>
+
+<p class="note">原型仅用于确认布局与信息层级，非最终视觉稿。对应设计文档 DESIGN.md §3.2。</p>
+
+<script>
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  }
+</script>
+</body>
+</html>

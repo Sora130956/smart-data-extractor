@@ -1,0 +1,56 @@
+{
+  "app": {
+    "title": "Smart Data Extractor",
+    "tagline": "基于 LLM 的结构化文档提取"
+  },
+  "header": {
+    "theme": "主题",
+    "themeLight": "浅色",
+    "themeDark": "深色",
+    "language": "EN / 中文",
+    "history": "历史记录",
+    "github": "GitHub"
+  },
+  "stats": {
+    "sources": "来源数",
+    "extracted": "已提取",
+    "failed": "失败",
+    "avgConfidence": "平均置信度",
+    "totalCost": "总成本"
+  },
+  "upload": {
+    "title": "拖拽文件到此处，或点击选择",
+    "hint": "PDF / 图片 / 文本文件 · 支持多文件 · 解析、OCR、文档分割均由后端完成",
+    "dropActive": "松开即可添加文件",
+    "pending": "排队中",
+    "uploaded": "已上传",
+    "remove": "移除"
+  },
+  "config": {
+    "mode": "模式",
+    "modePreset": "预设",
+    "modeCustom": "自定义 Schema",
+    "preset": "预设",
+    "presetContact": "联系人",
+    "presetInvoice": "发票",
+    "presetLead": "销售线索",
+    "instructions": "补充指令（可选）",
+    "start": "开始提取",
+    "starting": "提取中…"
+  },
+  "results": {
+    "title": "提取结果",
+    "filterAll": "全部",
+    "filterHigh": "高置信度",
+    "filterReview": "需复核",
+    "exportJson": "导出全部 JSON",
+    "exportExcel": "导出 Excel（即将支持）",
+    "emptyTitle": "还没有提取结果",
+    "emptyBody": "在上方添加文件或粘贴文本，选择预设后点击「开始提取」。每个字段都会带回各自的置信度。"
+  },
+  "confidence": {
+    "high": "高",
+    "medium": "中",
+    "low": "需复核"
+  }
+}

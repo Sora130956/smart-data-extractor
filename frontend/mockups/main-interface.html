@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Smart Data Extractor — 主界面原型</title>
+<style>
+  :root {
+    --surface: #ffffff;
+    --surface-muted: #f8fafc;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --brand: #059669;
+    --accent: #0ea5e9;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --radius: 8px;
+    --radius-card: 12px;
+  }
+  :root[data-theme="dark"] {
+    --surface: #0f172a;
+    --surface-muted: #1e293b;
+    --border: #334155;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --brand: #10b981;
+    --accent: #38bdf8;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --error: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--surface-muted);
+    color: var(--text);
+    font: 14px/20px -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .app {
+    max-width: 1080px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 28px; height: 28px; border-radius: var(--radius);
+    background: var(--brand); color: #fff;
+    display: grid; place-items: center; font-size: 14px; font-weight: 700;
+  }
+  .brand h1 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+  .brand span { display: block; font-size: 12px; line-height: 18px; color: var(--text-muted); font-weight: 400; }
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+  .btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: var(--radius); padding: 6px 12px; font-size: 13px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: var(--surface-muted); }
+  .btn-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--border); }
+  .stat { padding: 14px 20px; border-right: 1px solid var(--border); }
+  .stat:last-child { border-right: none; }
+  .stat .label { font-size: 12px; line-height: 18px; color: var(--text-muted); }
+  .stat .value { font-size: 16px; line-height: 24px; font-weight: 600; margin-top: 2px; }
+  .stat .value.ok { color: var(--success); }
+  .stat .value.err { color: var(--error); }
+
+  /* Input */
+  .section { padding: 20px; border-bottom: 1px solid var(--border); }
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: var(--radius-card);
+    background: var(--surface-muted); padding: 28px; text-align: center;
+  }
+  .dropzone .icon { font-size: 28px; }
+  .dropzone .title { font-weight: 600; margin-top: 8px; }
+  .dropzone .hint { font-size: 12px; line-height: 18px; color: var(--text-muted); margin-top: 4px; }
+
+  .filelist { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .fileitem {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 12px; font-size: 13px;
+  }
+  .fileitem .name { flex: 1; }
+  .fileitem .meta { font-size: 12px; color: var(--text-muted); }
+  .bar { height: 4px; border-radius: 999px; background: var(--border); width: 90px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+
+  .configbar { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  select, input[type=text] {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    border-radius: var(--radius); padding: 6px 10px; font-size: 13px; font-family: inherit;
+  }
+  .spacer { flex: 1; }
+
+  /* Schema editor */
+  .schema { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+  .schema-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: var(--surface-muted); border-bottom: 1px solid var(--border);
+    font-size: 13px; font-weight: 600;
+  }
+  .schema-head .modified { font-size: 12px; font-weight: 400; color: var(--warning); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { font-size: 12px; color: var(--text-muted); font-weight: 500; background: var(--surface); }
+  tbody tr:last-child td { border-bottom: none; }
+  .del { color: var(--error); cursor: pointer; border: none; background: none; font-size: 13px; }
+  .schema-foot { padding: 10px 14px; border-top: 1px solid var(--border); }
+
+  /* Results */
+  .results-head { display: flex; align-items: center; gap: 8px; padding: 16px 20px 12px; flex-wrap: wrap; }
+  .results-head h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+  .chip {
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px;
+    font-size: 12px; line-height: 18px; color: var(--text-muted); cursor: pointer; background: var(--surface);
+  }
+  .chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .chip.warn { border-color: var(--warning); color: var(--warning); }
+
+  .group { margin: 0 20px 12px; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+  .group-head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: var(--surface-muted); cursor: pointer;
+  }
+  .group-head .fname { font-weight: 600; font-size: 13px; }
+  .group-head .fmeta { font-size: 12px; color: var(--text-muted); }
+  .badge { font-size: 12px; line-height: 18px; border-radius: 999px; padding: 1px 9px; }
+  .badge.ok { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+  .badge.err { background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error); }
+  .caret { color: var(--text-muted); font-size: 12px; }
+
+  .row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--border); }
+  .row .idx { width: 62px; font-size: 12px; color: var(--text-muted); flex: none; }
+  .row .fields { flex: 1; display: flex; gap: 6px; flex-wrap: wrap; overflow: hidden; }
+  .fchip {
+    font-size: 12px; line-height: 18px; background: var(--surface-muted);
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 1px 8px; white-space: nowrap;
+  }
+  .conf { display: flex; align-items: center; gap: 8px; width: 132px; flex: none; }
+  .conf .bar { width: 76px; }
+  .conf .num { font-size: 12px; font-variant-numeric: tabular-nums; width: 34px; text-align: right; }
+  .conf.high .bar > i, .conf.high .num { color: var(--success); }
+  .conf.high .bar > i { background: var(--success); }
+  .conf.mid .bar > i { background: var(--warning); }
+  .conf.mid .num { color: var(--warning); }
+  .conf.low .bar > i { background: var(--error); }
+  .conf.low .num { color: var(--error); }
+  .row .cost { width: 62px; flex: none; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .row .act { width: 64px; flex: none; text-align: right; }
+  .row.failed { background: color-mix(in srgb, var(--error) 6%, transparent); }
+  .row.failed .fields { color: var(--error); font-size: 12px; }
+
+  .note {
+    max-width: 1080px; margin: 12px auto 0; font-size: 12px; line-height: 18px; color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="brand">
+      <div class="logo">SD</div>
+      <div>
+        <h1>Smart Data Extractor</h1>
+        <span>LLM-powered structured document extraction</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-sm" onclick="toggleTheme()">◐ Theme</button>
+      <button class="btn btn-sm">EN / 中文</button>
+      <button class="btn btn-sm">History</button>
+      <button class="btn btn-sm">GitHub</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><div class="label">Sources</div><div class="value">2</div></div>
+    <div class="stat"><div class="label">Extracted</div><div class="value ok">16</div></div>
+    <div class="stat"><div class="label">Failed</div><div class="value err">1</div></div>
+    <div class="stat"><div class="label">Avg Confidence</div><div class="value">0.88</div></div>
+    <div class="stat"><div class="label">Total Cost</div><div class="value">$0.0034</div></div>
+  </div>
+
+  <!-- Input -->
+  <div class="section">
+    <div class="dropzone">
+      <div class="icon">📁</div>
+      <div class="title">拖拽文件到此处，或点击选择</div>
+      <div class="hint">PDF / 图片 / 文本文件 · 支持多文件 · 解析、OCR、文档分割均由后端完成</div>
+    </div>
+
+    <div class="filelist">
+      <div class="fileitem">
+        <span>📄</span><span class="name">invoices_batch.pdf</span>
+        <span class="meta">2.4 MB</span>
+        <span class="bar"><i style="width:100%"></i></span>
+        <span class="meta">已上传</span>
+      </div>
+      <div class="fileitem">
+        <span>🖼️</span><span class="name">scanned_receipts.jpg</span>
+        <span class="meta">860 KB</span>
+        <span class="bar"><i style="width:62%"></i></span>
+        <span class="meta">62%</span>
+      </div>
+    </div>
+
+    <div class="configbar">
+      <select><option>Mode: Preset</option><option>Mode: Custom Schema</option></select>
+      <select><option>Preset: Invoice</option><option>Preset: Contact</option><option>Preset: Lead</option></select>
+      <input type="text" placeholder="Extra instructions (optional)" style="width:280px" />
+      <span class="spacer"></span>
+      <button class="btn btn-primary">Start Extraction</button>
+    </div>
+
+    <!-- Schema editor -->
+    <div class="schema">
+      <div class="schema-head">
+        <span>Schema Fields <span class="modified">· Invoice (modified) → 提交走 custom schema</span></span>
+        <button class="btn btn-sm">Reset to Preset</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th style="width:200px">Field</th><th style="width:130px">Type</th><th>Description</th><th style="width:48px"></th></tr>
+        </thead>
+        <tbody>
+          <tr><td>invoice_number</td><td>string</td><td>Invoice identifier, e.g. INV-2024-001</td><td><button class="del">✕</button></td></tr>
+          <tr><td>date</td><td>date</td><td>Invoice issue date (ISO 8601)</td><td><button class="del">✕</button></td></tr>
+          <tr><td>vendor</td><td>string</td><td>Vendor / supplier name</td><td><button class="del">✕</button></td></tr>
+          <tr><td>total</td><td>number</td><td>Grand total amount</td><td><button class="del">✕</button></td></tr>
+          <tr><td>tax</td><td>number</td><td>Tax amount</td><td><button class="del">✕</button></td></tr>
+          <tr><td>currency</td><td>string</td><td>ISO 4217 currency code</td><td><button class="del">✕</button></td></tr>
+          <tr><td>line_items</td><td>array</td><td>Line items with description, qty, unit price</td><td><button class="del">✕</button></td></tr>
+        </tbody>
+      </table>
+      <div class="schema-foot"><button class="btn btn-sm">+ Add Field</button></div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="results-head">
+    <h2>Extraction Results</h2>
+    <span class="chip active">All (17)</span>
+    <span class="chip">High Confidence (12)</span>
+    <span class="chip warn">Need Review (4)</span>
+    <span class="spacer"></span>
+    <button class="btn btn-sm">Export All JSON</button>
+    <button class="btn btn-sm" disabled>Export Excel (Coming)</button>
+  </div>
+
+  <!-- Group 1 -->
+  <div class="group">
+    <div class="group-head">
+      <span>📄</span>
+      <span class="fname">invoices_batch.pdf</span>
+      <span class="fmeta">· 15 pages · PDF text layer</span>
+      <span class="spacer"></span>
+      <span class="badge ok">12 ok</span>
+      <span class="badge err">1 failed</span>
+      <span class="caret">▼</span>
+    </div>
+
+    <div class="row">
+      <span class="idx">Page 1</span>
+      <span class="fields">
+        <span class="fchip">INV-2024-001</span><span class="fchip">2024-03-14</span>
+        <span class="fchip">Acme Corp</span><span class="fchip">$1,234.56</span>
+      </span>
+      <span class="conf high"><span class="bar"><i style="width:92%"></i></span><span class="num">0.92</span></span>
+      <span class="cost">$0.0002</span>
+      <span class="act"><button class="btn btn-sm">View</button></span>
+    </div>
+
+    <div class="row">
+      <span class="idx">Page 2</span>
+      <span class="fields">
+        <span class="fchip">INV-2024-002</span><span class="fchip">2024-03-15</span>
+        <span class="fchip">Globex Ltd</span><span class="fchip">$860.00</span>
+      </span>
+      <span class="conf high"><span class="bar"><i style="width:89%"></i></span><span class="num">0.89</span></span>
+      <span class="cost">$0.0002</span>
+      <span class="act"><button class="btn btn-sm">View</button></span>
+    </div>
+
+    <div class="row">
+      <span class="idx">Page 3</span>
+      <span class="fields">
+        <span class="fchip">INV-2024-003</span><span class="fchip">— date null</span>
+        <span class="fchip">Initech</span><span class="fchip">$2,410.00</span>
+      </span>
+      <span class="conf mid"><span class="bar"><i style="width:74%"></i></span><span class="num">0.74</span></span>
+      <span class="cost">$0.0002</span>
+      <span class="act"><button class="btn btn-sm">View</button></span>
+    </div>
+
+    <div class="row failed">
+      <span class="idx">Page 4</span>
+      <span class="fields">Extraction failed: unable to parse scanned page (OCR confidence too low)</span>
+      <span class="conf"><span class="num">—</span></span>
+      <span class="cost">$0.0000</span>
+      <span class="act"><button class="btn btn-sm">Retry</button></span>
+    </div>
+  </div>
+
+  <!-- Group 2 -->
+  <div class="group" style="margin-bottom:20px">
+    <div class="group-head">
+      <span>🖼️</span>
+      <span class="fname">scanned_receipts.jpg</span>
+      <span class="fmeta">· OCR processed · 4 items detected</span>
+      <span class="spacer"></span>
+      <span class="badge ok">4 ok</span>
+      <span class="caret">▼</span>
+    </div>
+
+    <div class="row">
+      <span class="idx">Item 1</span>
+      <span class="fields">
+        <span class="fchip">RC-8891</span><span class="fchip">2024-03-02</span>
+        <span class="fchip">Cafe Nero</span><span class="fchip">$18.40</span>
+      </span>
+      <span class="conf high"><span class="bar"><i style="width:91%"></i></span><span class="num">0.91</span></span>
+      <span class="cost">$0.0002</span>
+      <span class="act"><button class="btn btn-sm">View</button></span>
+    </div>
+
+    <div class="row">
+      <span class="idx">Item 2</span>
+      <span class="fields">
+        <span class="fchip">RC-8892</span><span class="fchip">2024-03-02</span>
+        <span class="fchip">— vendor null</span><span class="fchip">$7.20</span>
+      </span>
+      <span class="conf low"><span class="bar"><i style="width:63%"></i></span><span class="num">0.63</span></span>
+      <span class="cost">$0.0002</span>
+      <span class="act"><button class="btn btn-sm">View</button></span>
+    </div>
+  </div>
+
+</div>
+
+<p class="note">
+  原型仅用于确认布局与信息层级，非最终视觉稿。对应设计文档 DESIGN.md §3.1。
+</p>
+
+<script>
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark';
+  }
+</script>
+</body>
+</html>

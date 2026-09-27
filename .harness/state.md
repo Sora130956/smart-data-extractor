@@ -129,6 +129,15 @@
 - [ ] Phase 7（Day 6）：Docker + Render 部署
 - [ ] Phase 8（Day 7）：Demo 视频 + README + Proposal 模板
 
+### 前端模块清单（`frontend/`，规格见 `frontend/DESIGN.md` §9）
+
+- [x] F1（脚手架 + token + 骨架 + i18n）：Vite 8.3.1 + React 18.3.1 + TS 5.9.3 + Tailwind v4（CSS-first，`--sde-*` 原始 token + `@theme inline` 映射，light/dark 双主题）+ TanStack Query + Zustand + i18next（EN/中文，`sde.lang` 持久化，`<html lang>` 同步）；组件 Header / StatsStrip / UploadZone / ConfigBar / ResultsHeader / ConfidenceBar / EmptyState / Button；`utils/confidence.ts` 为分档单一来源（0.85 / 0.70）。验证：`tsc -b` exit 0、`vitest run` 10 passed（2 files）、`vite build` exit 0（CSS 12.68 kB / JS 235.72 kB）、浏览器核对四态（light+dark × EN+中文）渲染正常、`sde.theme`/`sde.lang` 刷新后保持、console 无报错
+- [ ] F2：文本粘贴输入 + `/batch_extract` 打通，Source/Result 两层渲染
+- [ ] F3：置信度体系（列 + 筛选）+ 结果详情弹窗
+- [ ] F4：Schema 编辑器 + custom schema 模式
+- [ ] F5（阻塞于后端 B1–B4）：文件上传
+- [ ] F6：导出 JSON + History + 空/错态打磨
+
 ## 可视化约定（docs/view/）
 
 - `docs/view/day{N}-project-tree.html`（项目理解树）与 `day{N}-dependency-graph.html`（包依赖+调用点图）按天版本化
@@ -137,7 +146,9 @@
 
 ## 下一步动作
 
-**Phase 7（Day 6）：Docker + Render 部署**——① 写 `Dockerfile`（uv 或 pip 安装、非 root 用户、健康检查）；② `.dockerignore`；③ 本地 `docker build && docker run` 验证 /health；④ Render 部署（环境变量 `OPENAI_API_KEY`、`MODEL` 等）；⑤ 部署后线上冒烟（/health + 一次 /extract）。可选前置：用户拍板后跑 `RUN_INTEGRATION=1` 真实 API 冒烟（R-14，2 次调用 < $0.01，验证 R-2 instructions 送达）。
+**前端 F2（当前主线）**：文本粘贴输入 + `/batch_extract` 打通，Source/Result 两层渲染。按 DESIGN.md §5.3，后端 B1–B4 就绪前用手工粘贴文本，每段文本一个 Source 产 1 条 Result，接口层做适配器隔离。需加 Zod 响应校验 + TanStack Query mutation + 真实 StatsStrip 统计。
+
+**后端 Phase 7（Day 6，可并行）：Docker + Render 部署**——① 写 `Dockerfile`（uv 或 pip 安装、非 root 用户、健康检查）；② `.dockerignore`；③ 本地 `docker build && docker run` 验证 /health；④ Render 部署（环境变量 `OPENAI_API_KEY`、`MODEL` 等）；⑤ 部署后线上冒烟（/health + 一次 /extract）。可选前置：用户拍板后跑 `RUN_INTEGRATION=1` 真实 API 冒烟（R-14，2 次调用 < $0.01，验证 R-2 instructions 送达）。
 
 ## 决策摘要
 

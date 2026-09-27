@@ -64,3 +64,8 @@ tmp/
 
 # 学习笔记与开发日志（个人学习材料，不提交到仓库）
 docs/study/
+
+# 前端（frontend/）
+node_modules/
+.vite/
+*.tsbuildinfo

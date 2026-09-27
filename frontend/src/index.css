@@ -1,0 +1,104 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens — DESIGN.md §7.
+ * Raw values live on `--sde-*` and are mapped into Tailwind's theme below,
+ * so switching `data-theme` reskins every utility without a rebuild.
+ * Components reference semantic names only; never a literal hex.
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --sde-surface: #ffffff;
+  --sde-surface-muted: #f8fafc;
+  --sde-border: #e2e8f0;
+  --sde-text: #0f172a;
+  --sde-text-muted: #64748b;
+  --sde-brand: #059669;
+  --sde-accent: #0ea5e9;
+  --sde-success: #10b981;
+  --sde-warning: #f59e0b;
+  --sde-error: #ef4444;
+  --sde-on-brand: #ffffff;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --sde-surface: #0f172a;
+  --sde-surface-muted: #1e293b;
+  --sde-border: #334155;
+  --sde-text: #f1f5f9;
+  --sde-text-muted: #94a3b8;
+  --sde-brand: #10b981;
+  --sde-accent: #38bdf8;
+  --sde-success: #34d399;
+  --sde-warning: #fbbf24;
+  --sde-error: #f87171;
+  --sde-on-brand: #042f23;
+}
+
+@theme inline {
+  --color-surface: var(--sde-surface);
+  --color-surface-muted: var(--sde-surface-muted);
+  --color-border: var(--sde-border);
+  --color-text: var(--sde-text);
+  --color-text-muted: var(--sde-text-muted);
+  --color-brand: var(--sde-brand);
+  --color-accent: var(--sde-accent);
+  --color-success: var(--sde-success);
+  --color-warning: var(--sde-warning);
+  --color-error: var(--sde-error);
+  --color-on-brand: var(--sde-on-brand);
+
+  /* §7 type scale — 16/24 is the ceiling on purpose: this reads as an instrument panel. */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.125rem;
+  --text-code: 0.8125rem;
+  --text-code--line-height: 1.25rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-title: 1rem;
+  --text-title--line-height: 1.5rem;
+
+  /* §7 spacing ladder: 4 / 8 / 12 / 16 / 20 / 24 */
+  --spacing: 0.25rem;
+
+  /* §7 radii */
+  --radius-token: 8px;
+  --radius-card: 12px;
+
+  --font-sans: 'IBM Plex Sans', 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--sde-surface-muted);
+    color: var(--sde-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Confidence and cost are read down a column, not as prose. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sde-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
