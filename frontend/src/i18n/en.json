@@ -26,6 +26,17 @@
     "uploaded": "Uploaded",
     "remove": "Remove"
   },
+  "paste": {
+    "title": "Paste Text",
+    "placeholder": "Paste one block of text here, e.g. one invoice, one contact card…",
+    "add": "+ Add as Source",
+    "charCount": "{{count}} characters",
+    "hint": "Each block you add becomes one Source → one Result",
+    "empty": "No text sources yet — paste text above and click \"+ Add as Source\"",
+    "itemLabel": "Text {{index}}",
+    "itemChars": "{{count}} chars",
+    "remove": "Remove"
+  },
   "config": {
     "mode": "Mode",
     "modePreset": "Preset",
@@ -36,7 +47,8 @@
     "presetLead": "Lead",
     "instructions": "Extra instructions (optional)",
     "start": "Start Extraction",
-    "starting": "Extracting…"
+    "starting": "Extracting…",
+    "requestError": "Extraction request failed: {{message}}"
   },
   "results": {
     "title": "Extraction Results",
@@ -52,5 +64,15 @@
     "high": "High",
     "medium": "Medium",
     "low": "Needs review"
+  },
+  "resultRow": {
+    "view": "View",
+    "retry": "Retry",
+    "failed": "Extraction failed: {{message}}",
+    "badgeOk": "{{count}} ok",
+    "badgeFailed": "{{count}} failed",
+    "nullField": "— {{field}} null",
+    "collapse": "Collapse",
+    "expand": "Expand"
   }
 }

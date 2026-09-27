@@ -252,6 +252,19 @@ B1–B4 落地前，前端用**手工粘贴文本 + `/batch_extract`** 打通全
 每段文本视作一个 Source，产出 1 条 Result（1:1 是 1:N 的特例）。
 数据层按 §4 的两层模型写，接口层做适配器隔离，后端端点上线后只改适配器。
 
+#### F2 实施范围（v1 上传方案的临时替代，非最终形态）
+
+后端目前只能处理纯文本，因此 F2 不做 §3.1 图示中的 Upload Zone / Tab 切换，只保留**单一粘贴文本入口**：
+
+- 页面只展示一个大文本框 + `+ Add as Source` 按钮（无 Mode 切换 Tab）。
+- 点击 Add 后，当前文本框内容进入「待处理列表」（每项：序号 / 单行预览省略 / 字符数 / 删除 ✕），文本框清空供下一段粘贴。
+- 待处理列表**不支持**点击展开查看完整文本（F2 明确跳过，未来按需再加）。
+- `Start Extraction` 汇总待处理列表里的所有文本段为 `texts: string[]`，调用 `/batch_extract`；按钮在待处理列表为空或请求进行中时 disabled。
+- 提交成功后：待处理列表清空，结果区渲染 Source/Result 两层（每个文本段 = 1 个 Source = 1 条 Result）。
+- `UploadZone` 组件代码保留（供 F5 复用/参考），但**从 `App.tsx` 的渲染中移除**，不在 F2 页面出现。
+- 整体请求失败（如网络错误/422）用页面顶部 banner 提示；单条结果失败（`error` 非空）用该行的 failed 态展示，不影响其他结果。
+- 后端 `data` 字典中混有 `xxx_confidence` 字段（见 B5），适配器需从中拆分出独立的 `confidence: Record<string, number>`，并从原 `data` 中剔除这些 `_confidence` 键。
+
 ---
 
 ## 6. 技术栈
@@ -337,7 +350,7 @@ frontend/
 | 阶段 | 内容 | 依赖 |
 |---|---|---|
 | F1 | 项目脚手架、Tailwind token、布局骨架、i18n | — |
-| F2 | 文本粘贴 + `/batch_extract` 打通，Source/Result 两层渲染 | 现有 API |
+| F2 | 纯文本粘贴单一入口（无 Tab/Upload）+ `/batch_extract` 打通，Source/Result 两层渲染，详见 §5.3 | 现有 API |
 | F3 | 置信度体系：进度条、分档、筛选、详情弹窗 | B5（可前端兜底） |
 | F4 | Schema 编辑器 + custom schema 提交 | 现有 API |
 | F5 | 文件上传接入 | **B1–B4** |

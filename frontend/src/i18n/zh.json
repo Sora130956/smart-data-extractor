@@ -26,6 +26,17 @@
     "uploaded": "已上传",
     "remove": "移除"
   },
+  "paste": {
+    "title": "粘贴文本",
+    "placeholder": "在此粘贴一段文本，例如一张发票、一张联系人名片……",
+    "add": "+ 添加为来源",
+    "charCount": "{{count}} 字符",
+    "hint": "每添加一段文本即成为一个来源 → 一条结果",
+    "empty": "还没有文本来源 — 在上方粘贴文本并点击「+ 添加为来源」",
+    "itemLabel": "文本 {{index}}",
+    "itemChars": "{{count}} 字符",
+    "remove": "移除"
+  },
   "config": {
     "mode": "模式",
     "modePreset": "预设",
@@ -36,7 +47,8 @@
     "presetLead": "销售线索",
     "instructions": "补充指令（可选）",
     "start": "开始提取",
-    "starting": "提取中…"
+    "starting": "提取中…",
+    "requestError": "提取请求失败：{{message}}"
   },
   "results": {
     "title": "提取结果",
@@ -52,5 +64,15 @@
     "high": "高",
     "medium": "中",
     "low": "需复核"
+  },
+  "resultRow": {
+    "view": "查看",
+    "retry": "重试",
+    "failed": "提取失败：{{message}}",
+    "badgeOk": "{{count}} 成功",
+    "badgeFailed": "{{count}} 失败",
+    "nullField": "— {{field}} 为空",
+    "collapse": "收起",
+    "expand": "展开"
   }
 }

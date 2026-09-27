@@ -1,0 +1,29 @@
+// Wire-level DTOs — mirrors src/smart_data_extractor/api/schemas.py.
+// Validated at the network boundary so a backend contract drift fails loudly
+// here instead of silently corrupting the UI.
+
+import { z } from 'zod';
+
+export const tokensUsedSchema = z.object({
+  input: z.number(),
+  output: z.number(),
+});
+
+export const batchResultItemSchema = z.object({
+  data: z.record(z.string(), z.unknown()).nullable(),
+  tokens_used: tokensUsedSchema,
+  cost_usd: z.number(),
+  error: z.string().nullable(),
+});
+
+export const batchExtractResponseSchema = z.object({
+  results: z.array(batchResultItemSchema),
+  total_cost_usd: z.number(),
+  total_tokens: tokensUsedSchema,
+  succeeded: z.number(),
+  failed: z.number(),
+});
+
+export type TokensUsed = z.infer<typeof tokensUsedSchema>;
+export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
+export type BatchExtractResponse = z.infer<typeof batchExtractResponseSchema>;

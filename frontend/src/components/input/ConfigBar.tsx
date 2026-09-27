@@ -9,7 +9,15 @@ const MODES: ExtractionMode[] = ['preset', 'custom'];
 const selectClass =
   'rounded-token border border-border bg-surface px-2.5 py-1.5 text-body text-text';
 
-export function ConfigBar({ canStart = false }: { canStart?: boolean }) {
+export function ConfigBar({
+  canStart = false,
+  isLoading = false,
+  onStart,
+}: {
+  canStart?: boolean;
+  isLoading?: boolean;
+  onStart?: () => void;
+}) {
   const { t } = useTranslation();
   const { mode, preset, instructions, setMode, setPreset, setInstructions } = useUiStore();
 
@@ -57,8 +65,8 @@ export function ConfigBar({ canStart = false }: { canStart?: boolean }) {
 
       <div className="flex-1" />
 
-      <Button variant="primary" disabled={!canStart}>
-        {t('config.start')}
+      <Button variant="primary" disabled={!canStart || isLoading} onClick={onStart}>
+        {isLoading ? t('config.starting') : t('config.start')}
       </Button>
     </div>
   );
