@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import type { ExtractionResult } from '@/types/extraction';
+import { formatCost } from '@/utils/currency';
 import { ConfidenceBar } from './ConfidenceBar';
 
 /** main-interface.html .fchip: render each field value as a short chip. */
@@ -35,7 +36,8 @@ export function ResultRow({
   onView?: () => void;
   onRetry?: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const cost = formatCost(result.costUsd, result.costCny, i18n.resolvedLanguage ?? 'en');
 
   if (result.status === 'failed') {
     return (
@@ -46,7 +48,7 @@ export function ResultRow({
         </span>
         <ConfidenceBar value={null} />
         <span className="tnum w-[62px] flex-none text-right text-caption text-text-muted">
-          ${result.costUsd.toFixed(4)}
+          {cost}
         </span>
         <span className="w-16 flex-none text-right">
           <Button size="sm" onClick={onRetry}>
@@ -74,7 +76,7 @@ export function ResultRow({
       </span>
       <ConfidenceBar value={result.avgConfidence} />
       <span className="tnum w-[62px] flex-none text-right text-caption text-text-muted">
-        ${result.costUsd.toFixed(4)}
+        {cost}
       </span>
       <span className="w-16 flex-none text-right">
         <Button size="sm" onClick={onView}>

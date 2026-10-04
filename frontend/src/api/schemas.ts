@@ -13,12 +13,14 @@ export const batchResultItemSchema = z.object({
   data: z.record(z.string(), z.unknown()).nullable(),
   tokens_used: tokensUsedSchema,
   cost_usd: z.number(),
+  cost_cny: z.number(),
   error: z.string().nullable(),
 });
 
 export const batchExtractResponseSchema = z.object({
   results: z.array(batchResultItemSchema),
   total_cost_usd: z.number(),
+  total_cost_cny: z.number(),
   total_tokens: tokensUsedSchema,
   succeeded: z.number(),
   failed: z.number(),

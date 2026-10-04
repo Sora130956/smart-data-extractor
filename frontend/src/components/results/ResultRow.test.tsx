@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import i18next from 'i18next';
+import { afterEach, describe, expect, it } from 'vitest';
 import '@/i18n';
 import { ResultRow } from './ResultRow';
 import type { ExtractionResult } from '@/types/extraction';
@@ -12,7 +13,7 @@ const successResult: ExtractionResult = {
   confidence: { invoice_number: 0.92, vendor: 0.88 },
   avgConfidence: 0.9,
   tokensUsed: { input: 100, output: 20 },
-  costUsd: 0.0002,
+  costUsd: 0.0002, costCny: 0.002,
 };
 
 const nestedResult: ExtractionResult = {
@@ -30,7 +31,7 @@ const nestedResult: ExtractionResult = {
   confidence: { invoice_number: 0.95, line_items: 0.88, tags: 0.8 },
   avgConfidence: 0.88,
   tokensUsed: { input: 200, output: 40 },
-  costUsd: 0.0003,
+  costUsd: 0.0003, costCny: 0.002175,
 };
 
 const failedResult: ExtractionResult = {
@@ -41,11 +42,16 @@ const failedResult: ExtractionResult = {
   confidence: {},
   avgConfidence: 0,
   tokensUsed: { input: 0, output: 0 },
-  costUsd: 0,
+  costUsd: 0, costCny: 0,
   error: 'unable to parse scanned page',
 };
 
 describe('ResultRow', () => {
+  // Restore the default language even if a test fails mid-switch.
+  afterEach(async () => {
+    await i18next.changeLanguage('en');
+  });
+
   it('renders the row label, field chips, confidence and cost for a successful result', () => {
     render(<ResultRow result={successResult} label="Text 1" />);
 
@@ -73,6 +79,14 @@ describe('ResultRow', () => {
     render(<ResultRow result={nestedResult} label="Text 3" />);
 
     expect(screen.getByText('net-30, urgent')).toBeInTheDocument();
+  });
+
+  it('shows the cost in CNY when the UI language is Chinese', async () => {
+    await i18next.changeLanguage('zh');
+    render(<ResultRow result={successResult} label="文本 1" />);
+
+    expect(screen.getByText('¥0.0020')).toBeInTheDocument();
+    await i18next.changeLanguage('en');
   });
 
   it('renders the failed state with the error message, no confidence, and a Retry action', () => {

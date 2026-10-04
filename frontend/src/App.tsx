@@ -37,7 +37,7 @@ function AppShell() {
 
   const stats: BatchStats = useMemo(() => {
     if (sources.length === 0) {
-      return { sources: 0, extracted: 0, failed: 0, avgConfidence: null, totalCostUsd: 0 };
+      return { sources: 0, extracted: 0, failed: 0, avgConfidence: null, totalCostUsd: 0, totalCostCny: 0 };
     }
     const allResults = sources.flatMap((s) => s.results);
     const extracted = allResults.filter((r) => r.status === 'success').length;
@@ -52,6 +52,7 @@ function AppShell() {
           ? confidences.reduce((sum, v) => sum + v, 0) / confidences.length
           : null,
       totalCostUsd: sources.reduce((sum, s) => sum + s.stats.totalCostUsd, 0),
+      totalCostCny: sources.reduce((sum, s) => sum + s.stats.totalCostCny, 0),
     };
   }, [sources]);
 

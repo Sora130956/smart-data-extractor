@@ -24,7 +24,11 @@ export function SourceGroup({
     <div className="mx-5 mb-3 overflow-hidden rounded-card border border-border">
       <div className="flex items-center gap-2.5 bg-surface-muted px-3.5 py-2.5">
         <span>{TYPE_ICON[source.type]}</span>
-        <span className="text-caption font-semibold">{source.name}</span>
+        <span className="text-caption font-semibold">
+          {source.type === 'text' && source.ordinal !== undefined
+            ? t('source.manualInput', { index: source.ordinal })
+            : source.name}
+        </span>
         {source.meta ? (
           <span className="text-caption text-text-muted">· {source.meta}</span>
         ) : null}

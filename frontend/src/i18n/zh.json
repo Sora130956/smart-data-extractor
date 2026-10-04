@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Smart Data Extractor",
+    "title": "智能数据提取器",
     "tagline": "基于 LLM 的结构化文档提取"
   },
   "header": {
@@ -64,6 +64,9 @@
     "high": "高",
     "medium": "中",
     "low": "需复核"
+  },
+  "source": {
+    "manualInput": "手动输入 {{index}}"
   },
   "resultRow": {
     "view": "查看",

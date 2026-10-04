@@ -43,6 +43,7 @@ function toResult(item: BatchResultItem, sourceId: string): ExtractionResult {
     avgConfidence,
     tokensUsed: { input: item.tokens_used.input, output: item.tokens_used.output },
     costUsd: item.cost_usd,
+    costCny: item.cost_cny,
     ...(item.error !== null ? { error: item.error } : {}),
   };
 }
@@ -63,7 +64,8 @@ export function adaptBatchExtractResponse(
     return {
       id: sourceId,
       type: 'text',
-      name: `Manual Input ${i + 1}`,
+      name: `Manual Input ${i + 1}`, // English fallback; UI layer re-labels via i18n
+      ordinal: i + 1,
       uploadedAt: new Date().toISOString(),
       meta: preview,
       results: [result],
@@ -71,6 +73,7 @@ export function adaptBatchExtractResponse(
         succeeded: result.status === 'success' ? 1 : 0,
         failed: result.status === 'failed' ? 1 : 0,
         totalCostUsd: result.costUsd,
+        totalCostCny: result.costCny,
         avgConfidence: result.avgConfidence,
       },
     };

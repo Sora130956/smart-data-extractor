@@ -8,17 +8,17 @@ describe('batchExtractResponseSchema', () => {
         {
           data: { invoice_number: 'INV-001', invoice_number_confidence: 0.92 },
           tokens_used: { input: 120, output: 40 },
-          cost_usd: 0.0002,
+          cost_usd: 0.0002, cost_cny: 0.00145,
           error: null,
         },
         {
           data: null,
           tokens_used: { input: 0, output: 0 },
-          cost_usd: 0,
+          cost_usd: 0, cost_cny: 0,
           error: 'unable to parse scanned page',
         },
       ],
-      total_cost_usd: 0.0002,
+      total_cost_usd: 0.0002, total_cost_cny: 0.00145, cost_cny: 0.00145,
       total_tokens: { input: 120, output: 40 },
       succeeded: 1,
       failed: 1,
@@ -37,7 +37,7 @@ describe('batchExtractResponseSchema', () => {
   it('rejects a payload missing required fields', () => {
     const payload = {
       results: [],
-      total_cost_usd: 0,
+      total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
       total_tokens: { input: 0, output: 0 },
       succeeded: 0,
       // failed is missing
@@ -52,11 +52,11 @@ describe('batchExtractResponseSchema', () => {
         {
           data: { a: 1 },
           tokens_used: { input: 1, output: 1 },
-          cost_usd: 0,
+          cost_usd: 0, cost_cny: 0,
           // error is missing (must be explicit null on success)
         },
       ],
-      total_cost_usd: 0,
+      total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
       total_tokens: { input: 1, output: 1 },
       succeeded: 1,
       failed: 0,

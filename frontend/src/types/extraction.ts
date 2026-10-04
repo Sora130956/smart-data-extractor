@@ -16,14 +16,18 @@ export interface ExtractionResult {
   avgConfidence: number;
   tokensUsed: { input: number; output: number };
   costUsd: number;
+  /** Display currency, converted server-side from costUsd. */
+  costCny: number;
   error?: string;
 }
 
 export interface ExtractionSource {
   id: string;
   type: SourceType;
-  /** File name, or "Manual Input" for pasted text. */
+  /** File name, or a translated label for pasted text (see ordinal). */
   name: string;
+  /** 1-based position among pasted text blocks; drives the i18n label. */
+  ordinal?: number;
   uploadedAt: string;
   /** "15 pages" | "OCR processed" */
   meta?: string;
@@ -32,6 +36,7 @@ export interface ExtractionSource {
     succeeded: number;
     failed: number;
     totalCostUsd: number;
+    totalCostCny: number;
     avgConfidence: number;
   };
 }

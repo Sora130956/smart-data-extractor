@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { formatConfidence } from '@/utils/confidence';
+import { formatCost } from '@/utils/currency';
 
 export interface BatchStats {
   sources: number;
@@ -8,6 +9,7 @@ export interface BatchStats {
   /** null until at least one result exists. */
   avgConfidence: number | null;
   totalCostUsd: number;
+  totalCostCny: number;
 }
 
 export const EMPTY_STATS: BatchStats = {
@@ -16,6 +18,7 @@ export const EMPTY_STATS: BatchStats = {
   failed: 0,
   avgConfidence: null,
   totalCostUsd: 0,
+  totalCostCny: 0,
 };
 
 function Stat({
@@ -43,7 +46,7 @@ function Stat({
 }
 
 export function StatsStrip({ stats = EMPTY_STATS }: { stats?: BatchStats }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   return (
     <div className="grid grid-cols-2 border-b border-border sm:grid-cols-3 lg:grid-cols-5">
@@ -59,7 +62,10 @@ export function StatsStrip({ stats = EMPTY_STATS }: { stats?: BatchStats }) {
         tone={stats.failed > 0 ? 'error' : 'neutral'}
       />
       <Stat label={t('stats.avgConfidence')} value={formatConfidence(stats.avgConfidence)} />
-      <Stat label={t('stats.totalCost')} value={`$${stats.totalCostUsd.toFixed(4)}`} />
+      <Stat
+        label={t('stats.totalCost')}
+        value={formatCost(stats.totalCostUsd, stats.totalCostCny, i18n.resolvedLanguage ?? 'en')}
+      />
     </div>
   );
 }

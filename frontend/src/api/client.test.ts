@@ -12,11 +12,11 @@ describe('batchExtract', () => {
         {
           data: { name: 'Acme', name_confidence: 0.91 },
           tokens_used: { input: 10, output: 5 },
-          cost_usd: 0.0001,
+          cost_usd: 0.0001, cost_cny: 0.000725,
           error: null,
         },
       ],
-      total_cost_usd: 0.0001,
+      total_cost_usd: 0.0001, total_cost_cny: 0.000725, cost_cny: 0.000725,
       total_tokens: { input: 10, output: 5 },
       succeeded: 1,
       failed: 0,
@@ -44,7 +44,7 @@ describe('batchExtract', () => {
       ok: true,
       json: async () => ({
         results: [],
-        total_cost_usd: 0,
+        total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
         total_tokens: { input: 0, output: 0 },
         succeeded: 0,
         failed: 0,

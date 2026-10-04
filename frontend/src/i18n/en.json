@@ -65,6 +65,9 @@
     "medium": "Medium",
     "low": "Needs review"
   },
+  "source": {
+    "manualInput": "Manual Input {{index}}"
+  },
   "resultRow": {
     "view": "View",
     "retry": "Retry",

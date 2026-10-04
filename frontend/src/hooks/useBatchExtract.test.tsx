@@ -24,11 +24,11 @@ describe('useBatchExtract', () => {
           {
             data: { name: 'Acme', name_confidence: 0.9 },
             tokens_used: { input: 10, output: 5 },
-            cost_usd: 0.0001,
+            cost_usd: 0.0001, cost_cny: 0.000725,
             error: null,
           },
         ],
-        total_cost_usd: 0.0001,
+        total_cost_usd: 0.0001, total_cost_cny: 0.000725, cost_cny: 0.000725,
         total_tokens: { input: 10, output: 5 },
         succeeded: 1,
         failed: 0,

@@ -19,10 +19,10 @@ const source: ExtractionSource = {
       confidence: { invoice_number: 0.92, vendor: 0.88 },
       avgConfidence: 0.9,
       tokensUsed: { input: 100, output: 20 },
-      costUsd: 0.0002,
+      costUsd: 0.0002, costCny: 0.00145,
     },
   ],
-  stats: { succeeded: 1, failed: 0, totalCostUsd: 0.0002, avgConfidence: 0.9 },
+  stats: { succeeded: 1, failed: 0, totalCostUsd: 0.0002, totalCostCny: 0.00145, avgConfidence: 0.9 },
 };
 
 const mixedSource: ExtractionSource = {
@@ -40,11 +40,11 @@ const mixedSource: ExtractionSource = {
       confidence: {},
       avgConfidence: 0,
       tokensUsed: { input: 0, output: 0 },
-      costUsd: 0,
+      costUsd: 0, costCny: 0,
       error: 'unable to parse scanned page',
     },
   ],
-  stats: { succeeded: 0, failed: 1, totalCostUsd: 0, avgConfidence: 0 },
+  stats: { succeeded: 0, failed: 1, totalCostUsd: 0, totalCostCny: 0, avgConfidence: 0 },
 };
 
 describe('SourceGroup', () => {
