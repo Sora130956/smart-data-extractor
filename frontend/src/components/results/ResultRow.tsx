@@ -4,8 +4,23 @@ import type { ExtractionResult } from '@/types/extraction';
 import { ConfidenceBar } from './ConfidenceBar';
 
 /** main-interface.html .fchip: render each field value as a short chip. */
-function fieldChip(key: string, value: unknown, nullLabel: string): string {
+function fieldChip(
+  key: string,
+  value: unknown,
+  nullLabel: string,
+  listLabel: string,
+): string {
   if (value === null || value === undefined) return nullLabel.replace('{{field}}', key);
+  if (Array.isArray(value)) {
+    // Nested records (e.g. invoice line_items) summarize as "field: N items";
+    // primitive arrays (e.g. tags) join their values.
+    const hasObjects = value.some((v) => v !== null && typeof v === 'object');
+    if (hasObjects) {
+      return listLabel.replace('{{field}}', key).replace('{{count}}', String(value.length));
+    }
+    return value.map((v) => String(v)).join(', ');
+  }
+  if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
 
@@ -53,7 +68,7 @@ export function ResultRow({
             key={key}
             className="whitespace-nowrap rounded-token border border-border bg-surface-muted px-2 py-0.5 text-caption"
           >
-            {fieldChip(key, value, t('resultRow.nullField'))}
+            {fieldChip(key, value, t('resultRow.nullField'), t('resultRow.listField'))}
           </span>
         ))}
       </span>

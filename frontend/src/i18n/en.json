@@ -72,6 +72,7 @@
     "badgeOk": "{{count}} ok",
     "badgeFailed": "{{count}} failed",
     "nullField": "— {{field}} null",
+    "listField": "{{field}}: {{count}} items",
     "collapse": "Collapse",
     "expand": "Expand"
   }

@@ -72,6 +72,7 @@
     "badgeOk": "{{count}} 成功",
     "badgeFailed": "{{count}} 失败",
     "nullField": "— {{field}} 为空",
+    "listField": "{{field}}：{{count}} 项",
     "collapse": "收起",
     "expand": "展开"
   }

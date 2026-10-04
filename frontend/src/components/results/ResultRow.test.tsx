@@ -15,6 +15,24 @@ const successResult: ExtractionResult = {
   costUsd: 0.0002,
 };
 
+const nestedResult: ExtractionResult = {
+  sourceId: 'text-2',
+  index: '1',
+  status: 'success',
+  data: {
+    invoice_number: 'INV-2024-0877',
+    line_items: [
+      { description: 'Ergonomic office chair', quantity: 6, unit_price: 189.0, amount: 1134.0 },
+      { description: 'Standing desk converter', quantity: 4, unit_price: 245.5, amount: 982.0 },
+    ],
+    tags: ['net-30', 'urgent'],
+  },
+  confidence: { invoice_number: 0.95, line_items: 0.88, tags: 0.8 },
+  avgConfidence: 0.88,
+  tokensUsed: { input: 200, output: 40 },
+  costUsd: 0.0003,
+};
+
 const failedResult: ExtractionResult = {
   sourceId: 'text-1',
   index: '1',
@@ -42,6 +60,19 @@ describe('ResultRow', () => {
     render(<ResultRow result={successResult} label="Text 1" />);
 
     expect(screen.getByText('— date null')).toBeInTheDocument();
+  });
+
+  it('renders an array of objects as a "field: N items" chip instead of [object Object]', () => {
+    render(<ResultRow result={nestedResult} label="Text 3" />);
+
+    expect(screen.getByText('line_items: 2 items')).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+
+  it('renders an array of primitives as a comma-joined chip', () => {
+    render(<ResultRow result={nestedResult} label="Text 3" />);
+
+    expect(screen.getByText('net-30, urgent')).toBeInTheDocument();
   });
 
   it('renders the failed state with the error message, no confidence, and a Retry action', () => {
