@@ -49,7 +49,7 @@ export function StatsStrip({ stats = EMPTY_STATS }: { stats?: BatchStats }) {
   const { t, i18n } = useTranslation();
 
   return (
-    <div className="grid grid-cols-2 border-b border-border sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-5 border-b border-border">
       <Stat label={t('stats.sources')} value={String(stats.sources)} />
       <Stat
         label={t('stats.extracted')}

@@ -89,7 +89,6 @@ function AppShell() {
     <div className="p-4 sm:p-6">
       <div className="mx-auto max-w-[1080px] overflow-hidden rounded-card border border-border bg-surface">
         <Header />
-        <StatsStrip stats={stats} />
 
         <section className="border-b border-border p-5">
           <PasteTextInput staged={staged} onAdd={handleAdd} onRemove={handleRemove} />
@@ -107,6 +106,7 @@ function AppShell() {
         ) : null}
 
         <section>
+          <StatsStrip stats={stats} />
           <ResultsHeader counts={counts} />
           {sources.length === 0 ? (
             <EmptyState />
