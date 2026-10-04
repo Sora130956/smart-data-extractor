@@ -1,0 +1,60 @@
+<h2>字段表格的可编辑交互</h2>
+<p class="subtitle">选中 Invoice preset，用户编辑了 total 的描述、删除了 tax 字段、新增了一个字段 → 状态变为"已修改"，走 custom schema 提交。</p>
+
+<div class="mockup">
+  <div class="mockup-header">ConfigBar + 可编辑字段表格</div>
+  <div class="mockup-body">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div class="mock-input" style="width:auto;">Preset: Invoice</div>
+      <div class="mock-input" style="flex:1;color:#999;">Instructions (optional)</div>
+      <button class="mock-button" style="background:#2563eb;color:#fff;">Start</button>
+    </div>
+
+    <div style="margin-top:10px;border:1px solid #eee;border-radius:8px;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#f7f7f8;padding:6px 10px;border-bottom:1px solid #eee;">
+        <span style="font-size:12px;font-weight:600;">Schema 字段 <span style="color:#d97706;font-weight:500;">· 已修改</span></span>
+        <button class="mock-button" style="font-size:11px;padding:3px 8px;">重置为 Preset</button>
+      </div>
+      <div style="display:flex;background:#fafafa;font-size:11px;color:#888;padding:5px 10px;font-weight:600;">
+        <span style="width:150px;">字段名</span><span style="width:90px;">类型</span><span style="flex:1;">描述</span><span style="width:24px;"></span>
+      </div>
+      <div style="display:flex;align-items:center;padding:5px 10px;font-size:12px;border-top:1px solid #f2f2f2;">
+        <span style="width:150px;" class="mock-input" >invoice_number</span>
+        <span style="width:90px;color:#888;">string</span>
+        <span style="flex:1;color:#666;" class="mock-input">发票编号</span>
+        <span style="width:24px;color:#bbb;cursor:pointer;text-align:center;">✕</span>
+      </div>
+      <div style="display:flex;align-items:center;padding:5px 10px;font-size:12px;border-top:1px solid #f2f2f2;background:#fff8e6;">
+        <span style="width:150px;" class="mock-input">total</span>
+        <span style="width:90px;color:#888;">number</span>
+        <span style="flex:1;color:#333;font-weight:500;" class="mock-input">含税总金额（已编辑）</span>
+        <span style="width:24px;color:#bbb;cursor:pointer;text-align:center;">✕</span>
+      </div>
+      <div style="display:flex;align-items:center;padding:5px 10px;font-size:12px;border-top:1px solid #f2f2f2;opacity:.4;text-decoration:line-through;">
+        <span style="width:150px;">tax</span>
+        <span style="width:90px;color:#888;">number</span>
+        <span style="flex:1;color:#666;">税额（已删除）</span>
+        <span style="width:24px;">—</span>
+      </div>
+      <div style="display:flex;align-items:center;padding:5px 10px;font-size:12px;border-top:1px solid #f2f2f2;background:#eefcf0;">
+        <span style="width:150px;" class="mock-input">payment_terms</span>
+        <span style="width:90px;color:#888;">string</span>
+        <span style="flex:1;color:#333;" class="mock-input">付款条款（新增）</span>
+        <span style="width:24px;color:#bbb;cursor:pointer;text-align:center;">✕</span>
+      </div>
+      <div style="padding:6px 10px;border-top:1px solid #f2f2f2;">
+        <button class="mock-button" style="font-size:12px;">+ 添加字段</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:14px;">
+  <h3>几个交互细节，请确认：</h3>
+  <ul style="font-size:13px;line-height:1.9;color:#444;">
+    <li><b>字段名/类型/描述</b>：点击即可编辑（表格内直接变成输入框），类型用下拉选择（string/number/integer/boolean/date/array/object）</li>
+    <li><b>删除字段</b>：点 ✕ 直接从列表移除（不做"划掉待确认"的中间态，上图删除线仅为示意被删效果）</li>
+    <li><b>新增字段</b>：点"+ 添加字段"在表格底部插入一行空白，直接填写</li>
+    <li><b>重置为 Preset</b>：一键丢弃所有编辑，字段表格和提交通道都还原成原始 Preset</li>
+  </ul>
+</div>

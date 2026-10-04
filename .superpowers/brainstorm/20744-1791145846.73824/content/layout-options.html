@@ -1,0 +1,92 @@
+<h2>输入区整体布局：现状 vs 两种重设计方向</h2>
+<p class="subtitle">现状：textarea / 按钮+提示 / 已粘贴列表，三块视觉上各自成块，略显割裂。下面两个方向都改为"一个统一的来源面板"，按钮更醒目，去掉多余 hint。</p>
+
+<div class="section">
+  <div class="label">现状（对照用，不可选）</div>
+  <div class="mockup">
+    <div class="mockup-header">PasteTextInput（当前实现）</div>
+    <div class="mockup-body">
+      <div style="font-size:12px;color:#888;margin-bottom:6px;font-weight:600;">Paste Text</div>
+      <div class="mock-input" style="height:70px;display:flex;align-items:flex-start;color:#999;">Paste one block of text here…</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+        <button class="mock-button" style="opacity:.6;">+ 添加为来源</button>
+        <span style="font-size:11px;color:#999;">0 characters</span>
+        <div style="flex:1"></div>
+        <span style="font-size:11px;color:#999;">每添加一段文本即成为一个来源 → 一条结果</span>
+      </div>
+      <div style="margin-top:12px;border:1px dashed #ddd;border-radius:8px;padding:14px;text-align:center;font-size:12px;color:#999;">
+        No text sources yet — paste text above and click "+ Add as Source"
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;">
+        <div class="mock-input" style="width:auto;">Mode: Preset</div>
+        <div class="mock-input" style="width:auto;">Preset: Invoice</div>
+        <div class="mock-input" style="flex:1;color:#999;">Instructions (optional)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>方向 A：单一卡片，列表直接接在输入框下方</h3>
+<p class="subtitle">去掉独立的"空状态"块和右侧 hint；按钮做成醒目的强调色大按钮；已添加的文本作为"卡片内的列表"紧贴在输入框下面，整体看起来是一个连续的"来源管理"卡片。</p>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="content">
+      <div class="mockup">
+        <div class="mockup-header">方向 A</div>
+        <div class="mockup-body">
+          <div style="font-size:12px;color:#888;margin-bottom:6px;font-weight:600;">粘贴文本</div>
+          <div class="mock-input" style="height:64px;display:flex;align-items:flex-start;color:#999;">粘贴一段文本，例如一张发票、一张名片…</div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+            <button class="mock-button" style="background:#2563eb;color:#fff;font-weight:600;padding:8px 16px;">+ 添加</button>
+          </div>
+          <div style="margin-top:12px;border-top:1px solid #eee;padding-top:10px;">
+            <div style="font-size:11px;color:#999;margin-bottom:6px;">已添加 2 段文本</div>
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:#f7f7f8;margin-bottom:4px;">
+              <span style="font-size:11px;color:#999;width:18px;">1</span>
+              <span style="flex:1;font-size:12px;" class="truncate">Invoice #INV-2024-001, vendor Acme Co...</span>
+              <span style="font-size:11px;color:#999;">126 字</span>
+              <span style="color:#bbb;cursor:pointer;">✕</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:#f7f7f8;">
+              <span style="font-size:11px;color:#999;width:18px;">2</span>
+              <span style="flex:1;font-size:12px;" class="truncate">Contact card: Jane Doe, jane@acme.com...</span>
+              <span style="font-size:11px;color:#999;">88 字</span>
+              <span style="color:#bbb;cursor:pointer;">✕</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px;">单卡片，列表就是输入框的延伸；按钮靠右更醒目</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="content">
+      <div class="mockup">
+        <div class="mockup-header">方向 B</div>
+        <div class="mockup-body">
+          <div style="display:flex;gap:12px;">
+            <div style="flex:1;">
+              <div style="font-size:12px;color:#888;margin-bottom:6px;font-weight:600;">粘贴文本</div>
+              <div class="mock-input" style="height:100px;display:flex;align-items:flex-start;color:#999;">粘贴一段文本…</div>
+              <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+                <button class="mock-button" style="background:#2563eb;color:#fff;font-weight:600;padding:8px 16px;">+ 添加</button>
+              </div>
+            </div>
+            <div style="width:220px;border-left:1px solid #eee;padding-left:12px;">
+              <div style="font-size:11px;color:#999;margin-bottom:6px;">来源列表 · 2</div>
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:#f7f7f8;margin-bottom:4px;">
+                <span style="flex:1;font-size:12px;" class="truncate">Invoice #INV-2024-001...</span>
+                <span style="color:#bbb;cursor:pointer;">✕</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:#f7f7f8;">
+                <span style="flex:1;font-size:12px;" class="truncate">Contact: Jane Doe...</span>
+                <span style="color:#bbb;cursor:pointer;">✕</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="margin-top:8px;">左右分栏：左边输入，右边实时列表，适合文本较多时</p>
+    </div>
+  </div>
+</div>
