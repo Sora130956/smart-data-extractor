@@ -26,6 +26,18 @@ export const batchExtractResponseSchema = z.object({
   failed: z.number(),
 });
 
+export const presetFieldSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  description: z.string().nullable(),
+});
+
+export const presetSchemaResponseSchema = z.object({
+  fields: z.array(presetFieldSchema),
+});
+
 export type TokensUsed = z.infer<typeof tokensUsedSchema>;
 export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
 export type BatchExtractResponse = z.infer<typeof batchExtractResponseSchema>;
+export type PresetFieldDto = z.infer<typeof presetFieldSchema>;
+export type PresetSchemaResponse = z.infer<typeof presetSchemaResponseSchema>;

@@ -203,3 +203,30 @@ async def test_batch_partial_failure_contract(app, client):
 async def test_batch_empty_texts_422(client):
     resp = await client.post("/batch_extract", json={"texts": [], "preset": "contact"})
     assert resp.status_code == 422
+
+
+async def test_preset_schema_returns_fields(client):
+    resp = await client.get("/presets/contact/schema")
+    assert resp.status_code == 200
+    body = resp.json()
+    names = {f["name"] for f in body["fields"]}
+    assert names == {"name", "email", "phone", "company", "job_title", "website"}
+    # No internal confidence fields leak into the schema view.
+    assert all(not f["name"].endswith("_confidence") for f in body["fields"])
+    email_field = next(f for f in body["fields"] if f["name"] == "email")
+    assert email_field["type"] == "string"
+    assert email_field["description"]
+
+
+async def test_preset_schema_invoice_has_array_and_date_types(client):
+    resp = await client.get("/presets/invoice/schema")
+    assert resp.status_code == 200
+    fields = {f["name"]: f for f in resp.json()["fields"]}
+    assert fields["date"]["type"] == "date"
+    assert fields["total"]["type"] == "number"
+    assert fields["line_items"]["type"] == "array"
+
+
+async def test_preset_schema_unknown_preset_404(client):
+    resp = await client.get("/presets/unknown-preset/schema")
+    assert resp.status_code == 404

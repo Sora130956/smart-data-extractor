@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, batchExtract } from './client';
+import { ApiError, batchExtract, getPresetSchema } from './client';
 
 describe('batchExtract', () => {
   afterEach(() => {
@@ -81,5 +81,65 @@ describe('batchExtract', () => {
     const err = new ApiError('boom', 500);
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('ApiError');
+  });
+
+  it('posts a schema instead of a preset when schema is provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [],
+        total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
+        total_tokens: { input: 0, output: 0 },
+        succeeded: 0,
+        failed: 0,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const schema = { fields: { name: { type: 'string', description: null } } };
+    await batchExtract({ texts: ['a'], schema });
+
+    const call = fetchMock.mock.calls[0][1];
+    expect(JSON.parse(call.body)).toEqual({ texts: ['a'], schema });
+  });
+});
+
+describe('getPresetSchema', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches and parses a preset schema', async () => {
+    const payload = {
+      fields: [
+        { name: 'name', type: 'string', description: 'Full name' },
+        { name: 'email', type: 'string', description: null },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getPresetSchema('contact');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/presets/contact/schema');
+    expect(result.fields).toHaveLength(2);
+  });
+
+  it('throws ApiError on a non-ok response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      text: async () => 'Unknown preset',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getPresetSchema('bogus')).rejects.toMatchObject({
+      status: 404,
+      message: 'Unknown preset',
+    });
   });
 });

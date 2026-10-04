@@ -82,3 +82,15 @@ class BatchExtractResponse(BaseModel):
     total_tokens: TokensUsed
     succeeded: int
     failed: int
+
+
+class PresetFieldInfo(BaseModel):
+    """One field of a preset's extraction schema, for client-side display."""
+
+    name: str
+    type: str
+    description: str | None = None
+
+
+class PresetSchemaResponse(BaseModel):
+    fields: list[PresetFieldInfo]

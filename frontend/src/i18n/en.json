@@ -27,28 +27,43 @@
     "remove": "Remove"
   },
   "paste": {
-    "title": "Paste Text",
-    "placeholder": "Paste one block of text here, e.g. one invoice, one contact card…",
-    "add": "+ Add as Source",
-    "charCount": "{{count}} characters",
-    "hint": "Each block you add becomes one Source → one Result",
-    "empty": "No text sources yet — paste text above and click \"+ Add as Source\"",
+    "title": "Drop a .txt file here, or click to browse",
+    "hint": "Only .txt files supported · multiple files allowed",
+    "dropActive": "Release to add these files",
+    "empty": "No text sources yet — upload a .txt file on the left",
     "itemLabel": "Text {{index}}",
     "itemChars": "{{count}} chars",
     "remove": "Remove"
   },
   "config": {
-    "mode": "Mode",
-    "modePreset": "Preset",
-    "modeCustom": "Custom Schema",
     "preset": "Preset",
     "presetContact": "Contact",
     "presetInvoice": "Invoice",
     "presetLead": "Lead",
-    "instructions": "Extra instructions (optional)",
+    "instructions": "Describe what you want to extract… (optional)",
     "start": "Start Extraction",
     "starting": "Extracting…",
     "requestError": "Extraction request failed: {{message}}"
+  },
+  "schema": {
+    "loading": "Loading…",
+    "title": "Extraction Fields",
+    "modified": "Modified",
+    "resetToPreset": "Reset to Preset",
+    "fieldName": "Field Name",
+    "fieldType": "Type",
+    "fieldDescription": "Description",
+    "removeField": "Remove field",
+    "addField": "+ Add Field",
+    "type": {
+      "string": "Text",
+      "number": "Number",
+      "integer": "Integer",
+      "boolean": "Boolean",
+      "date": "Date",
+      "array": "Array",
+      "object": "Object"
+    }
   },
   "results": {
     "title": "Extraction Results",

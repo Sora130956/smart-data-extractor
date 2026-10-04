@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { batchExtractResponseSchema } from './schemas';
+import { batchExtractResponseSchema, presetSchemaResponseSchema } from './schemas';
 
 describe('batchExtractResponseSchema', () => {
   it('parses a response with a mix of succeeded and failed items', () => {
@@ -63,5 +63,26 @@ describe('batchExtractResponseSchema', () => {
     };
 
     expect(() => batchExtractResponseSchema.parse(payload)).toThrow();
+  });
+});
+
+describe('presetSchemaResponseSchema', () => {
+  it('parses a list of fields with nullable descriptions', () => {
+    const payload = {
+      fields: [
+        { name: 'name', type: 'string', description: 'Full name' },
+        { name: 'email', type: 'string', description: null },
+      ],
+    };
+
+    const parsed = presetSchemaResponseSchema.parse(payload);
+    expect(parsed.fields).toHaveLength(2);
+    expect(parsed.fields[1].description).toBeNull();
+  });
+
+  it('rejects a field missing the type key', () => {
+    const payload = { fields: [{ name: 'name', description: 'Full name' }] };
+
+    expect(() => presetSchemaResponseSchema.parse(payload)).toThrow();
   });
 });

@@ -1,71 +1,80 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { PasteTextInput, type StagedText } from './PasteTextInput';
 
+function makeFile(name: string, content: string): File {
+  const file = new File([content], name, { type: 'text/plain' });
+  // jsdom's File does not implement .text() yet.
+  if (typeof file.text !== 'function') {
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
+  }
+  return file;
+}
+
 describe('PasteTextInput', () => {
-  it('disables Add until the textarea has non-whitespace content', () => {
-    render(<PasteTextInput staged={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-
-    const addButton = screen.getByRole('button', { name: '+ Add as Source' });
-    expect(addButton).toBeDisabled();
-
-    const textarea = screen.getByPlaceholderText(/Paste one block of text here/);
-    fireEvent.change(textarea, { target: { value: '   ' } });
-    expect(addButton).toBeDisabled();
-
-    fireEvent.change(textarea, { target: { value: 'Invoice #123' } });
-    expect(addButton).not.toBeDisabled();
-  });
-
-  it('calls onAdd with the trimmed text and clears the textarea', () => {
-    const onAdd = vi.fn();
-    render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
-
-    const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>(
-      /Paste one block of text here/,
-    );
-    fireEvent.change(textarea, { target: { value: '  Invoice #123  ' } });
-    fireEvent.click(screen.getByRole('button', { name: '+ Add as Source' }));
-
-    expect(onAdd).toHaveBeenCalledWith('Invoice #123');
-    expect(textarea.value).toBe('');
-  });
-
-  it('updates the live character count as the draft changes', () => {
-    render(<PasteTextInput staged={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-
-    const textarea = screen.getByPlaceholderText(/Paste one block of text here/);
-    fireEvent.change(textarea, { target: { value: 'hello' } });
-
-    expect(screen.getByText('5 characters')).toBeInTheDocument();
-  });
-
   it('shows the empty hint when there are no staged texts', () => {
     render(<PasteTextInput staged={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
 
     expect(screen.getByText(/No text sources yet/)).toBeInTheDocument();
   });
 
-  it('renders each staged item with its preview and character count', () => {
+  it('calls onAdd with the file name and its content when a txt file is selected', async () => {
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('invoice.txt', 'Invoice #123');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('invoice.txt', 'Invoice #123'));
+  });
+
+  it('calls onAdd for each selected txt file', async () => {
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const fileA = makeFile('a.txt', 'Content A');
+    const fileB = makeFile('b.txt', 'Content B');
+    fireEvent.change(input, { target: { files: [fileA, fileB] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
+    expect(onAdd).toHaveBeenCalledWith('a.txt', 'Content A');
+    expect(onAdd).toHaveBeenCalledWith('b.txt', 'Content B');
+  });
+
+  it('ignores non-txt files', async () => {
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('image.png', 'binary');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await Promise.resolve();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('renders each staged item with its file name and character count', () => {
     const staged: StagedText[] = [
-      { id: 'a', text: 'First source text' },
-      { id: 'b', text: 'Second source text' },
+      { id: 'a', name: 'invoice.txt', text: 'First source text' },
+      { id: 'b', name: 'contact.txt', text: 'Second source text' },
     ];
     render(<PasteTextInput staged={staged} onAdd={vi.fn()} onRemove={vi.fn()} />);
 
     expect(screen.queryByText(/No text sources yet/)).not.toBeInTheDocument();
     expect(screen.getByText('Text 1')).toBeInTheDocument();
-    expect(screen.getByText('First source text')).toBeInTheDocument();
+    expect(screen.getByText('invoice.txt')).toBeInTheDocument();
     expect(screen.getByText('17 chars')).toBeInTheDocument();
     expect(screen.getByText('Text 2')).toBeInTheDocument();
-    expect(screen.getByText('Second source text')).toBeInTheDocument();
+    expect(screen.getByText('contact.txt')).toBeInTheDocument();
     expect(screen.getByText('18 chars')).toBeInTheDocument();
   });
 
   it('calls onRemove with the item id when its remove button is clicked', () => {
     const onRemove = vi.fn();
-    const staged: StagedText[] = [{ id: 'a', text: 'First source text' }];
+    const staged: StagedText[] = [{ id: 'a', name: 'invoice.txt', text: 'First source text' }];
     render(<PasteTextInput staged={staged} onAdd={vi.fn()} onRemove={onRemove} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove Text 1' }));

@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from smart_data_extractor.models import Contact, Invoice, Lead
-from smart_data_extractor.presets import PRESETS, get_preset
+from smart_data_extractor.presets import PRESETS, get_preset, get_preset_fields
 
 
 def test_presets_registry_keys():
@@ -47,3 +47,22 @@ def test_preset_prompt_instructs_null_and_confidence():
         assert "confidence" in prompt
         assert "0.0" in prompt
         assert "1.0" in prompt
+
+
+def test_get_preset_fields_excludes_confidence_fields():
+    """Reflected field metadata must not include the paired _confidence fields."""
+    fields = get_preset_fields("contact")
+    names = {f["name"] for f in fields}
+    assert names == {"name", "email", "phone", "company", "job_title", "website"}
+
+
+def test_get_preset_fields_includes_description_and_type():
+    fields = get_preset_fields("contact")
+    email = next(f for f in fields if f["name"] == "email")
+    assert email["type"] == "string"
+    assert isinstance(email["description"], str) and email["description"]
+
+
+def test_get_preset_fields_unknown_raises():
+    with pytest.raises(ValueError, match="unknown-preset"):
+        get_preset_fields("unknown-preset")

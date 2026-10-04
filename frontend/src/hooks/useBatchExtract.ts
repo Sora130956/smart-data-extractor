@@ -8,14 +8,15 @@ import type { ExtractionSource } from '@/types/extraction';
 
 export interface BatchExtractInput {
   texts: string[];
-  preset: string;
+  preset?: string;
+  schema?: Record<string, unknown>;
   instructions?: string;
 }
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, instructions }) => {
-      const response = await batchExtract({ texts, preset, instructions });
+    mutationFn: async ({ texts, preset, schema, instructions }) => {
+      const response = await batchExtract({ texts, preset, schema, instructions });
       return adaptBatchExtractResponse(response, texts);
     },
   });

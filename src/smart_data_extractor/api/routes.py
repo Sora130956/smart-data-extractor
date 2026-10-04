@@ -14,9 +14,11 @@ from smart_data_extractor.api.schemas import (
     BatchExtractResponse,
     ExtractRequest,
     ExtractResponse,
+    PresetSchemaResponse,
 )
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction import batch_extract, extract_data
+from smart_data_extractor.presets import get_preset_fields
 
 router = APIRouter()
 
@@ -39,6 +41,15 @@ def get_batch_fn() -> Callable[..., Any]:
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/presets/{name}/schema", response_model=PresetSchemaResponse)
+async def preset_schema(name: str) -> PresetSchemaResponse:
+    try:
+        fields = get_preset_fields(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PresetSchemaResponse(fields=fields)
 
 
 @router.post("/extract", response_model=ExtractResponse)

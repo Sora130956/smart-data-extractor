@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ExtractionMode, PresetId, ResultFilter } from '@/types/extraction';
+import type { PresetId, ResultFilter, SchemaField } from '@/types/extraction';
 
 export type Theme = 'light' | 'dark';
 
@@ -18,23 +18,28 @@ function applyTheme(theme: Theme) {
 
 interface UiState {
   theme: Theme;
-  mode: ExtractionMode;
   preset: PresetId;
   instructions: string;
   filter: ResultFilter;
+  /** Effective field set shown/edited in the SchemaEditor for the current preset. */
+  customFields: SchemaField[];
+  /** True once the user has edited a preset's fields; drives the custom-schema submit path. */
+  isSchemaModified: boolean;
   toggleTheme: () => void;
-  setMode: (mode: ExtractionMode) => void;
   setPreset: (preset: PresetId) => void;
   setInstructions: (instructions: string) => void;
   setFilter: (filter: ResultFilter) => void;
+  setCustomFields: (fields: SchemaField[]) => void;
+  resetToPreset: (fields: SchemaField[]) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
   theme: readInitialTheme(),
-  mode: 'preset',
   preset: 'invoice',
   instructions: '',
   filter: 'all',
+  customFields: [],
+  isSchemaModified: false,
 
   toggleTheme: () =>
     set((state) => {
@@ -43,8 +48,10 @@ export const useUiStore = create<UiState>((set) => ({
       return { theme };
     }),
 
-  setMode: (mode) => set({ mode }),
-  setPreset: (preset) => set({ preset }),
+  setPreset: (preset) => set({ preset, customFields: [], isSchemaModified: false }),
   setInstructions: (instructions) => set({ instructions }),
   setFilter: (filter) => set({ filter }),
+  // Editing a field implicitly switches the submit path to custom schema (D-F06).
+  setCustomFields: (fields) => set({ customFields: fields, isSchemaModified: true }),
+  resetToPreset: (fields) => set({ customFields: fields, isSchemaModified: false }),
 }));

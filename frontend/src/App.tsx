@@ -16,12 +16,12 @@ const queryClient = new QueryClient();
 
 function AppShell() {
   const { t } = useTranslation();
-  const { preset, instructions, filter } = useUiStore();
+  const { preset, instructions, filter, customFields, isSchemaModified } = useUiStore();
   const [staged, setStaged] = useState<StagedText[]>([]);
   const { mutate, data: sources = [], isPending, error } = useBatchExtract();
 
-  function handleAdd(text: string) {
-    setStaged((prev) => [...prev, { id: crypto.randomUUID(), text }]);
+  function handleAdd(name: string, text: string) {
+    setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text }]);
   }
 
   function handleRemove(id: string) {
@@ -29,8 +29,22 @@ function AppShell() {
   }
 
   function handleStart() {
+    const target = isSchemaModified
+      ? {
+          schema: {
+            fields: Object.fromEntries(
+              customFields.map((f) => [f.name, { type: f.type, description: f.description }]),
+            ),
+          },
+        }
+      : { preset };
+
     mutate(
-      { texts: staged.map((item) => item.text), preset, instructions: instructions || undefined },
+      {
+        texts: staged.map((item) => item.text),
+        ...target,
+        instructions: instructions || undefined,
+      },
       { onSuccess: () => setStaged([]) },
     );
   }

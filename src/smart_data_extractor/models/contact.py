@@ -15,22 +15,22 @@ class Contact(ConfidenceBase):
     Invalid formats are set to None with confidence 0.0.
     """
     
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, description="Full name of the contact person")
     name_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     
-    email: Optional[str] = None
+    email: Optional[str] = Field(default=None, description="Email address of the contact")
     email_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     
-    phone: Optional[str] = None
+    phone: Optional[str] = Field(default=None, description="Phone number of the contact")
     phone_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     
-    company: Optional[str] = None
+    company: Optional[str] = Field(default=None, description="Company or organization name")
     company_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     
-    job_title: Optional[str] = None
+    job_title: Optional[str] = Field(default=None, description="Job title or position of the contact")
     job_title_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     
-    website: Optional[str] = None
+    website: Optional[str] = Field(default=None, description="Company or personal website URL")
     website_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     
     @field_validator("email")
