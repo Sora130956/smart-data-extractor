@@ -15,9 +15,15 @@ from smart_data_extractor.api.schemas import (
     ExtractRequest,
     ExtractResponse,
 )
+from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction import batch_extract, extract_data
 
 router = APIRouter()
+
+
+def _to_cny(usd: float) -> float:
+    """Convert a USD cost to CNY for display (approximate static rate)."""
+    return round(usd * get_settings().usd_to_cny, 6)
 
 
 def get_extract_fn() -> Callable[..., Any]:
@@ -41,9 +47,10 @@ async def extract(
     fn: Callable[..., Any] = Depends(get_extract_fn),
 ) -> dict:
     try:
-        return await fn(req.text, req.preset, req.schema_, instructions=req.instructions)
+        result = await fn(req.text, req.preset, req.schema_, instructions=req.instructions)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 
 
 @router.post("/batch_extract", response_model=BatchExtractResponse)
@@ -64,10 +71,13 @@ async def batch(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     items = result["results"]
+    for item in items:
+        item["cost_cny"] = _to_cny(item["cost_usd"])
     failed = sum(1 for i in items if i["error"] is not None)
     return BatchExtractResponse(
         results=items,
         total_cost_usd=result["total_cost_usd"],
+        total_cost_cny=round(sum(i["cost_cny"] for i in items), 6),
         total_tokens=result["total_tokens"],
         succeeded=len(items) - failed,
         failed=failed,

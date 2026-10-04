@@ -13,7 +13,8 @@ from smart_data_extractor.api.routes import get_batch_fn, get_extract_fn
 
 
 @pytest.fixture
-def app():
+def app(fake_openai_env):
+    # fake_openai_env: routes read settings for the USD->CNY display rate.
     app = create_app()
     yield app
     app.dependency_overrides.clear()
@@ -114,6 +115,8 @@ async def test_extract_happy_path(app, client):
     assert body["data"] == {"name": "John Smith"}
     assert body["tokens_used"] == {"input": len("John Smith"), "output": 1}
     assert body["cost_usd"] == 0.001
+    # CNY is derived at the transport layer from the configured rate.
+    assert body["cost_cny"] == pytest.approx(0.001 * 7.25)
     # The route forwards request fields to the extraction layer unchanged.
     assert calls == [
         {"text": "John Smith", "preset": "contact", "schema_dict": None, "instructions": "be strict"}
@@ -188,6 +191,9 @@ async def test_batch_partial_failure_contract(app, client):
     assert body["succeeded"] == 2
     assert body["failed"] == 1
     assert body["total_cost_usd"] == pytest.approx(0.002)
+    assert ok1["cost_cny"] == pytest.approx(0.001 * 7.25)
+    assert err["cost_cny"] == 0.0
+    assert body["total_cost_cny"] == pytest.approx(0.002 * 7.25)
     assert body["total_tokens"]["input"] == len("good one") + len("good two")
     # The API always opts into per-item tolerance and forwards instructions.
     assert calls[0]["return_exceptions"] is True

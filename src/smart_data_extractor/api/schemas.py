@@ -61,6 +61,7 @@ class ExtractResponse(BaseModel):
     data: dict[str, Any]
     tokens_used: TokensUsed
     cost_usd: float
+    cost_cny: float
 
 
 class BatchResultItem(BaseModel):
@@ -70,12 +71,14 @@ class BatchResultItem(BaseModel):
     data: dict[str, Any] | None
     tokens_used: TokensUsed
     cost_usd: float
+    cost_cny: float
     error: str | None
 
 
 class BatchExtractResponse(BaseModel):
     results: list[BatchResultItem]
     total_cost_usd: float
+    total_cost_cny: float
     total_tokens: TokensUsed
     succeeded: int
     failed: int

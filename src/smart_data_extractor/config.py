@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     openai_api_key: str
     model: str = "openai:gpt-4o-mini"
     max_concurrency: int = 5
+    # Display-currency conversion (approximate static rate, override via env).
+    usd_to_cny: float = 7.25
     
     model_config = SettingsConfigDict(
         env_file=".env",
