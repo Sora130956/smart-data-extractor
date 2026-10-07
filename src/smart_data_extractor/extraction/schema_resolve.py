@@ -83,7 +83,7 @@ async def resolve_schema(
     missing_indices = [i for i, f in enumerate(fields) if f.get("field_name") is None]
     known_names = {f["field_name"] for f in fields if f.get("field_name") is not None}
 
-    generated: dict[int, str] = {}
+    generated: dict[int, _FieldNameItem] = {}
     tokens = {"input": 0, "output": 0}
     cost_usd = 0.0
 
