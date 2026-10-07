@@ -68,6 +68,7 @@ describe('adaptBatchExtractResponse', () => {
       failed: 1,
       totalCostUsd: 0, totalCostCny: 0,
       avgConfidence: 0,
+      schemaResolveCostUsd: 0, schemaResolveCostCny: 0,
     });
   });
 
@@ -101,6 +102,39 @@ describe('adaptBatchExtractResponse', () => {
     expect(sources[1].id).toBe('text-1');
     expect(sources[1].name).toBe('Manual Input 2');
     expect(sources[1].results[0].status).toBe('failed');
+  });
+
+  it('attributes the schema resolve cost to the first source only', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1, a_confidence: 0.9 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0.0001, cost_cny: 0.000725,
+          error: null,
+        },
+        {
+          data: { b: 2, b_confidence: 0.8 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0.0001, cost_cny: 0.000725,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0.0002, total_cost_cny: 0.00145,
+      total_tokens: { input: 2, output: 2 },
+      succeeded: 2,
+      failed: 0,
+    };
+
+    const sources = adaptBatchExtractResponse(response, ['first', 'second'], {
+      costUsd: 0.0005,
+      costCny: 0.0036,
+    });
+
+    expect(sources[0].stats.schemaResolveCostUsd).toBe(0.0005);
+    expect(sources[0].stats.schemaResolveCostCny).toBe(0.0036);
+    expect(sources[1].stats.schemaResolveCostUsd).toBe(0);
+    expect(sources[1].stats.schemaResolveCostCny).toBe(0);
   });
 
   it('truncates the source meta preview and collapses whitespace', () => {

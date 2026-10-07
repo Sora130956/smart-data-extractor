@@ -38,13 +38,22 @@ export interface ExtractionSource {
     totalCostUsd: number;
     totalCostCny: number;
     avgConfidence: number;
+    /** LLM cost of resolving custom field names for this submission, if any. */
+    schemaResolveCostUsd: number;
+    schemaResolveCostCny: number;
   };
 }
 
 export interface SchemaField {
-  name: string;
+  /** User-facing label, shown/edited in the SchemaEditor. */
+  displayName: string;
+  /** Real LLM schema key; null until /schema/resolve assigns one. */
+  fieldName: string | null;
   type: 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'array' | 'object';
   description: string;
+  /** Preset fields only: baseline for the needsResolve diff. */
+  originalDisplayName?: string;
+  originalDescription?: string;
 }
 
 export type PresetId = 'contact' | 'invoice' | 'lead';

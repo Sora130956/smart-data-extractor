@@ -45,7 +45,7 @@ export function SchemaEditor() {
   }
 
   function addField() {
-    setCustomFields([...customFields, { name: '', type: 'string', description: '' }]);
+    setCustomFields([...customFields, { displayName: '', fieldName: null, type: 'string', description: '' }]);
   }
 
   function handleReset() {
@@ -83,8 +83,8 @@ export function SchemaEditor() {
             <input
               aria-label={t('schema.fieldName')}
               className={`${cellClass} w-[140px] flex-none`}
-              value={field.name}
-              onChange={(e) => updateField(i, { name: e.target.value })}
+              value={field.displayName}
+              onChange={(e) => updateField(i, { displayName: e.target.value })}
             />
             <select
               aria-label={t('schema.fieldType')}
@@ -106,7 +106,7 @@ export function SchemaEditor() {
             />
             <button
               type="button"
-              aria-label={`${t('schema.removeField')} ${field.name || i + 1}`}
+              aria-label={`${t('schema.removeField')} ${field.displayName || i + 1}`}
               onClick={() => removeField(i)}
               className="flex-none rounded-token px-1 text-caption text-text-muted hover:text-error"
             >

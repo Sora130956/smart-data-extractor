@@ -4,8 +4,10 @@
 import {
   batchExtractResponseSchema,
   presetSchemaResponseSchema,
+  schemaResolveResponseSchema,
   type BatchExtractResponse,
   type PresetSchemaResponse,
+  type SchemaResolveResponse,
 } from './schemas';
 
 export class ApiError extends Error {
@@ -59,4 +61,29 @@ export async function getPresetSchema(preset: string): Promise<PresetSchemaRespo
   }
 
   return presetSchemaResponseSchema.parse(await res.json());
+}
+
+export interface SchemaResolveFieldParams {
+  display_name: string;
+  description: string;
+  type: string;
+  required?: boolean;
+  field_name?: string;
+}
+
+export async function resolveSchema(
+  fields: SchemaResolveFieldParams[],
+): Promise<SchemaResolveResponse> {
+  const res = await fetch('/api/schema/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new ApiError(detail || res.statusText, res.status);
+  }
+
+  return schemaResolveResponseSchema.parse(await res.json());
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, batchExtract, getPresetSchema } from './client';
+import { ApiError, batchExtract, getPresetSchema, resolveSchema } from './client';
 
 describe('batchExtract', () => {
   afterEach(() => {
@@ -141,5 +141,51 @@ describe('getPresetSchema', () => {
       status: 404,
       message: 'Unknown preset',
     });
+  });
+});
+
+describe('resolveSchema', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('posts fields and parses a successful response', async () => {
+    const payload = {
+      schema: { fields: { company_name: { type: 'string', description: 'Full name', required: true } } },
+      tokens_used: { input: 50, output: 20 },
+      cost_usd: 0.0001,
+      cost_cny: 0.000725,
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const fields = [{ display_name: 'Company Name', description: 'Full name', type: 'string' }];
+    const result = await resolveSchema(fields);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/schema/resolve',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ fields }),
+      }),
+    );
+    expect(result.schema.fields.company_name.type).toBe('string');
+  });
+
+  it('throws ApiError on a non-ok response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      statusText: 'Unprocessable Entity',
+      text: async () => 'duplicate field name',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      resolveSchema([{ display_name: 'X', description: '', type: 'string' }]),
+    ).rejects.toMatchObject({ status: 422, message: 'duplicate field name' });
   });
 });

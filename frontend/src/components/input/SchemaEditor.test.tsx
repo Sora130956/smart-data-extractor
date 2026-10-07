@@ -59,7 +59,9 @@ describe('SchemaEditor', () => {
     render(<SchemaEditor />, { wrapper });
 
     await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
-    useUiStore.getState().setCustomFields([{ name: 'custom', type: 'string', description: '' }]);
+    useUiStore
+      .getState()
+      .setCustomFields([{ displayName: 'custom', fieldName: null, type: 'string', description: '' }]);
 
     await waitFor(() => expect(screen.getByText('Modified')).toBeInTheDocument());
 

@@ -22,7 +22,10 @@ const source: ExtractionSource = {
       costUsd: 0.0002, costCny: 0.00145,
     },
   ],
-  stats: { succeeded: 1, failed: 0, totalCostUsd: 0.0002, totalCostCny: 0.00145, avgConfidence: 0.9 },
+  stats: {
+    succeeded: 1, failed: 0, totalCostUsd: 0.0002, totalCostCny: 0.00145, avgConfidence: 0.9,
+    schemaResolveCostUsd: 0, schemaResolveCostCny: 0,
+  },
 };
 
 const mixedSource: ExtractionSource = {
@@ -44,7 +47,10 @@ const mixedSource: ExtractionSource = {
       error: 'unable to parse scanned page',
     },
   ],
-  stats: { succeeded: 0, failed: 1, totalCostUsd: 0, totalCostCny: 0, avgConfidence: 0 },
+  stats: {
+    succeeded: 0, failed: 1, totalCostUsd: 0, totalCostCny: 0, avgConfidence: 0,
+    schemaResolveCostUsd: 0, schemaResolveCostCny: 0,
+  },
 };
 
 describe('SourceGroup', () => {

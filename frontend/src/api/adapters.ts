@@ -55,11 +55,15 @@ function toResult(item: BatchResultItem, sourceId: string): ExtractionResult {
 export function adaptBatchExtractResponse(
   response: BatchExtractResponse,
   texts: string[],
+  schemaResolveCost?: { costUsd: number; costCny: number },
 ): ExtractionSource[] {
   return response.results.map((item, i) => {
     const sourceId = `text-${i}`;
     const result = toResult(item, sourceId);
     const preview = (texts[i] ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    // Attribute the one-off /schema/resolve cost to the first source only,
+    // so it is counted once in the aggregate totals rather than duplicated.
+    const isFirst = i === 0;
 
     return {
       id: sourceId,
@@ -75,6 +79,8 @@ export function adaptBatchExtractResponse(
         totalCostUsd: result.costUsd,
         totalCostCny: result.costCny,
         avgConfidence: result.avgConfidence,
+        schemaResolveCostUsd: isFirst ? schemaResolveCost?.costUsd ?? 0 : 0,
+        schemaResolveCostCny: isFirst ? schemaResolveCost?.costCny ?? 0 : 0,
       },
     };
   });

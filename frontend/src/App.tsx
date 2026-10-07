@@ -8,16 +8,31 @@ import { ConfigBar } from '@/components/input/ConfigBar';
 import { ResultsHeader, type FilterCounts } from '@/components/results/ResultsHeader';
 import { EmptyState } from '@/components/results/EmptyState';
 import { SourceGroup } from '@/components/results/SourceGroup';
+import { resolveSchema, type SchemaResolveFieldParams } from '@/api/client';
 import { useBatchExtract } from '@/hooks/useBatchExtract';
 import { useUiStore } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
+import type { SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
+
+/** §5.3: a field needs /schema/resolve when its name is unknown, or when a
+ * preset field's display name/description has diverged from its baseline. */
+function needsResolve(field: SchemaField): boolean {
+  return (
+    field.fieldName === null ||
+    (field.originalDisplayName !== undefined &&
+      (field.displayName !== field.originalDisplayName ||
+        field.description !== field.originalDescription))
+  );
+}
 
 function AppShell() {
   const { t } = useTranslation();
   const { preset, instructions, filter, customFields, isSchemaModified } = useUiStore();
   const [staged, setStaged] = useState<StagedText[]>([]);
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const { mutate, data: sources = [], isPending, error } = useBatchExtract();
 
   function handleAdd(name: string, text: string) {
@@ -28,26 +43,50 @@ function AppShell() {
     setStaged((prev) => prev.filter((item) => item.id !== id));
   }
 
-  function handleStart() {
-    const target = isSchemaModified
-      ? {
-          schema: {
-            fields: Object.fromEntries(
-              customFields.map((f) => [f.name, { type: f.type, description: f.description }]),
-            ),
-          },
-        }
-      : { preset };
+  async function handleStart() {
+    setResolveError(null);
+
+    let target: { schema: Record<string, unknown> } | { preset: string };
+    let schemaResolveCost: { costUsd: number; costCny: number } | undefined;
+
+    if (isSchemaModified) {
+      const fields: SchemaResolveFieldParams[] = customFields.map((f) => {
+        const field: SchemaResolveFieldParams = {
+          display_name: f.displayName,
+          description: f.description,
+          type: f.type,
+        };
+        if (!needsResolve(f) && f.fieldName) field.field_name = f.fieldName;
+        return field;
+      });
+
+      setIsResolving(true);
+      try {
+        const resolved = await resolveSchema(fields);
+        target = { schema: resolved.schema };
+        schemaResolveCost = { costUsd: resolved.cost_usd, costCny: resolved.cost_cny };
+      } catch (err) {
+        setResolveError(err instanceof Error ? err.message : String(err));
+        return;
+      } finally {
+        setIsResolving(false);
+      }
+    } else {
+      target = { preset };
+    }
 
     mutate(
       {
         texts: staged.map((item) => item.text),
         ...target,
         instructions: instructions || undefined,
+        schemaResolveCost,
       },
       { onSuccess: () => setStaged([]) },
     );
   }
+
+  const requestErrorMessage = resolveError ?? error?.message;
 
   const stats: BatchStats = useMemo(() => {
     if (sources.length === 0) {
@@ -65,8 +104,8 @@ function AppShell() {
         confidences.length > 0
           ? confidences.reduce((sum, v) => sum + v, 0) / confidences.length
           : null,
-      totalCostUsd: sources.reduce((sum, s) => sum + s.stats.totalCostUsd, 0),
-      totalCostCny: sources.reduce((sum, s) => sum + s.stats.totalCostCny, 0),
+      totalCostUsd: sources.reduce((sum, s) => sum + s.stats.totalCostUsd + s.stats.schemaResolveCostUsd, 0),
+      totalCostCny: sources.reduce((sum, s) => sum + s.stats.totalCostCny + s.stats.schemaResolveCostCny, 0),
     };
   }, [sources]);
 
@@ -108,14 +147,14 @@ function AppShell() {
           <PasteTextInput staged={staged} onAdd={handleAdd} onRemove={handleRemove} />
           <ConfigBar
             canStart={staged.length > 0}
-            isLoading={isPending}
+            isLoading={isPending || isResolving}
             onStart={handleStart}
           />
         </section>
 
-        {error ? (
+        {requestErrorMessage ? (
           <div className="mx-5 mt-4 rounded-card border border-error bg-error/10 px-3.5 py-2.5 text-caption text-error">
-            {t('config.requestError', { message: error.message })}
+            {t('config.requestError', { message: requestErrorMessage })}
           </div>
         ) : null}
 

@@ -36,8 +36,24 @@ export const presetSchemaResponseSchema = z.object({
   fields: z.array(presetFieldSchema),
 });
 
+export const schemaFieldSpecSchema = z.object({
+  type: z.string(),
+  description: z.string().nullable(),
+  required: z.boolean(),
+});
+
+export const schemaResolveResponseSchema = z.object({
+  schema: z.object({
+    fields: z.record(z.string(), schemaFieldSpecSchema),
+  }),
+  tokens_used: tokensUsedSchema,
+  cost_usd: z.number(),
+  cost_cny: z.number(),
+});
+
 export type TokensUsed = z.infer<typeof tokensUsedSchema>;
 export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
 export type BatchExtractResponse = z.infer<typeof batchExtractResponseSchema>;
 export type PresetFieldDto = z.infer<typeof presetFieldSchema>;
 export type PresetSchemaResponse = z.infer<typeof presetSchemaResponseSchema>;
+export type SchemaResolveResponse = z.infer<typeof schemaResolveResponseSchema>;

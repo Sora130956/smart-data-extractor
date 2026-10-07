@@ -11,13 +11,15 @@ export interface BatchExtractInput {
   preset?: string;
   schema?: Record<string, unknown>;
   instructions?: string;
+  /** Cost of the /schema/resolve call that produced `schema`, if any. */
+  schemaResolveCost?: { costUsd: number; costCny: number };
 }
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions }) => {
+    mutationFn: async ({ texts, preset, schema, instructions, schemaResolveCost }) => {
       const response = await batchExtract({ texts, preset, schema, instructions });
-      return adaptBatchExtractResponse(response, texts);
+      return adaptBatchExtractResponse(response, texts, schemaResolveCost);
     },
   });
 }

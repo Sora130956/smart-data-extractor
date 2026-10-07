@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { batchExtractResponseSchema, presetSchemaResponseSchema } from './schemas';
+import {
+  batchExtractResponseSchema,
+  presetSchemaResponseSchema,
+  schemaResolveResponseSchema,
+} from './schemas';
 
 describe('batchExtractResponseSchema', () => {
   it('parses a response with a mix of succeeded and failed items', () => {
@@ -84,5 +88,29 @@ describe('presetSchemaResponseSchema', () => {
     const payload = { fields: [{ name: 'name', description: 'Full name' }] };
 
     expect(() => presetSchemaResponseSchema.parse(payload)).toThrow();
+  });
+});
+
+describe('schemaResolveResponseSchema', () => {
+  it('parses a resolved schema with a map of generated field names', () => {
+    const payload = {
+      schema: {
+        fields: {
+          company_name: { type: 'string', description: 'Full name', required: true },
+        },
+      },
+      tokens_used: { input: 50, output: 20 },
+      cost_usd: 0.0001,
+      cost_cny: 0.000725,
+    };
+
+    const parsed = schemaResolveResponseSchema.parse(payload);
+    expect(parsed.schema.fields.company_name.required).toBe(true);
+  });
+
+  it('rejects a payload missing the schema key', () => {
+    const payload = { tokens_used: { input: 0, output: 0 }, cost_usd: 0, cost_cny: 0 };
+
+    expect(() => schemaResolveResponseSchema.parse(payload)).toThrow();
   });
 });

@@ -11,9 +11,12 @@ export function usePresetSchema(preset: string) {
     queryFn: async () => {
       const response = await getPresetSchema(preset);
       return response.fields.map((f) => ({
-        name: f.name,
+        displayName: f.name,
+        fieldName: f.name,
         type: f.type as SchemaField['type'],
         description: f.description ?? '',
+        originalDisplayName: f.name,
+        originalDescription: f.description ?? '',
       }));
     },
   });
