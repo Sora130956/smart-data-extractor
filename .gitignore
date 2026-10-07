@@ -69,3 +69,6 @@ docs/study/
 node_modules/
 .vite/
 *.tsbuildinfo
+
+# SQLite 数据库文件
+*.db
