@@ -47,6 +47,29 @@ describe('useBatchExtract', () => {
     expect(result.current.data?.[0].results[0].confidence).toEqual({ name: 0.9 });
   });
 
+  it('forwards lang into the request body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [],
+        total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
+        total_tokens: { input: 0, output: 0 },
+        succeeded: 0,
+        failed: 0,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useBatchExtract(), { wrapper });
+
+    result.current.mutate({ texts: ['你好'], preset: 'contact', lang: 'zh' });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.lang).toBe('zh');
+  });
+
   it('surfaces an error on a failed request', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

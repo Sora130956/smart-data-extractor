@@ -27,6 +27,8 @@ export interface BatchExtractParams {
   preset?: string;
   schema?: Record<string, unknown>;
   instructions?: string;
+  /** UI language tag: preset field descriptions sent to the LLM follow it. */
+  lang?: string;
 }
 
 export async function batchExtract(
@@ -39,6 +41,7 @@ export async function batchExtract(
     body.preset = params.preset;
   }
   if (params.instructions) body.instructions = params.instructions;
+  if (params.lang) body.lang = params.lang;
 
   const res = await fetch('/api/batch_extract', {
     method: 'POST',

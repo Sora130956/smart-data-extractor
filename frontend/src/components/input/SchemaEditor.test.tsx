@@ -24,7 +24,8 @@ function stubPresetSchemaFetch() {
           display_name_en: 'Name',
           type: 'string',
           format: null,
-          description: 'Full name',
+          description_zh: '联系人全名',
+          description_en: 'Full name of the contact person',
         },
         {
           field_name: 'email',
@@ -32,7 +33,8 @@ function stubPresetSchemaFetch() {
           display_name_en: 'Email',
           type: 'string',
           format: null,
-          description: null,
+          description_zh: null,
+          description_en: 'Email address of the contact',
         },
       ],
     }),
@@ -55,6 +57,9 @@ describe('SchemaEditor', () => {
     await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
     expect(screen.getByDisplayValue('Name')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Email')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Full name of the contact person')).toBeInTheDocument();
+    // description_zh missing -> falls back to the English column.
+    expect(screen.getByDisplayValue('Email address of the contact')).toBeInTheDocument();
   });
 
   it('marks the schema as modified after editing a field', async () => {
@@ -95,6 +100,9 @@ describe('SchemaEditor', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('姓名')).toBeInTheDocument());
     expect(screen.getByDisplayValue('邮箱')).toBeInTheDocument();
+    // Descriptions localize too: zh column first, English fallback.
+    expect(screen.getByDisplayValue('联系人全名')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Email address of the contact')).toBeInTheDocument();
   });
 
   it('keeps user edits instead of reseeding when the language changes', async () => {

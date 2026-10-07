@@ -28,7 +28,7 @@ function needsResolve(field: SchemaField): boolean {
 }
 
 function AppShell() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { preset, instructions, filter, customFields, isSchemaModified } = useUiStore();
   const [staged, setStaged] = useState<StagedText[]>([]);
   const [isResolving, setIsResolving] = useState(false);
@@ -80,6 +80,8 @@ function AppShell() {
         texts: staged.map((item) => item.text),
         ...target,
         instructions: instructions || undefined,
+        // UI language: preset field descriptions sent to the LLM follow it.
+        lang: i18n.resolvedLanguage ?? undefined,
         schemaResolveCost,
       },
       { onSuccess: () => setStaged([]) },

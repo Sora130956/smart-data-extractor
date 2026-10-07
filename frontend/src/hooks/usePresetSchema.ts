@@ -17,15 +17,22 @@ export function usePresetSchema(preset: string) {
     queryKey: ['preset-schema', preset, lang],
     queryFn: async () => {
       const response = await getPresetSchema(preset);
-      return response.fields.map((f) => ({
-        displayName: isZh ? f.display_name_zh : f.display_name_en,
-        displayNameEn: f.display_name_en,
-        fieldName: f.field_name,
-        type: f.type as SchemaField['type'],
-        description: f.description ?? '',
-        originalDisplayName: isZh ? f.display_name_zh : f.display_name_en,
-        originalDescription: f.description ?? '',
-      }));
+      return response.fields.map((f) => {
+        // Pick the description column by UI language, falling back to the
+        // other column (user-defined single-language fields behave the same).
+        const description = (isZh
+          ? f.description_zh ?? f.description_en
+          : f.description_en ?? f.description_zh) ?? '';
+        return {
+          displayName: isZh ? f.display_name_zh : f.display_name_en,
+          displayNameEn: f.display_name_en,
+          fieldName: f.field_name,
+          type: f.type as SchemaField['type'],
+          description,
+          originalDisplayName: isZh ? f.display_name_zh : f.display_name_en,
+          originalDescription: description,
+        };
+      });
     },
   });
 }

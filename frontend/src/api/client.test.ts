@@ -62,6 +62,29 @@ describe('batchExtract', () => {
     });
   });
 
+  it('includes lang only when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [],
+        total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
+        total_tokens: { input: 0, output: 0 },
+        succeeded: 0,
+        failed: 0,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await batchExtract({ texts: ['a'], preset: 'invoice', lang: 'zh' });
+    await batchExtract({ texts: ['b'], preset: 'invoice' });
+
+    const withLang = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const withoutLang = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(withLang).toEqual({ texts: ['a'], preset: 'invoice', lang: 'zh' });
+    expect(withoutLang).toEqual({ texts: ['b'], preset: 'invoice' });
+    expect('lang' in withoutLang).toBe(false);
+  });
+
   it('throws ApiError with status on a non-ok response', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -154,7 +177,8 @@ describe('getPresetSchema', () => {
           display_name_en: 'Name',
           type: 'string',
           format: null,
-          description: 'Full name',
+          description_zh: '联系人全名',
+          description_en: 'Full name of the contact person',
         },
         {
           field_name: 'email',
@@ -162,7 +186,8 @@ describe('getPresetSchema', () => {
           display_name_en: 'Email',
           type: 'string',
           format: null,
-          description: null,
+          description_zh: null,
+          description_en: null,
         },
       ],
     };
@@ -177,6 +202,7 @@ describe('getPresetSchema', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/presets/contact/schema');
     expect(result.fields).toHaveLength(2);
     expect(result.fields[0].field_name).toBe('name');
+    expect(result.fields[0].description_zh).toBe('联系人全名');
   });
 
   it('throws ApiError on a non-ok response', async () => {

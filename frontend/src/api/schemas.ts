@@ -32,7 +32,8 @@ export const presetFieldSchema = z.object({
   display_name_en: z.string(),
   type: z.string(),
   format: z.string().nullable(),
-  description: z.string().nullable(),
+  description_zh: z.string().nullable(),
+  description_en: z.string().nullable(),
 });
 
 export const presetSchemaResponseSchema = z.object({

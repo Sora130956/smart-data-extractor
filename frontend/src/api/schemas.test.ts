@@ -72,7 +72,39 @@ describe('batchExtractResponseSchema', () => {
 });
 
 describe('presetSchemaResponseSchema', () => {
-  it('parses a list of fields with nullable descriptions', () => {
+  it('parses a list of fields with bilingual descriptions', () => {
+    const payload = {
+      fields: [
+        {
+          field_name: 'name',
+          display_name_zh: '姓名',
+          display_name_en: 'Name',
+          type: 'string',
+          format: null,
+          description_zh: '联系人全名',
+          description_en: 'Full name of the contact person',
+        },
+        {
+          field_name: 'email',
+          display_name_zh: '邮箱',
+          display_name_en: 'Email',
+          type: 'string',
+          format: null,
+          description_zh: null,
+          description_en: 'Email address of the contact',
+        },
+      ],
+    };
+
+    const parsed = presetSchemaResponseSchema.parse(payload);
+    expect(parsed.fields).toHaveLength(2);
+    expect(parsed.fields[0].field_name).toBe('name');
+    expect(parsed.fields[0].description_zh).toBe('联系人全名');
+    expect(parsed.fields[1].description_zh).toBeNull();
+    expect(parsed.fields[1].description_en).toBe('Email address of the contact');
+  });
+
+  it('rejects the legacy single-description shape', () => {
     const payload = {
       fields: [
         {
@@ -83,21 +115,10 @@ describe('presetSchemaResponseSchema', () => {
           format: null,
           description: 'Full name',
         },
-        {
-          field_name: 'email',
-          display_name_zh: '邮箱',
-          display_name_en: 'Email',
-          type: 'string',
-          format: null,
-          description: null,
-        },
       ],
     };
 
-    const parsed = presetSchemaResponseSchema.parse(payload);
-    expect(parsed.fields).toHaveLength(2);
-    expect(parsed.fields[0].field_name).toBe('name');
-    expect(parsed.fields[1].description).toBeNull();
+    expect(() => presetSchemaResponseSchema.parse(payload)).toThrow();
   });
 
   it('rejects a field missing the type key', () => {
@@ -108,7 +129,8 @@ describe('presetSchemaResponseSchema', () => {
           display_name_zh: '姓名',
           display_name_en: 'Name',
           format: null,
-          description: 'Full name',
+          description_zh: '联系人全名',
+          description_en: 'Full name',
         },
       ],
     };
