@@ -1,22 +1,20 @@
-"""Preset dataclass: binds a Pydantic model to an extraction prompt."""
+"""Preset dataclass: binds a database-backed schema to an extraction prompt."""
 
 from dataclasses import dataclass
-from typing import Type
-
-from pydantic import BaseModel
+from typing import Any
 
 
 @dataclass(frozen=True)
 class Preset:
-    """A predefined extraction scenario.
+    """A predefined extraction scenario loaded from the database.
 
     Attributes:
-        name: Registry key, e.g. "contact".
-        model_class: The Pydantic model used as Agent output_type.
+        name: Schema id, e.g. "contact".
         prompt_template: System instructions telling the LLM what to extract
             and how to score confidence.
+        schema_dict: Field specs ready for ``create_dynamic_model``.
     """
 
     name: str
-    model_class: Type[BaseModel]
     prompt_template: str
+    schema_dict: dict[str, Any]
