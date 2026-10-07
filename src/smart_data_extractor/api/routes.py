@@ -14,13 +14,14 @@ from smart_data_extractor.api.schemas import (
     BatchExtractResponse,
     ExtractRequest,
     ExtractResponse,
+    PresetListItem,
     PresetSchemaResponse,
     SchemaResolveRequest,
     SchemaResolveResponse,
 )
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction import batch_extract, extract_data, resolve_schema
-from smart_data_extractor.presets import get_preset_fields
+from smart_data_extractor.presets import get_preset_fields, list_presets
 
 router = APIRouter()
 
@@ -48,6 +49,11 @@ def get_schema_resolve_fn() -> Callable[..., Any]:
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/presets", response_model=list[PresetListItem])
+async def presets_list() -> list[PresetListItem]:
+    return [PresetListItem(**p) for p in list_presets()]
 
 
 @router.get("/presets/{name}/schema", response_model=PresetSchemaResponse)

@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from smart_data_extractor.presets import PRESETS
+from smart_data_extractor.presets import list_presets
 
 
 class _ExtractionTarget(BaseModel):
@@ -26,11 +26,13 @@ class _ExtractionTarget(BaseModel):
     def _check_target(self):
         if (self.preset is None) == (self.schema_ is None):
             raise ValueError("Exactly one of preset or schema must be provided")
-        if self.preset is not None and self.preset not in PRESETS:
-            available = ", ".join(sorted(PRESETS))
-            raise ValueError(
-                f"Unknown preset {self.preset!r}. Available presets: {available}"
-            )
+        if self.preset is not None:
+            known = {p["id"] for p in list_presets()}
+            if self.preset not in known:
+                available = ", ".join(sorted(known))
+                raise ValueError(
+                    f"Unknown preset {self.preset!r}. Available presets: {available}"
+                )
         if self.schema_ is not None:
             # Same dual-shape convention as models.dynamic: with or without
             # a top-level "fields" wrapper. Require each spec to carry "type"
@@ -87,13 +89,25 @@ class BatchExtractResponse(BaseModel):
 class PresetFieldInfo(BaseModel):
     """One field of a preset's extraction schema, for client-side display."""
 
-    name: str
+    field_name: str
+    display_name_zh: str
+    display_name_en: str
     type: str
+    format: str | None = None
     description: str | None = None
 
 
 class PresetSchemaResponse(BaseModel):
     fields: list[PresetFieldInfo]
+
+
+class PresetListItem(BaseModel):
+    """One schema in the master table, for the preset picker."""
+
+    id: str
+    display_name_zh: str
+    display_name_en: str
+    is_builtin: bool
 
 
 class SchemaFieldInput(BaseModel):
@@ -105,6 +119,7 @@ class SchemaFieldInput(BaseModel):
     """
 
     display_name: str
+    display_name_en: str | None = None
     description: str | None = None
     type: str
     required: bool = False

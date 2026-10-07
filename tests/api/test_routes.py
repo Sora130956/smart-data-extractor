@@ -101,7 +101,7 @@ async def test_health(client):
 # --- /extract ---
 
 
-async def test_extract_happy_path(app, client):
+async def test_extract_happy_path(app, client, test_db):
     fake, calls = _make_fake_extract()
     app.dependency_overrides[get_extract_fn] = lambda: fake
 
@@ -156,7 +156,7 @@ async def test_extract_malformed_schema_422(client):
     assert resp.status_code == 422
 
 
-async def test_extract_value_error_becomes_400(app, client):
+async def test_extract_value_error_becomes_400(app, client, test_db):
     fake, _ = _make_fake_extract(fail_with=ValueError("schema exploded"))
     app.dependency_overrides[get_extract_fn] = lambda: fake
 
@@ -169,7 +169,7 @@ async def test_extract_value_error_becomes_400(app, client):
 # --- /batch_extract ---
 
 
-async def test_batch_partial_failure_contract(app, client):
+async def test_batch_partial_failure_contract(app, client, test_db):
     fake, calls = _make_fake_batch()
     app.dependency_overrides[get_batch_fn] = lambda: fake
 
@@ -205,29 +205,41 @@ async def test_batch_empty_texts_422(client):
     assert resp.status_code == 422
 
 
-async def test_preset_schema_returns_fields(client):
+async def test_preset_schema_returns_fields(client, test_db):
     resp = await client.get("/presets/contact/schema")
     assert resp.status_code == 200
     body = resp.json()
-    names = {f["name"] for f in body["fields"]}
+    names = {f["field_name"] for f in body["fields"]}
     assert names == {"name", "email", "phone", "company", "job_title", "website"}
-    # No internal confidence fields leak into the schema view.
-    assert all(not f["name"].endswith("_confidence") for f in body["fields"])
-    email_field = next(f for f in body["fields"] if f["name"] == "email")
+    email_field = next(f for f in body["fields"] if f["field_name"] == "email")
     assert email_field["type"] == "string"
+    assert email_field["format"] == "email"
+    assert email_field["display_name_zh"] == "邮箱"
+    assert email_field["display_name_en"] == "Email"
     assert email_field["description"]
 
 
-async def test_preset_schema_invoice_has_array_and_date_types(client):
+async def test_preset_schema_invoice_has_date_type_no_line_items(client, test_db):
     resp = await client.get("/presets/invoice/schema")
     assert resp.status_code == 200
-    fields = {f["name"]: f for f in resp.json()["fields"]}
+    fields = {f["field_name"]: f for f in resp.json()["fields"]}
+    assert "line_items" not in fields
     assert fields["date"]["type"] == "date"
     assert fields["total"]["type"] == "number"
-    assert fields["line_items"]["type"] == "array"
 
 
-async def test_preset_schema_unknown_preset_404(client):
+async def test_list_presets_returns_builtins(client, test_db):
+    resp = await client.get("/presets")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_id = {p["id"]: p for p in body}
+    assert set(by_id) == {"contact", "invoice", "lead"}
+    assert by_id["contact"]["display_name_zh"] == "联系人"
+    assert by_id["contact"]["display_name_en"] == "Contact"
+    assert by_id["contact"]["is_builtin"] is True
+
+
+async def test_preset_schema_unknown_preset_404(client, test_db):
     resp = await client.get("/presets/unknown-preset/schema")
     assert resp.status_code == 404
 
@@ -270,6 +282,7 @@ async def test_schema_resolve_happy_path(app, client):
     assert calls[0] == [
         {
             "display_name": "紧急程度",
+            "display_name_en": None,
             "description": "d",
             "type": "string",
             "required": False,
