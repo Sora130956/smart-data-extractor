@@ -24,6 +24,7 @@ async def batch_extract(
     model: Any = None,
     instructions: str | None = None,
     return_exceptions: bool = False,
+    lang: str | None = None,
 ) -> dict:
     """Extract structured data from multiple texts concurrently.
 
@@ -42,6 +43,8 @@ async def batch_extract(
             "cost_usd": 0.0, "error": "<ExcType>: <msg>"}`` and successful
             items carry ``"error": None``; aggregates then count successes
             only (failures contribute zero).
+        lang: UI language tag, forwarded to every extract_data call so
+            preset field descriptions follow the caller's locale.
 
     Returns:
         {"results": [extract_data-result per text, in input order],
@@ -59,7 +62,8 @@ async def batch_extract(
     async def _run(text: str) -> dict:
         try:
             r = await extract_data(
-                text, preset, schema_dict, model=model, instructions=instructions
+                text, preset, schema_dict, model=model,
+                instructions=instructions, lang=lang
             )
         except Exception as exc:
             if not return_exceptions:

@@ -57,17 +57,19 @@ def shared_concurrency_limiter() -> ConcurrencyLimiter:
 
 
 @lru_cache(maxsize=None)
-def get_preset_agent(preset_name: str, model_ref: str) -> Agent:
+def get_preset_agent(preset_name: str, model_ref: str, lang: str = "en") -> Agent:
     """Cached production agent for a preset.
 
-    Keyed by (preset_name, model_ref); builtin presets are immutable within
-    the process lifetime, so the cache stays safe after the DB migration.
-    Caching reuses the underlying AsyncOpenAI client (connection pooling)
-    and shares the process-wide concurrency limiter.
+    Keyed by (preset_name, model_ref, lang); builtin presets are immutable
+    within the process lifetime, so the cache stays safe after the DB
+    migration — one entry per language, each carrying that language's field
+    descriptions for the LLM. Caching reuses the underlying AsyncOpenAI
+    client (connection pooling) and shares the process-wide concurrency
+    limiter.
     """
     from smart_data_extractor.models import create_dynamic_model
 
-    p = get_preset(preset_name)
+    p = get_preset(preset_name, lang=lang)
     return Agent(
         model_ref,
         output_type=create_dynamic_model(p.schema_dict, model_name=f"Preset_{preset_name}"),

@@ -96,9 +96,10 @@ def _make_fake_extract(fail_on=()):
     calls = []
 
     async def fake_extract(
-        text, preset=None, schema_dict=None, *, model=None, model_ref=None, instructions=None
+        text, preset=None, schema_dict=None, *, model=None, model_ref=None,
+        instructions=None, lang=None
     ):
-        calls.append({"text": text, "instructions": instructions})
+        calls.append({"text": text, "instructions": instructions, "lang": lang})
         if text in fail_on:
             raise RuntimeError(f"boom: {text}")
         return {
@@ -155,3 +156,13 @@ async def test_batch_forwards_instructions(monkeypatch):
     await batch_extract(["a", "b"], preset="contact", instructions="be strict")
 
     assert [c["instructions"] for c in calls] == ["be strict", "be strict"]
+
+
+async def test_batch_forwards_lang(monkeypatch):
+    """lang is forwarded to every extract_data call."""
+    fake, calls = _make_fake_extract()
+    monkeypatch.setattr(batch_module, "extract_data", fake)
+
+    await batch_extract(["a", "b"], preset="contact", lang="zh")
+
+    assert [c["lang"] for c in calls] == ["zh", "zh"]

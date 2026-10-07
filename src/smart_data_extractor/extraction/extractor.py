@@ -72,6 +72,7 @@ async def extract_data(
     model: Any = None,
     model_ref: str | None = None,
     instructions: str | None = None,
+    lang: str | None = None,
 ) -> dict:
     """Extract structured data from a single text.
 
@@ -86,6 +87,8 @@ async def extract_data(
         model_ref: Optional genai-prices ref override for cost tracking.
         instructions: Optional caller instructions, appended after the base
             rules of whichever prompt is in effect (preset or dynamic).
+        lang: UI language tag. On the preset path, field descriptions sent
+            to the LLM follow it (``zh*`` -> Chinese, else English).
 
     Returns:
         {"data": {...}, "tokens_used": {"input": int, "output": int},
@@ -99,10 +102,11 @@ async def extract_data(
         raise ValueError("Exactly one of preset or schema_dict must be provided")
 
     if preset is not None:
-        p = get_preset(preset)
+        effective_lang = lang or "en"
+        p = get_preset(preset, lang=effective_lang)
         if model is None and instructions is None:
             # Production default: cached agent (shared pool + shared limiter)
-            agent = get_preset_agent(p.name, get_settings().model) #NOTE 使用预定义的数据模型，由于prompt、字段什么的都是固定的，所以agent可以缓存
+            agent = get_preset_agent(p.name, get_settings().model, lang=effective_lang) #NOTE 使用预定义的数据模型，由于prompt、字段什么的都是固定的，所以agent可以缓存（lang 进入缓存键，两种语言各一份）
         else:
             # Caller instructions make the agent uncacheable (unbounded key
             # space) -> build fresh; injected models keep the test path.

@@ -24,6 +24,25 @@ def test_get_preset_agent_differs_across_presets(fake_openai_env, test_db):
     assert contact_agent is not invoice_agent
 
 
+def test_get_preset_agent_lang_is_part_of_cache_key(fake_openai_env, test_db):
+    """zh and en get one cached agent each; same lang reuses the instance."""
+    en1 = get_preset_agent("contact", "openai:gpt-4o-mini", lang="en")
+    en2 = get_preset_agent("contact", "openai:gpt-4o-mini", lang="en")
+    zh1 = get_preset_agent("contact", "openai:gpt-4o-mini", lang="zh")
+    zh2 = get_preset_agent("contact", "openai:gpt-4o-mini", lang="zh")
+    assert en1 is en2
+    assert zh1 is zh2
+    assert en1 is not zh1
+
+
+def test_get_preset_agent_zh_uses_chinese_descriptions(fake_openai_env, test_db):
+    """The zh agent's output model describes fields in Chinese (LLM prompt)."""
+    en_schema = get_preset_agent("contact", "openai:gpt-4o-mini", lang="en").output_type.model_json_schema()
+    zh_schema = get_preset_agent("contact", "openai:gpt-4o-mini", lang="zh").output_type.model_json_schema()
+    assert en_schema["properties"]["email"].get("description") == "Email address of the contact"
+    assert zh_schema["properties"]["email"].get("description") == "联系人电子邮箱"
+
+
 def test_cached_agent_sets_zero_temperature(fake_openai_env, test_db):
     """Extraction agents run deterministic: temperature reaches the Agent."""
     agent = get_preset_agent("contact", "openai:gpt-4o-mini")

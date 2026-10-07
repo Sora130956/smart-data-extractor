@@ -6,6 +6,7 @@ import pytest
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+import smart_data_extractor.extraction.extractor as extractor_module
 from smart_data_extractor.extraction import extract_data
 from smart_data_extractor.extraction.extractor import _compose_instructions, _resolve_cost
 
@@ -95,6 +96,58 @@ async def test_extract_accepts_caller_instructions(test_model, test_db):
         instructions="The text may be in German.",
     )
     assert set(result["data"]) == CONTACT_FIELDS
+
+
+async def test_extract_forwards_lang_to_get_preset(test_model, test_db, monkeypatch):
+    """lang reaches the preset lookup, including zh-prefixed locales."""
+    real_get_preset = extractor_module.get_preset
+    calls = []
+
+    def spy(name, lang="en"):
+        calls.append((name, lang))
+        return real_get_preset(name, lang=lang)
+
+    monkeypatch.setattr(extractor_module, "get_preset", spy)
+
+    await extract_data("张三，zhang@acme.cn", preset="contact", model=test_model, lang="zh-CN")
+
+    assert calls == [("contact", "zh-CN")]
+
+
+async def test_extract_defaults_lang_to_english(test_model, test_db, monkeypatch):
+    """Without lang, the preset lookup still gets an explicit "en"."""
+    real_get_preset = extractor_module.get_preset
+    calls = []
+
+    def spy(name, lang="en"):
+        calls.append((name, lang))
+        return real_get_preset(name, lang=lang)
+
+    monkeypatch.setattr(extractor_module, "get_preset", spy)
+
+    await extract_data("Jane Doe, jane@startup.io", preset="contact", model=test_model)
+
+    assert calls == [("contact", "en")]
+
+
+async def test_extract_forwards_lang_to_cached_agent(fake_openai_env, test_db, monkeypatch):
+    """The production cached-agent path keys its agent by the UI language."""
+    calls = []
+
+    def spy(preset_name, model_ref, lang="en"):
+        calls.append((preset_name, lang))
+        # Offline stand-in for the cached production agent (TestModel).
+        p = extractor_module.get_preset(preset_name, lang=lang)
+        output_type = extractor_module.create_dynamic_model(
+            p.schema_dict, model_name=f"Preset_{preset_name}"
+        )
+        return extractor_module.build_agent(output_type, model=TestModel())
+
+    monkeypatch.setattr(extractor_module, "get_preset_agent", spy)
+
+    await extract_data("张三，zhang@acme.cn", preset="contact", lang="zh")
+
+    assert calls == [("contact", "zh")]
 
 
 def test_compose_instructions_appends_caller_section():
