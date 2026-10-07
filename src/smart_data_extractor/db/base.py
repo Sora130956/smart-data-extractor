@@ -1,16 +1,19 @@
 """Engine/session factories and database initialization."""
 
+import os
 from functools import lru_cache
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from smart_data_extractor.config import get_settings
+DEFAULT_DATABASE_URL = "sqlite:///./smart_data_extractor.db"
 
 
 @lru_cache
 def get_engine():
-    url = get_settings().database_url
+    # Read the env var directly instead of get_settings(): the db layer must
+    # work without OPENAI_API_KEY configured (acceptance suite AC-5).
+    url = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
     return create_engine(url, connect_args=connect_args)
 
