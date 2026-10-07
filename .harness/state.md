@@ -188,3 +188,8 @@
 - 决策：batch 固定容错模式（部分结果仍写出，任一失败 exit 1）；退出码 0/1/2 分层对应 API 200/400/422；stdout 只放数据 JSON、stderr 放汇总与错误；入口名沿用 `smart-data-extractor` → `cli:app`
 - 理由：CLI 面向脚本管道消费，数据/诊断必须分流；退出码是脚本判断批处理结果的唯一手段；D-008 已授权自选语义
 - 详见：`.harness/decisions.md`（来源：Phase 5 实现，plan 5.1 的 `extractor` 命令名与之偏差，以本决策为准）
+
+### D-010: preset description 双语化（按 UI 语言取列 + 互为回退）
+- 决策：`schema_fields.description` 拆 `description_zh`/`description_en` 双列；`zh*` 优先 zh 回退 en，否则反之；前端 `i18n.resolvedLanguage` 经 `/extract`、`/batch_extract` 可选 `lang` 透传到 `get_preset`/`get_preset_agent`（lang 进缓存键）；`PresetFieldInfo` 与前端 schema 暴露双语列；`/schema/resolve` 保持单语言
+- 理由：中文界面描述显示英文且发给 LLM 的描述语言不可控；单语言自定义字段与 preset 统一走同一回退规则
+- 详见：`.harness/decisions.md`（commits：a592b66 / fa9dd03 / 1b5732b / 5129618 / fe4a846；后端 168 passed / 2 skipped，前端 typecheck+62 tests+build 全绿）

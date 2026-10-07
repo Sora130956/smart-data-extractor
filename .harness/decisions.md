@@ -216,3 +216,26 @@
   - Phase 8 README/Demo 按 0/1/2 退出码与流分工展示用法
   - plan 5.1 的 `extractor` 命令名与实际 `smart-data-extractor` 存在文档偏差，以本决策为准
   - R-9（batch 双模式形状差异）对 CLI 无影响：CLI 永远走容错模式，结果项恒有 `error` 键
+
+## D-010：preset description 双语化——按 UI 语言取列 + 互为回退
+
+- **日期**：2026-10-07
+- **状态**：已接受
+- **来源**：DB 化改造（7fe44e4..bbef518）后的 i18n 缺口：中文界面 Schema 编辑器"描述"显示英文
+- **背景**：
+  - `schema_fields.description` 单列存英文，中文界面与发往 LLM 的字段描述无法本地化
+  - 用户自定义字段（/schema/resolve）本来就只填一种语言，需保持行为一致
+- **决策**：
+  1. `SchemaFieldRow.description` 拆为 `description_zh` + `description_en` 两列（均 nullable），seed 22 字段补全中文
+  2. 取值规则：`lang.startswith("zh")` 优先 zh 回退 en，否则优先 en 回退 zh——单语言自定义字段与 preset 走同一规则
+  3. `lang` 从前端 `i18n.resolvedLanguage` 经 `/extract`、`/batch_extract` 请求体（可选 `lang: str | None`）透传至 `extract_data` → `get_preset`；`get_preset_agent` 的 lru_cache 键加入 lang（两种语言各一份缓存）
+  4. `/presets/{name}/schema` 响应的 `PresetFieldInfo.description` 拆为 `description_zh`/`description_en`，前端 `usePresetSchema` 按语言选列（含回退），描述随 queryKey 中的 lang 自动刷新
+  5. `/schema/resolve` 的 `SchemaFieldInput.description` 保持单语言不变
+- **理由（为什么不选备选方案）**：
+  - 备选 A：请求时由后端翻译 → 放弃。引入额外 LLM 调用与不确定性，seed 数据本就可静态双语
+  - 备选 B：description 存 JSON `{"zh":..,"en":..}` 单列 → 放弃。SQLite 查询/约束无法触及内部键，与 display_name_zh/en 双列模式不一致
+  - 备选 C：只改前端显示、LLM 仍收英文 → 放弃。需求明确要求发给 LLM 的描述也按界面语言
+- **影响**：
+  - dev 库 `smart_data_extractor.db` 需删除重建（create_all 不做列迁移）
+  - CLI 未暴露 lang（保持英文默认），后续如需再加
+  - commits：a592b66 / fa9dd03 / 1b5732b / 5129618 / fe4a846
