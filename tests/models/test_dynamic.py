@@ -171,3 +171,31 @@ def test_create_dynamic_model_serialization():
     assert data["price"] == 599.0
     assert "product_name_confidence" in data
     assert "price_confidence" in data
+
+
+def test_create_dynamic_model_date_type_maps_to_str():
+    """A 'date' field is a str normalized to ISO by its format validator."""
+    Model = create_dynamic_model({"due": {"type": "date", "required": False, "format": "date"}})
+    instance = Model(due="01/15/2024")
+    assert instance.due == "2024-01-15"
+
+
+def test_create_dynamic_model_format_validator_normalizes_email():
+    Model = create_dynamic_model({"email": {"type": "string", "required": False, "format": "email"}})
+    instance = Model(email="  John@ACME.com ")
+    assert instance.email == "john@acme.com"
+
+
+def test_create_dynamic_model_format_validator_invalid_sets_none_and_zero_confidence():
+    """Invalid format -> field None; ConfidenceBase zeroes the confidence."""
+    Model = create_dynamic_model({"email": {"type": "string", "required": False, "format": "email"}})
+    instance = Model(email="not-an-email", email_confidence=0.9)
+    assert instance.email is None
+    assert instance.email_confidence == 0.0
+
+
+def test_create_dynamic_model_without_format_has_no_validator():
+    """Fields without format accept arbitrary strings unchanged."""
+    Model = create_dynamic_model({"note": {"type": "string", "required": False}})
+    instance = Model(note="  Keep As Is ")
+    assert instance.note == "  Keep As Is "
