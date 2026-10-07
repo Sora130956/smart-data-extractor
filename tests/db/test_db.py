@@ -23,6 +23,41 @@ def test_init_db_creates_tables_and_seeds(test_db):
         assert email.format == "email"
         assert email.display_name_zh == "邮箱"
         assert email.display_name_en == "Email"
+        assert email.description_zh == "联系人电子邮箱"
+        assert email.description_en == "Email address of the contact"
+    finally:
+        session.close()
+
+
+def test_seed_fields_have_bilingual_descriptions(test_db):
+    """All 22 seeded fields carry both a Chinese and an English description."""
+    session = get_session_factory()()
+    try:
+        rows = session.query(SchemaFieldRow).all()
+        assert len(rows) == 22
+        for f in rows:
+            assert isinstance(f.description_zh, str) and f.description_zh.strip(), (
+                f"{f.schema_id}.{f.field_name} has no Chinese description"
+            )
+            assert isinstance(f.description_en, str) and f.description_en.strip(), (
+                f"{f.schema_id}.{f.field_name} has no English description"
+            )
+    finally:
+        session.close()
+
+
+def test_seed_specific_chinese_descriptions(test_db):
+    """Spot-check representative Chinese descriptions per preset."""
+    session = get_session_factory()()
+    try:
+        rows = {
+            (f.schema_id, f.field_name): f.description_zh
+            for f in session.query(SchemaFieldRow).all()
+        }
+        assert rows[("invoice", "date")] == "发票日期，ISO 格式（YYYY-MM-DD）"
+        assert rows[("lead", "job_title")] == "线索联系人的职位（体现决策权）"
+        assert rows[("lead", "timeline")] == "预计采购时间线（BANT：时间）"
+        assert rows[("contact", "name")] == "联系人全名"
     finally:
         session.close()
 

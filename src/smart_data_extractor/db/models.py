@@ -44,7 +44,8 @@ class SchemaFieldRow(Base):
     display_name_en: Mapped[str]
     type: Mapped[str]
     format: Mapped[str | None]
-    description: Mapped[str | None]
+    description_zh: Mapped[str | None]
+    description_en: Mapped[str | None]
     required: Mapped[bool] = mapped_column(default=False)
     order: Mapped[int]
 

@@ -42,36 +42,37 @@ Rules:
 - notes should capture the expressed need or pain points.
 """
 
-# (field_name, display_name_zh, display_name_en, type, format, description)
+# (field_name, display_name_zh, display_name_en, type, format,
+#  description_zh, description_en)
 _CONTACT_FIELDS = [
-    ("name", "姓名", "Name", "string", None, "Full name of the contact person"),
-    ("email", "邮箱", "Email", "string", "email", "Email address of the contact"),
-    ("phone", "电话", "Phone", "string", "phone", "Phone number of the contact"),
-    ("company", "公司", "Company", "string", None, "Company or organization name"),
-    ("job_title", "职位", "Job Title", "string", None, "Job title or position of the contact"),
-    ("website", "网站", "Website", "string", "url", "Company or personal website URL"),
+    ("name", "姓名", "Name", "string", None, "联系人全名", "Full name of the contact person"),
+    ("email", "邮箱", "Email", "string", "email", "联系人电子邮箱", "Email address of the contact"),
+    ("phone", "电话", "Phone", "string", "phone", "联系人电话号码", "Phone number of the contact"),
+    ("company", "公司", "Company", "string", None, "公司或组织名称", "Company or organization name"),
+    ("job_title", "职位", "Job Title", "string", None, "联系人的职位或头衔", "Job title or position of the contact"),
+    ("website", "网站", "Website", "string", "url", "公司或个人网站地址", "Company or personal website URL"),
 ]
 
 _INVOICE_FIELDS = [
-    ("invoice_number", "发票号码", "Invoice Number", "string", None, "Unique invoice identifier or number"),
-    ("date", "日期", "Date", "date", "date", "Invoice date in ISO format (YYYY-MM-DD)"),
-    ("vendor", "供应商", "Vendor", "string", None, "Vendor or seller name"),
-    ("total", "总金额", "Total", "number", None, "Total invoice amount"),
-    ("tax", "税额", "Tax", "number", None, "Tax amount"),
-    ("currency", "货币", "Currency", "string", None, "Currency code (e.g. USD, EUR)"),
+    ("invoice_number", "发票号码", "Invoice Number", "string", None, "发票的唯一编号", "Unique invoice identifier or number"),
+    ("date", "日期", "Date", "date", "date", "发票日期，ISO 格式（YYYY-MM-DD）", "Invoice date in ISO format (YYYY-MM-DD)"),
+    ("vendor", "供应商", "Vendor", "string", None, "供应商或卖方名称", "Vendor or seller name"),
+    ("total", "总金额", "Total", "number", None, "发票总金额", "Total invoice amount"),
+    ("tax", "税额", "Tax", "number", None, "税额", "Tax amount"),
+    ("currency", "货币", "Currency", "string", None, "货币代码（如 USD、EUR）", "Currency code (e.g. USD, EUR)"),
 ]
 
 _LEAD_FIELDS = [
-    ("name", "姓名", "Name", "string", None, "Full name of the lead"),
-    ("email", "邮箱", "Email", "string", "email", "Email address of the lead"),
-    ("phone", "电话", "Phone", "string", "phone", "Phone number of the lead"),
-    ("company", "公司", "Company", "string", None, "Company or organization name"),
-    ("job_title", "职位", "Job Title", "string", None, "Job title or position of the lead"),
-    ("lead_source", "线索来源", "Lead Source", "string", None, "Source where the lead originated (e.g. website, referral)"),
-    ("stage", "阶段", "Stage", "string", None, "Current stage in the sales pipeline"),
-    ("budget_range", "预算范围", "Budget Range", "string", None, "Estimated budget range (BANT: Budget)"),
-    ("timeline", "时间线", "Timeline", "string", None, "Expected purchase timeline (BANT: Timeline)"),
-    ("notes", "备注", "Notes", "string", None, "Additional notes or context about the lead"),
+    ("name", "姓名", "Name", "string", None, "线索联系人姓名", "Full name of the lead"),
+    ("email", "邮箱", "Email", "string", "email", "线索联系人电子邮箱", "Email address of the lead"),
+    ("phone", "电话", "Phone", "string", "phone", "线索联系人电话号码", "Phone number of the lead"),
+    ("company", "公司", "Company", "string", None, "公司或组织名称", "Company or organization name"),
+    ("job_title", "职位", "Job Title", "string", None, "线索联系人的职位（体现决策权）", "Job title or position of the lead"),
+    ("lead_source", "线索来源", "Lead Source", "string", None, "线索来源（如官网、转介绍）", "Source where the lead originated (e.g. website, referral)"),
+    ("stage", "阶段", "Stage", "string", None, "销售管道当前阶段", "Current stage in the sales pipeline"),
+    ("budget_range", "预算范围", "Budget Range", "string", None, "预估预算范围（BANT：预算）", "Estimated budget range (BANT: Budget)"),
+    ("timeline", "时间线", "Timeline", "string", None, "预计采购时间线（BANT：时间）", "Expected purchase timeline (BANT: Timeline)"),
+    ("notes", "备注", "Notes", "string", None, "关于线索的补充说明或背景", "Additional notes or context about the lead"),
 ]
 
 _PRESETS = [
@@ -95,7 +96,7 @@ def seed_builtin_presets(session: Session) -> None:
                 prompt_template=prompt,
             )
         )
-        for order, (fname, fzh, fen, ftype, ffmt, fdesc) in enumerate(fields):
+        for order, (fname, fzh, fen, ftype, ffmt, fdesc_zh, fdesc_en) in enumerate(fields):
             session.add(
                 SchemaFieldRow(
                     schema_id=schema_id,
@@ -104,7 +105,8 @@ def seed_builtin_presets(session: Session) -> None:
                     display_name_en=fen,
                     type=ftype,
                     format=ffmt,
-                    description=fdesc,
+                    description_zh=fdesc_zh,
+                    description_en=fdesc_en,
                     required=False,
                     order=order,
                 )

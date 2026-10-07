@@ -54,7 +54,8 @@ def _load_definition(name: str) -> dict[str, Any]:
                     "display_name_en": f.display_name_en,
                     "type": f.type,
                     "format": f.format,
-                    "description": f.description,
+                    "description_zh": f.description_zh,
+                    "description_en": f.description_en,
                     "required": f.required,
                     "order": f.order,
                 }
@@ -78,7 +79,7 @@ def get_preset(name: str) -> Preset:
             f["field_name"]: {
                 "type": f["type"],
                 "format": f["format"],
-                "description": f["description"],
+                "description": f["description_en"],
                 "required": f["required"],
             }
             for f in definition["fields"]
@@ -105,7 +106,11 @@ def get_preset_fields(name: str) -> list[dict[str, Any]]:
             "display_name_en": f["display_name_en"],
             "type": f["type"],
             "format": f["format"],
-            "description": f["description"],
+            "description_zh": f["description_zh"],
+            "description_en": f["description_en"],
+            # Transitional: kept until the API layer exposes the bilingual
+            # columns (PresetFieldInfo) and its consumers migrate.
+            "description": f["description_en"],
         }
         for f in definition["fields"]
     ]
