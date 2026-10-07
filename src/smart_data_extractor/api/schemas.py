@@ -94,3 +94,32 @@ class PresetFieldInfo(BaseModel):
 
 class PresetSchemaResponse(BaseModel):
     fields: list[PresetFieldInfo]
+
+
+class SchemaFieldInput(BaseModel):
+    """One field as edited in the schema editor, before name resolution.
+
+    ``field_name`` is optional: the caller supplies it for unmodified
+    preset fields (skip generation) and omits it for new/changed fields
+    (trigger generation).
+    """
+
+    display_name: str
+    description: str | None = None
+    type: str
+    required: bool = False
+    field_name: str | None = None
+
+
+class SchemaResolveRequest(BaseModel):
+    fields: list[SchemaFieldInput] = Field(min_length=1)
+
+
+class SchemaResolveResponse(BaseModel):
+    # Aliased: a field literally named "schema" would shadow BaseModel.schema.
+    schema_: dict[str, Any] = Field(alias="schema")
+    tokens_used: TokensUsed
+    cost_usd: float
+    cost_cny: float
+
+    model_config = {"populate_by_name": True}

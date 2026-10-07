@@ -15,9 +15,11 @@ from smart_data_extractor.api.schemas import (
     ExtractRequest,
     ExtractResponse,
     PresetSchemaResponse,
+    SchemaResolveRequest,
+    SchemaResolveResponse,
 )
 from smart_data_extractor.config import get_settings
-from smart_data_extractor.extraction import batch_extract, extract_data
+from smart_data_extractor.extraction import batch_extract, extract_data, resolve_schema
 from smart_data_extractor.presets import get_preset_fields
 
 router = APIRouter()
@@ -36,6 +38,11 @@ def get_extract_fn() -> Callable[..., Any]:
 def get_batch_fn() -> Callable[..., Any]:
     """DI seam: the batch extraction function (production default)."""
     return batch_extract
+
+
+def get_schema_resolve_fn() -> Callable[..., Any]:
+    """DI seam: the field-name resolution function (production default)."""
+    return resolve_schema
 
 
 @router.get("/health")
@@ -59,6 +66,18 @@ async def extract(
 ) -> dict:
     try:
         result = await fn(req.text, req.preset, req.schema_, instructions=req.instructions)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "cost_cny": _to_cny(result["cost_usd"])}
+
+
+@router.post("/schema/resolve", response_model=SchemaResolveResponse)
+async def schema_resolve(
+    req: SchemaResolveRequest,
+    fn: Callable[..., Any] = Depends(get_schema_resolve_fn),
+) -> dict:
+    try:
+        result = await fn([f.model_dump() for f in req.fields])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}

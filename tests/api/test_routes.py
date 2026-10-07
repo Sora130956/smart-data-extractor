@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from smart_data_extractor.api import create_app
-from smart_data_extractor.api.routes import get_batch_fn, get_extract_fn
+from smart_data_extractor.api.routes import get_batch_fn, get_extract_fn, get_schema_resolve_fn
 
 
 @pytest.fixture
@@ -230,3 +230,67 @@ async def test_preset_schema_invoice_has_array_and_date_types(client):
 async def test_preset_schema_unknown_preset_404(client):
     resp = await client.get("/presets/unknown-preset/schema")
     assert resp.status_code == 404
+
+
+# --- /schema/resolve ---
+
+
+def _make_fake_resolve(fail_with: Exception | None = None):
+    calls = []
+
+    async def fake_resolve(fields):
+        calls.append(fields)
+        if fail_with is not None:
+            raise fail_with
+        return {
+            "schema": {"fields": {"urgency_level": {"type": "string", "description": "d", "required": False}}},
+            "tokens_used": {"input": 10, "output": 2},
+            "cost_usd": 0.001,
+        }
+
+    return fake_resolve, calls
+
+
+async def test_schema_resolve_happy_path(app, client):
+    fake, calls = _make_fake_resolve()
+    app.dependency_overrides[get_schema_resolve_fn] = lambda: fake
+
+    resp = await client.post(
+        "/schema/resolve",
+        json={"fields": [{"display_name": "紧急程度", "description": "d", "type": "string"}]},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["schema"] == {
+        "fields": {"urgency_level": {"type": "string", "description": "d", "required": False}}
+    }
+    assert body["cost_usd"] == 0.001
+    assert body["cost_cny"] == pytest.approx(0.001 * 7.25)
+    assert calls[0] == [
+        {
+            "display_name": "紧急程度",
+            "description": "d",
+            "type": "string",
+            "required": False,
+            "field_name": None,
+        }
+    ]
+
+
+async def test_schema_resolve_value_error_becomes_400(app, client):
+    fake, _ = _make_fake_resolve(fail_with=ValueError("bad name"))
+    app.dependency_overrides[get_schema_resolve_fn] = lambda: fake
+
+    resp = await client.post(
+        "/schema/resolve",
+        json={"fields": [{"display_name": "X", "type": "string"}]},
+    )
+
+    assert resp.status_code == 400
+    assert "bad name" in resp.json()["detail"]
+
+
+async def test_schema_resolve_empty_fields_422(client):
+    resp = await client.post("/schema/resolve", json={"fields": []})
+    assert resp.status_code == 422
