@@ -2,7 +2,24 @@
 
 import pytest
 
+from smart_data_extractor.db import get_session_factory
+from smart_data_extractor.db.models import SchemaFieldRow
 from smart_data_extractor.presets import get_preset, get_preset_fields, list_presets
+
+
+def _null_description(schema_id: str, field_name: str, column: str) -> None:
+    """Null one description column of a seeded field (fallback tests)."""
+    session = get_session_factory()()
+    try:
+        row = (
+            session.query(SchemaFieldRow)
+            .filter_by(schema_id=schema_id, field_name=field_name)
+            .one()
+        )
+        setattr(row, column, None)
+        session.commit()
+    finally:
+        session.close()
 
 
 def test_list_presets_returns_three_builtins(test_db):
@@ -37,6 +54,44 @@ def test_get_preset_unknown_raises(test_db):
         get_preset("unknown-preset")
 
 
+# --- description language picking ---
+
+
+def test_get_preset_default_lang_picks_english(test_db):
+    fields = get_preset("contact").schema_dict["fields"]
+    assert fields["email"]["description"] == "Email address of the contact"
+
+
+def test_get_preset_zh_lang_picks_chinese(test_db):
+    fields = get_preset("contact", lang="zh").schema_dict["fields"]
+    assert fields["email"]["description"] == "联系人电子邮箱"
+
+
+def test_get_preset_zh_cn_locale_prefix_picks_chinese(test_db):
+    fields = get_preset("contact", lang="zh-CN").schema_dict["fields"]
+    assert fields["email"]["description"] == "联系人电子邮箱"
+
+
+def test_get_preset_zh_falls_back_to_english(test_db):
+    _null_description("contact", "email", "description_zh")
+    fields = get_preset("contact", lang="zh").schema_dict["fields"]
+    assert fields["email"]["description"] == "Email address of the contact"
+
+
+def test_get_preset_en_falls_back_to_chinese(test_db):
+    _null_description("contact", "email", "description_en")
+    fields = get_preset("contact").schema_dict["fields"]
+    assert fields["email"]["description"] == "联系人电子邮箱"
+
+
+def test_get_preset_fields_returns_bilingual_descriptions(test_db):
+    fields = get_preset_fields("contact")
+    email = next(f for f in fields if f["field_name"] == "email")
+    assert email["description_zh"] == "联系人电子邮箱"
+    assert email["description_en"] == "Email address of the contact"
+    assert "description" not in email
+
+
 def test_get_preset_fields_returns_display_names_and_format(test_db):
     fields = get_preset_fields("contact")
     assert [f["field_name"] for f in fields] == [
@@ -47,7 +102,8 @@ def test_get_preset_fields_returns_display_names_and_format(test_db):
     assert email["format"] == "email"
     assert email["display_name_zh"] == "邮箱"
     assert email["display_name_en"] == "Email"
-    assert isinstance(email["description"], str) and email["description"]
+    assert isinstance(email["description_zh"], str) and email["description_zh"]
+    assert isinstance(email["description_en"], str) and email["description_en"]
 
 
 def test_get_preset_fields_invoice_has_date_no_line_items(test_db):

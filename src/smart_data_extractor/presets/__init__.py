@@ -67,8 +67,27 @@ def _load_definition(name: str) -> dict[str, Any]:
         session.close()
 
 
-def get_preset(name: str) -> Preset:
+def _pick_description(field: dict[str, Any], lang: str) -> str | None:
+    """Pick a field description by UI language, falling back to the other.
+
+    ``zh*`` locales prefer the Chinese column; everything else prefers
+    English. User-defined single-language fields behave identically: the
+    filled column wins regardless of the requested language.
+    """
+    zh_first = lang.startswith("zh")
+    primary, fallback = (
+        ("description_zh", "description_en") if zh_first else ("description_en", "description_zh")
+    )
+    return field[primary] if field[primary] is not None else field[fallback]
+
+
+def get_preset(name: str, lang: str = "en") -> Preset:
     """Look up a preset by name and build its dynamic-model schema dict.
+
+    Args:
+        name: Preset id ("contact" / "invoice" / "lead").
+        lang: UI language tag; descriptions sent to the LLM follow it
+            (``zh*`` -> Chinese with English fallback, else the reverse).
 
     Raises:
         ValueError: If the name is not a registered preset.
@@ -79,7 +98,7 @@ def get_preset(name: str) -> Preset:
             f["field_name"]: {
                 "type": f["type"],
                 "format": f["format"],
-                "description": f["description_en"],
+                "description": _pick_description(f, lang),
                 "required": f["required"],
             }
             for f in definition["fields"]
@@ -108,9 +127,6 @@ def get_preset_fields(name: str) -> list[dict[str, Any]]:
             "format": f["format"],
             "description_zh": f["description_zh"],
             "description_en": f["description_en"],
-            # Transitional: kept until the API layer exposes the bilingual
-            # columns (PresetFieldInfo) and its consumers migrate.
-            "description": f["description_en"],
         }
         for f in definition["fields"]
     ]

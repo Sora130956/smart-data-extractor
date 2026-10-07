@@ -216,7 +216,6 @@ async def test_preset_schema_returns_fields(client, test_db):
     assert email_field["format"] == "email"
     assert email_field["display_name_zh"] == "邮箱"
     assert email_field["display_name_en"] == "Email"
-    assert email_field["description"]
 
 
 async def test_preset_schema_invoice_has_date_type_no_line_items(client, test_db):
