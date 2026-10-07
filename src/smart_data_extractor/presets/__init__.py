@@ -25,7 +25,7 @@ def list_presets() -> list[dict[str, Any]]:
         session.close()
 
 
-def _load_definition(name: str) -> SchemaDefinition:
+def _load_definition(name: str) -> dict[str, Any]:
     session = get_session_factory()()
     try:
         row = session.get(SchemaDefinition, name)
