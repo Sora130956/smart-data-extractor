@@ -20,8 +20,9 @@ You generate JSON schema field names for a data extraction form.
 For each field listed below, produce a concise snake_case name derived from
 its display name and description, in English, suitable as a Python
 identifier (lowercase letters, digits, underscores; must not start with a
-digit). Return exactly one output item per input field, echoing its
-original index.
+digit). Also produce a concise English display name (title-case phrase, e.g.
+"Urgency Level") for English UI display. Return exactly one output item per
+input field, echoing its original index.
 """
 
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -30,6 +31,7 @@ _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 class _FieldNameItem(BaseModel):
     index: int
     field_name: str
+    display_name_en: str
 
 
 class _FieldNameList(BaseModel):
@@ -99,14 +101,14 @@ async def resolve_schema(
 
         result = await agent.run(prompt)
         usage = result.usage
-        generated = {item.index: item.field_name for item in result.output.fields}
+        generated = {item.index: item for item in result.output.fields}
         tokens = {"input": usage.input_tokens, "output": usage.output_tokens}
         cost_usd = _resolve_cost(usage, model=model, model_ref=model_ref)
 
     seen = set(known_names)
     final_names: dict[int, str] = {}
     for i in missing_indices:
-        name = generated.get(i)
+        name = generated.get(i).field_name if i in generated else None
         if name is None:
             raise ValueError(f"Field name generation did not return a name for field index {i}")
         _validate_identifier(name)
@@ -122,6 +124,9 @@ async def resolve_schema(
             "type": f["type"],
             "description": f.get("description"),
             "required": f.get("required", False),
+            "display_name": f["display_name"],
+            "display_name_en": f.get("display_name_en")
+            or (generated[i].display_name_en if i in generated else None),
         }
 
     return {
