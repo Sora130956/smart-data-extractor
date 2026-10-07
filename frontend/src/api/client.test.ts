@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, batchExtract, getPresetSchema, resolveSchema } from './client';
+import { ApiError, batchExtract, getPresets, getPresetSchema, resolveSchema } from './client';
 
 describe('batchExtract', () => {
   afterEach(() => {
@@ -104,6 +104,42 @@ describe('batchExtract', () => {
   });
 });
 
+describe('getPresets', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches and parses the preset list', async () => {
+    const payload = [
+      { id: 'contact', display_name_zh: '联系人', display_name_en: 'Contact', is_builtin: true },
+      { id: 'invoice', display_name_zh: '发票', display_name_en: 'Invoice', is_builtin: true },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getPresets();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/presets');
+    expect(result).toHaveLength(2);
+    expect(result[0].display_name_en).toBe('Contact');
+  });
+
+  it('throws ApiError on a non-ok response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      text: async () => 'boom',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getPresets()).rejects.toMatchObject({ status: 500, message: 'boom' });
+  });
+});
+
 describe('getPresetSchema', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -112,8 +148,22 @@ describe('getPresetSchema', () => {
   it('fetches and parses a preset schema', async () => {
     const payload = {
       fields: [
-        { name: 'name', type: 'string', description: 'Full name' },
-        { name: 'email', type: 'string', description: null },
+        {
+          field_name: 'name',
+          display_name_zh: '姓名',
+          display_name_en: 'Name',
+          type: 'string',
+          format: null,
+          description: 'Full name',
+        },
+        {
+          field_name: 'email',
+          display_name_zh: '邮箱',
+          display_name_en: 'Email',
+          type: 'string',
+          format: null,
+          description: null,
+        },
       ],
     };
     const fetchMock = vi.fn().mockResolvedValue({
@@ -126,6 +176,7 @@ describe('getPresetSchema', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/presets/contact/schema');
     expect(result.fields).toHaveLength(2);
+    expect(result.fields[0].field_name).toBe('name');
   });
 
   it('throws ApiError on a non-ok response', async () => {

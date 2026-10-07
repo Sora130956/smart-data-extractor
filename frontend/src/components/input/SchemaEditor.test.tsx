@@ -18,8 +18,22 @@ function stubPresetSchemaFetch() {
     ok: true,
     json: async () => ({
       fields: [
-        { name: 'name', type: 'string', description: 'Full name' },
-        { name: 'email', type: 'string', description: null },
+        {
+          field_name: 'name',
+          display_name_zh: '姓名',
+          display_name_en: 'Name',
+          type: 'string',
+          format: null,
+          description: 'Full name',
+        },
+        {
+          field_name: 'email',
+          display_name_zh: '邮箱',
+          display_name_en: 'Email',
+          type: 'string',
+          format: null,
+          description: null,
+        },
       ],
     }),
   });
@@ -38,8 +52,8 @@ describe('SchemaEditor', () => {
     render(<SchemaEditor />, { wrapper });
 
     await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
-    expect(screen.getByDisplayValue('name')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('email')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Name')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Email')).toBeInTheDocument();
   });
 
   it('marks the schema as modified after editing a field', async () => {

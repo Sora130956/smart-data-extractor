@@ -47,15 +47,17 @@ export interface ExtractionSource {
 export interface SchemaField {
   /** User-facing label, shown/edited in the SchemaEditor. */
   displayName: string;
+  /** English label from the preset; passed to /schema/resolve when present. */
+  displayNameEn?: string | null;
   /** Real LLM schema key; null until /schema/resolve assigns one. */
   fieldName: string | null;
-  type: 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'array' | 'object';
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'date';
   description: string;
   /** Preset fields only: baseline for the needsResolve diff. */
   originalDisplayName?: string;
   originalDescription?: string;
 }
 
-export type PresetId = 'contact' | 'invoice' | 'lead';
+export type PresetId = string;
 export type ExtractionMode = 'preset' | 'custom';
 export type ResultFilter = 'all' | 'high' | 'review';

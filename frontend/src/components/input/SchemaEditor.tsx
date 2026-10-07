@@ -15,8 +15,6 @@ const FIELD_TYPES: SchemaField['type'][] = [
   'integer',
   'boolean',
   'date',
-  'array',
-  'object',
 ];
 
 const cellClass =

@@ -37,9 +37,6 @@
   },
   "config": {
     "preset": "Preset",
-    "presetContact": "Contact",
-    "presetInvoice": "Invoice",
-    "presetLead": "Lead",
     "instructions": "Describe what you want to extract… (optional)",
     "start": "Start Extraction",
     "starting": "Extracting…",
@@ -60,9 +57,7 @@
       "number": "Number",
       "integer": "Integer",
       "boolean": "Boolean",
-      "date": "Date",
-      "array": "Array",
-      "object": "Object"
+      "date": "Date"
     }
   },
   "results": {

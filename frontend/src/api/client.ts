@@ -3,9 +3,11 @@
 
 import {
   batchExtractResponseSchema,
+  presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
   type BatchExtractResponse,
+  type PresetListItem,
   type PresetSchemaResponse,
   type SchemaResolveResponse,
 } from './schemas';
@@ -50,6 +52,17 @@ export async function batchExtract(
   }
 
   return batchExtractResponseSchema.parse(await res.json());
+}
+
+export async function getPresets(): Promise<PresetListItem[]> {
+  const res = await fetch('/api/presets');
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new ApiError(detail || res.statusText, res.status);
+  }
+
+  return presetListResponseSchema.parse(await res.json());
 }
 
 export async function getPresetSchema(preset: string): Promise<PresetSchemaResponse> {

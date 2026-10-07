@@ -1,10 +1,10 @@
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { SchemaEditor } from '@/components/input/SchemaEditor';
+import { getPresets } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import type { PresetId } from '@/types/extraction';
-
-const PRESETS: PresetId[] = ['contact', 'invoice', 'lead'];
 
 const selectClass =
   'rounded-token border border-border bg-surface px-2.5 py-1.5 text-body text-text';
@@ -18,8 +18,10 @@ export function ConfigBar({
   isLoading?: boolean;
   onStart?: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { preset, instructions, setPreset, setInstructions } = useUiStore();
+  const { data: presets } = useQuery({ queryKey: ['presets'], queryFn: getPresets });
+  const isZh = (i18n.resolvedLanguage ?? 'en') === 'zh';
 
   return (
     <div className="mt-4">
@@ -33,9 +35,9 @@ export function ConfigBar({
           value={preset}
           onChange={(e) => setPreset(e.target.value as PresetId)}
         >
-          {PRESETS.map((p) => (
-            <option key={p} value={p}>
-              {`${t('config.preset')}: ${t(`config.preset${p.charAt(0).toUpperCase()}${p.slice(1)}`)}`}
+          {(presets ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {`${t('config.preset')}: ${isZh ? p.display_name_zh : p.display_name_en}`}
             </option>
           ))}
         </select>

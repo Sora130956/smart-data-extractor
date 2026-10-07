@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   batchExtractResponseSchema,
+  presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
 } from './schemas';
@@ -74,20 +75,64 @@ describe('presetSchemaResponseSchema', () => {
   it('parses a list of fields with nullable descriptions', () => {
     const payload = {
       fields: [
-        { name: 'name', type: 'string', description: 'Full name' },
-        { name: 'email', type: 'string', description: null },
+        {
+          field_name: 'name',
+          display_name_zh: '姓名',
+          display_name_en: 'Name',
+          type: 'string',
+          format: null,
+          description: 'Full name',
+        },
+        {
+          field_name: 'email',
+          display_name_zh: '邮箱',
+          display_name_en: 'Email',
+          type: 'string',
+          format: null,
+          description: null,
+        },
       ],
     };
 
     const parsed = presetSchemaResponseSchema.parse(payload);
     expect(parsed.fields).toHaveLength(2);
+    expect(parsed.fields[0].field_name).toBe('name');
     expect(parsed.fields[1].description).toBeNull();
   });
 
   it('rejects a field missing the type key', () => {
-    const payload = { fields: [{ name: 'name', description: 'Full name' }] };
+    const payload = {
+      fields: [
+        {
+          field_name: 'name',
+          display_name_zh: '姓名',
+          display_name_en: 'Name',
+          format: null,
+          description: 'Full name',
+        },
+      ],
+    };
 
     expect(() => presetSchemaResponseSchema.parse(payload)).toThrow();
+  });
+});
+
+describe('presetListResponseSchema', () => {
+  it('parses a list of presets with localized display names', () => {
+    const payload = [
+      { id: 'contact', display_name_zh: '联系人', display_name_en: 'Contact', is_builtin: true },
+      { id: 'custom1', display_name_zh: '自定义', display_name_en: 'Custom', is_builtin: false },
+    ];
+
+    const parsed = presetListResponseSchema.parse(payload);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[1].is_builtin).toBe(false);
+  });
+
+  it('rejects an item missing a display name', () => {
+    const payload = [{ id: 'contact', display_name_en: 'Contact', is_builtin: true }];
+
+    expect(() => presetListResponseSchema.parse(payload)).toThrow();
   });
 });
 

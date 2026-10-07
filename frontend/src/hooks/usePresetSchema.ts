@@ -3,6 +3,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { getPresetSchema } from '@/api/client';
+import i18n from '@/i18n';
 import type { SchemaField } from '@/types/extraction';
 
 export function usePresetSchema(preset: string) {
@@ -10,12 +11,14 @@ export function usePresetSchema(preset: string) {
     queryKey: ['preset-schema', preset],
     queryFn: async () => {
       const response = await getPresetSchema(preset);
+      const isZh = (i18n.resolvedLanguage ?? 'en') === 'zh';
       return response.fields.map((f) => ({
-        displayName: f.name,
-        fieldName: f.name,
+        displayName: isZh ? f.display_name_zh : f.display_name_en,
+        displayNameEn: f.display_name_en,
+        fieldName: f.field_name,
         type: f.type as SchemaField['type'],
         description: f.description ?? '',
-        originalDisplayName: f.name,
+        originalDisplayName: isZh ? f.display_name_zh : f.display_name_en,
         originalDescription: f.description ?? '',
       }));
     },

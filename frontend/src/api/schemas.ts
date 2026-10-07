@@ -27,14 +27,26 @@ export const batchExtractResponseSchema = z.object({
 });
 
 export const presetFieldSchema = z.object({
-  name: z.string(),
+  field_name: z.string(),
+  display_name_zh: z.string(),
+  display_name_en: z.string(),
   type: z.string(),
+  format: z.string().nullable(),
   description: z.string().nullable(),
 });
 
 export const presetSchemaResponseSchema = z.object({
   fields: z.array(presetFieldSchema),
 });
+
+export const presetListItemSchema = z.object({
+  id: z.string(),
+  display_name_zh: z.string(),
+  display_name_en: z.string(),
+  is_builtin: z.boolean(),
+});
+
+export const presetListResponseSchema = z.array(presetListItemSchema);
 
 export const schemaFieldSpecSchema = z.object({
   type: z.string(),
@@ -56,4 +68,5 @@ export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
 export type BatchExtractResponse = z.infer<typeof batchExtractResponseSchema>;
 export type PresetFieldDto = z.infer<typeof presetFieldSchema>;
 export type PresetSchemaResponse = z.infer<typeof presetSchemaResponseSchema>;
+export type PresetListItem = z.infer<typeof presetListItemSchema>;
 export type SchemaResolveResponse = z.infer<typeof schemaResolveResponseSchema>;

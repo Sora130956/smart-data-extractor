@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PresetId, ResultFilter, SchemaField } from '@/types/extraction';
+import type { ResultFilter, SchemaField } from '@/types/extraction';
 
 export type Theme = 'light' | 'dark';
 
@@ -18,7 +18,7 @@ function applyTheme(theme: Theme) {
 
 interface UiState {
   theme: Theme;
-  preset: PresetId;
+  preset: string;
   instructions: string;
   filter: ResultFilter;
   /** Effective field set shown/edited in the SchemaEditor for the current preset. */
@@ -26,7 +26,7 @@ interface UiState {
   /** True once the user has edited a preset's fields; drives the custom-schema submit path. */
   isSchemaModified: boolean;
   toggleTheme: () => void;
-  setPreset: (preset: PresetId) => void;
+  setPreset: (preset: string) => void;
   setInstructions: (instructions: string) => void;
   setFilter: (filter: ResultFilter) => void;
   setCustomFields: (fields: SchemaField[]) => void;
