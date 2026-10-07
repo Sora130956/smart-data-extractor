@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     max_concurrency: int = 5
     # Display-currency conversion (approximate static rate, override via env).
     usd_to_cny: float = 7.25
+    database_url: str = "sqlite:///./smart_data_extractor.db"
     
     model_config = SettingsConfigDict(
         env_file=".env",

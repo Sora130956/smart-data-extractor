@@ -102,3 +102,17 @@ def test_get_settings_cached(monkeypatch):
     
     # Should be the same instance due to lru_cache
     assert settings1 is settings2
+
+
+def test_settings_database_url_default(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().database_url == "sqlite:///./smart_data_extractor.db"
+
+
+def test_settings_database_url_override(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/test.db")
+    get_settings.cache_clear()
+    assert get_settings().database_url == "sqlite:////tmp/test.db"
