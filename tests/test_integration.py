@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from smart_data_extractor.extraction import extract_data
-from smart_data_extractor.models import Contact
+from smart_data_extractor.presets import get_preset_fields
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_INTEGRATION") != "1",
@@ -33,7 +33,9 @@ async def test_real_contact_extraction():
     result = await extract_data(text, preset="contact")
 
     data = result["data"]
-    assert set(data) == set(Contact.model_fields)
+    contact_fields = {f["field_name"] for f in get_preset_fields("contact")}
+    expected_keys = contact_fields | {f"{name}_confidence" for name in contact_fields}
+    assert set(data) == expected_keys
     assert data["name"] == "John Smith"
     assert data["email"] == "john@acme.com"
     assert data["job_title"] == "CTO"
