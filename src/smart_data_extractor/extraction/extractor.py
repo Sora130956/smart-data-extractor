@@ -1,4 +1,4 @@
-﻿"""Single-text extraction."""
+"""Single-text extraction."""
 
 from typing import Any
 
@@ -106,16 +106,17 @@ async def extract_data(
         else:
             # Caller instructions make the agent uncacheable (unbounded key
             # space) -> build fresh; injected models keep the test path.
+            output_type = create_dynamic_model(p.schema_dict, model_name=f"Preset_{p.name}")
             final = _compose_instructions(p.prompt_template, instructions)
             if model is None:
                 agent = build_agent(
-                    p.model_class,
+                    output_type,
                     model=get_settings().model,
                     instructions=final,
                     limiter=shared_concurrency_limiter(),
                 )
             else:
-                agent = build_agent(p.model_class, model=model, instructions=final)
+                agent = build_agent(output_type, model=model, instructions=final)
     else:
         output_type = create_dynamic_model(schema_dict) #NOTE 根据用户自定义数据模型，在运行时动态创建创建BaseModel
         final = _compose_instructions(DYNAMIC_PROMPT, instructions) #NOTE 用户可选的自定义prompt已实现：追加在基础规则之后，帮助LLM理解业务含义

@@ -13,7 +13,7 @@ def test_model() -> TestModel:
     return TestModel()
 
 
-async def test_batch_returns_one_result_per_text(test_model):
+async def test_batch_returns_one_result_per_text(test_model, test_db):
     """Each input text yields one result shaped like extract_data's."""
     texts = [
         "John Smith, CTO at Acme Corp, john@acme.com",
@@ -26,7 +26,7 @@ async def test_batch_returns_one_result_per_text(test_model):
         assert set(r) == {"data", "tokens_used", "cost_usd"}
 
 
-async def test_batch_aggregates_cost_and_tokens(test_model):
+async def test_batch_aggregates_cost_and_tokens(test_model, test_db):
     """Totals equal the sum of the per-text results (not first / max / zero)."""
     texts = ["text one", "text two", "text three"]
     result = await batch_extract(texts, preset="contact", model=test_model)
@@ -65,7 +65,7 @@ async def test_batch_requires_exactly_one_source(test_model):
         )
 
 
-async def test_batch_unknown_preset_raises(test_model):
+async def test_batch_unknown_preset_raises(test_model, test_db):
     """An unregistered preset name raises ValueError."""
     with pytest.raises(ValueError, match="nope"):
         await batch_extract(["some text"], preset="nope", model=test_model)

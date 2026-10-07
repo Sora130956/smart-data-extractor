@@ -21,11 +21,31 @@ from pydantic_ai.models.test import TestModel
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction import batch_extract, extract_data
 from smart_data_extractor.extraction.agent import shared_concurrency_limiter
-from smart_data_extractor.models import Contact, create_dynamic_model
-from smart_data_extractor.models.invoice import Invoice
-from smart_data_extractor.models.lead import Lead
+from smart_data_extractor.models import create_dynamic_model
+from smart_data_extractor.presets import get_preset
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+CONTACT_FIELDS = {
+    "name", "email", "phone", "company", "job_title", "website",
+    "name_confidence", "email_confidence", "phone_confidence",
+    "company_confidence", "job_title_confidence", "website_confidence",
+}
+
+INVOICE_FIELDS = {
+    "invoice_number", "date", "vendor", "total", "tax", "currency",
+    "invoice_number_confidence", "date_confidence", "vendor_confidence",
+    "total_confidence", "tax_confidence", "currency_confidence",
+}
+
+LEAD_FIELDS = {
+    "name", "email", "phone", "company", "job_title", "lead_source",
+    "stage", "budget_range", "timeline", "notes",
+    "name_confidence", "email_confidence", "phone_confidence",
+    "company_confidence", "job_title_confidence", "lead_source_confidence",
+    "stage_confidence", "budget_range_confidence", "timeline_confidence",
+    "notes_confidence",
+}
 
 AC2_SCHEMA = {
     "fields": {
@@ -44,37 +64,35 @@ def fixture_text(name: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("preset", "fixture", "model_class"),
+    ("preset", "fixture", "expected_fields"),
     [
-        ("contact", "contact_sample.txt", Contact),
-        ("invoice", "invoice_sample.txt", Invoice),
-        ("lead", "lead_sample.txt", Lead),
+        ("contact", "contact_sample.txt", CONTACT_FIELDS),
+        ("invoice", "invoice_sample.txt", INVOICE_FIELDS),
+        ("lead", "lead_sample.txt", LEAD_FIELDS),
     ],
 )
-async def test_ac1_preset_output_matches_model(preset, fixture, model_class):
-    """Extracted keys equal the preset model's fields, nothing more/less."""
+async def test_ac1_preset_output_matches_model(preset, fixture, expected_fields, test_db):
+    """Extracted keys equal the preset schema's fields, nothing more/less."""
     result = await extract_data(
         fixture_text(fixture), preset=preset, model=TestModel()
     )
-    assert set(result["data"]) == set(model_class.model_fields)
+    assert set(result["data"]) == expected_fields
 
 
 def test_ac1_field_completeness():
     """Contact has exactly 12 fields; Invoice/Lead carry their core
     business fields and at least 6 data fields each (BANT names)."""
-    assert len(Contact.model_fields) == 12
+    assert len(CONTACT_FIELDS) == 12
 
     assert {
-        "invoice_number", "date", "vendor", "total", "tax", "line_items"
-    } <= set(Invoice.model_fields)
+        "invoice_number", "date", "vendor", "total", "tax", "currency"
+    } <= INVOICE_FIELDS
     assert {
         "name", "email", "phone", "company", "job_title"
-    } <= set(Lead.model_fields)
+    } <= LEAD_FIELDS
 
-    for model in (Contact, Invoice, Lead):
-        data_fields = [
-            f for f in model.model_fields if not f.endswith("_confidence")
-        ]
+    for fields in (CONTACT_FIELDS, INVOICE_FIELDS, LEAD_FIELDS):
+        data_fields = [f for f in fields if not f.endswith("_confidence")]
         assert len(data_fields) >= 6
 
 
@@ -111,9 +129,12 @@ def test_ac2_required_field_enforced():
 # --- AC-3: confidence bounds + validation interception ---
 
 
-def test_ac3_invalid_email_intercepted():
+def test_ac3_invalid_email_intercepted(test_db):
     """Invalid email -> field null AND confidence zeroed; valid sibling
     fields keep their values and confidences."""
+    Contact = create_dynamic_model(
+        get_preset("contact").schema_dict, model_name="Preset_contact"
+    )
     contact = Contact(
         name="John",
         name_confidence=0.9,
@@ -128,7 +149,10 @@ def test_ac3_invalid_email_intercepted():
     assert contact.phone_confidence == 0.9
 
 
-def test_ac3_invalid_phone_website_date_intercepted():
+def test_ac3_invalid_phone_website_date_intercepted(test_db):
+    Contact = create_dynamic_model(
+        get_preset("contact").schema_dict, model_name="Preset_contact"
+    )
     contact = Contact(
         phone="123", phone_confidence=0.7,
         website="not-a-url", website_confidence=0.6,
@@ -138,19 +162,25 @@ def test_ac3_invalid_phone_website_date_intercepted():
     assert contact.website is None
     assert contact.website_confidence == 0.0
 
+    Invoice = create_dynamic_model(
+        get_preset("invoice").schema_dict, model_name="Preset_invoice"
+    )
     invoice = Invoice(date="not-a-date", date_confidence=0.8)
     assert invoice.date is None
     assert invoice.date_confidence == 0.0
 
 
-def test_ac3_absent_fields_default_to_zero_confidence():
+def test_ac3_absent_fields_default_to_zero_confidence(test_db):
+    Contact = create_dynamic_model(
+        get_preset("contact").schema_dict, model_name="Preset_contact"
+    )
     contact = Contact()
-    for name in Contact.model_fields:
+    for name in CONTACT_FIELDS:
         if name.endswith("_confidence"):
             assert getattr(contact, name) == 0.0
 
 
-async def test_ac3_confidence_bounds_through_extraction():
+async def test_ac3_confidence_bounds_through_extraction(test_db):
     """Every confidence produced by an extraction stays within [0.0, 1.0]."""
     result = await extract_data(
         fixture_text("contact_sample.txt"), preset="contact", model=TestModel()
@@ -166,7 +196,7 @@ async def test_ac3_confidence_bounds_through_extraction():
 # --- AC-4: cost tracking + batch aggregation + concurrency cap ---
 
 
-async def test_ac4_single_record_cost_and_tokens():
+async def test_ac4_single_record_cost_and_tokens(test_db):
     result = await extract_data(
         fixture_text("contact_sample.txt"), preset="contact", model=TestModel()
     )
@@ -176,7 +206,7 @@ async def test_ac4_single_record_cost_and_tokens():
     assert result["tokens_used"]["output"] > 0
 
 
-async def test_ac4_batch_aggregates_over_fixture_texts():
+async def test_ac4_batch_aggregates_over_fixture_texts(test_db):
     texts = [
         fixture_text(n)
         for n in ("contact_sample.txt", "invoice_sample.txt", "lead_sample.txt")

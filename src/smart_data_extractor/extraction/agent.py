@@ -1,4 +1,4 @@
-﻿"""Agent construction: bind a model to an output type.
+"""Agent construction: bind a model to an output type.
 
 Production preset agents are cached (lru_cache) so repeated extractions
 reuse the same HTTP connection pool and one process-wide concurrency
@@ -60,15 +60,17 @@ def shared_concurrency_limiter() -> ConcurrencyLimiter:
 def get_preset_agent(preset_name: str, model_ref: str) -> Agent:
     """Cached production agent for a preset.
 
-    Keyed by (preset_name, model_ref) strings — bounded by 3 presets x
-    a handful of model refs, so unbounded growth is impossible. Caching
-    reuses the underlying AsyncOpenAI client (connection pooling) and
-    shares the process-wide concurrency limiter.
+    Keyed by (preset_name, model_ref); builtin presets are immutable within
+    the process lifetime, so the cache stays safe after the DB migration.
+    Caching reuses the underlying AsyncOpenAI client (connection pooling)
+    and shares the process-wide concurrency limiter.
     """
+    from smart_data_extractor.models import create_dynamic_model
+
     p = get_preset(preset_name)
     return Agent(
         model_ref,
-        output_type=p.model_class,
+        output_type=create_dynamic_model(p.schema_dict, model_name=f"Preset_{preset_name}"),
         instructions=p.prompt_template,
         model_settings=ModelSettings(temperature=0),# NOTE 数据提取工作，temperature设置为0
         max_concurrency=shared_concurrency_limiter(), # NOTE ConcurrencyLimiter 控制全局agent并发。如果单纯设置max_concurrency=5,则每个agent的并发是单独控制的，没有意义
