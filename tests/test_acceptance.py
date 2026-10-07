@@ -79,20 +79,30 @@ async def test_ac1_preset_output_matches_model(preset, fixture, expected_fields,
     assert set(result["data"]) == expected_fields
 
 
-def test_ac1_field_completeness():
-    """Contact has exactly 12 fields; Invoice/Lead carry their core
-    business fields and at least 6 data fields each (BANT names)."""
-    assert len(CONTACT_FIELDS) == 12
+def test_ac1_field_completeness(test_db):
+    """The seeded preset schemas carry their core business fields: contact
+    has exactly the 6 data fields mirrored in CONTACT_FIELDS (confidence
+    twins are added by create_dynamic_model, not stored in the seed);
+    invoice/lead keep their core names (invoice has no line_items since
+    the DB migration); every preset has at least 6 data fields."""
+    contact_data_fields = set(get_preset("contact").schema_dict["fields"])
+    assert contact_data_fields == {
+        f for f in CONTACT_FIELDS if not f.endswith("_confidence")
+    }
+    assert len(contact_data_fields) == 6
 
+    invoice_data_fields = set(get_preset("invoice").schema_dict["fields"])
     assert {
         "invoice_number", "date", "vendor", "total", "tax", "currency"
-    } <= INVOICE_FIELDS
+    } <= invoice_data_fields
+    assert "line_items" not in invoice_data_fields
+
+    lead_data_fields = set(get_preset("lead").schema_dict["fields"])
     assert {
         "name", "email", "phone", "company", "job_title"
-    } <= LEAD_FIELDS
+    } <= lead_data_fields
 
-    for fields in (CONTACT_FIELDS, INVOICE_FIELDS, LEAD_FIELDS):
-        data_fields = [f for f in fields if not f.endswith("_confidence")]
+    for data_fields in (contact_data_fields, invoice_data_fields, lead_data_fields):
         assert len(data_fields) >= 6
 
 
