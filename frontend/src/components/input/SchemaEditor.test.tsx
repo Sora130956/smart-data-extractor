@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import '@/i18n';
+import i18n from '@/i18n';
 import { SchemaEditor } from './SchemaEditor';
 import { useUiStore } from '@/store/uiStore';
 
@@ -42,7 +42,8 @@ function stubPresetSchemaFetch() {
 }
 
 describe('SchemaEditor', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en');
     vi.unstubAllGlobals();
     useUiStore.setState({ customFields: [], isSchemaModified: false, preset: 'invoice' });
   });
@@ -82,5 +83,34 @@ describe('SchemaEditor', () => {
     screen.getByRole('button', { name: 'Reset to Preset' }).click();
 
     await waitFor(() => expect(screen.queryByText('Modified')).not.toBeInTheDocument());
+  });
+
+  it('refreshes field display names when the UI language changes', async () => {
+    stubPresetSchemaFetch();
+    render(<SchemaEditor />, { wrapper });
+
+    await waitFor(() => expect(screen.getByDisplayValue('Name')).toBeInTheDocument());
+
+    await i18n.changeLanguage('zh');
+
+    await waitFor(() => expect(screen.getByDisplayValue('姓名')).toBeInTheDocument());
+    expect(screen.getByDisplayValue('邮箱')).toBeInTheDocument();
+  });
+
+  it('keeps user edits instead of reseeding when the language changes', async () => {
+    stubPresetSchemaFetch();
+    render(<SchemaEditor />, { wrapper });
+
+    await waitFor(() => expect(screen.getByDisplayValue('Name')).toBeInTheDocument());
+    useUiStore
+      .getState()
+      .setCustomFields([{ displayName: 'custom', fieldName: null, type: 'string', description: '' }]);
+    await waitFor(() => expect(screen.getByText('Modified')).toBeInTheDocument());
+
+    await i18n.changeLanguage('zh');
+
+    await waitFor(() => expect(screen.getByText('已修改')).toBeInTheDocument());
+    expect(screen.getByDisplayValue('custom')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('姓名')).not.toBeInTheDocument();
   });
 });

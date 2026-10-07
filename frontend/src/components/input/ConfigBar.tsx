@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/Button';
 import { SchemaEditor } from '@/components/input/SchemaEditor';
 import { getPresets } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
-import type { PresetId } from '@/types/extraction';
 
 const selectClass =
   'rounded-token border border-border bg-surface px-2.5 py-1.5 text-body text-text';
@@ -20,8 +19,12 @@ export function ConfigBar({
 }) {
   const { t, i18n } = useTranslation();
   const { preset, instructions, setPreset, setInstructions } = useUiStore();
-  const { data: presets } = useQuery({ queryKey: ['presets'], queryFn: getPresets });
-  const isZh = (i18n.resolvedLanguage ?? 'en') === 'zh';
+  const {
+    data: presets,
+    isPending: presetsLoading,
+    isError: presetsError,
+  } = useQuery({ queryKey: ['presets'], queryFn: getPresets });
+  const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
 
   return (
     <div className="mt-4">
@@ -33,13 +36,20 @@ export function ConfigBar({
           id="preset"
           className={selectClass}
           value={preset}
-          onChange={(e) => setPreset(e.target.value as PresetId)}
+          disabled={presetsLoading || presetsError}
+          onChange={(e) => setPreset(e.target.value)}
         >
-          {(presets ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {`${t('config.preset')}: ${isZh ? p.display_name_zh : p.display_name_en}`}
-            </option>
-          ))}
+          {presetsLoading ? (
+            <option value={preset}>{t('config.presetsLoading')}</option>
+          ) : presetsError ? (
+            <option value={preset}>{preset}</option>
+          ) : (
+            (presets ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {`${t('config.preset')}: ${isZh ? p.display_name_zh : p.display_name_en}`}
+              </option>
+            ))
+          )}
         </select>
 
         <input
@@ -56,6 +66,10 @@ export function ConfigBar({
           {isLoading ? t('config.starting') : t('config.start')}
         </Button>
       </div>
+
+      {presetsError ? (
+        <p className="mt-2 text-caption text-error">{t('config.presetsError')}</p>
+      ) : null}
 
       <SchemaEditor />
     </div>

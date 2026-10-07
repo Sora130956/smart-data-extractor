@@ -2,16 +2,21 @@
 // SchemaEditor to show the selected preset's field structure.
 
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { getPresetSchema } from '@/api/client';
-import i18n from '@/i18n';
 import type { SchemaField } from '@/types/extraction';
 
 export function usePresetSchema(preset: string) {
+  // useTranslation (not the i18n singleton) so a language switch re-renders
+  // and the lang in the queryKey busts the cached previous-language fields.
+  const { i18n } = useTranslation();
+  const lang = i18n.resolvedLanguage ?? 'en';
+  const isZh = lang.startsWith('zh');
+
   return useQuery<SchemaField[], Error>({
-    queryKey: ['preset-schema', preset],
+    queryKey: ['preset-schema', preset, lang],
     queryFn: async () => {
       const response = await getPresetSchema(preset);
-      const isZh = (i18n.resolvedLanguage ?? 'en') === 'zh';
       return response.fields.map((f) => ({
         displayName: isZh ? f.display_name_zh : f.display_name_en,
         displayNameEn: f.display_name_en,

@@ -26,9 +26,10 @@ export function SchemaEditor() {
   const { data: presetFields, isLoading } = usePresetSchema(preset);
 
   // Seed the editable field set from the preset's schema. Runs again after
-  // a preset switch, since setPreset() clears customFields to [].
+  // a preset switch (setPreset clears customFields) or a language switch
+  // (queryKey includes the language), as long as the user has no edits.
   useEffect(() => {
-    if (presetFields && customFields.length === 0) {
+    if (presetFields && !isSchemaModified) {
       resetToPreset(presetFields);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

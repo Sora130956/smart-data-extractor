@@ -37,6 +37,8 @@
   },
   "config": {
     "preset": "Preset",
+    "presetsLoading": "Loading presets…",
+    "presetsError": "Failed to load presets",
     "instructions": "Describe what you want to extract… (optional)",
     "start": "Start Extraction",
     "starting": "Extracting…",
