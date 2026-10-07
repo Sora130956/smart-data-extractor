@@ -15,12 +15,14 @@ from smart_data_extractor.presets import list_presets
 
 class _ExtractionTarget(BaseModel):
     """Shared request fields: the extraction target (preset XOR schema)
-    plus optional caller instructions."""
+    plus optional caller instructions and UI language."""
 
     preset: str | None = None
     # Aliased: a field literally named "schema" would shadow BaseModel.schema.
     schema_: dict[str, Any] | None = Field(default=None, alias="schema")
     instructions: str | None = None
+    # UI language tag: preset field descriptions sent to the LLM follow it.
+    lang: str | None = None
 
     @model_validator(mode="after")
     def _check_target(self):
@@ -94,7 +96,8 @@ class PresetFieldInfo(BaseModel):
     display_name_en: str
     type: str
     format: str | None = None
-    description: str | None = None
+    description_zh: str | None = None
+    description_en: str | None = None
 
 
 class PresetSchemaResponse(BaseModel):

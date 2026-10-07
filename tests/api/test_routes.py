@@ -41,10 +41,17 @@ def _make_fake_extract(fail_with: Exception | None = None):
     calls = []
 
     async def fake_extract(
-        text, preset=None, schema_dict=None, *, model=None, model_ref=None, instructions=None
+        text, preset=None, schema_dict=None, *, model=None, model_ref=None,
+        instructions=None, lang=None
     ):
         calls.append(
-            {"text": text, "preset": preset, "schema_dict": schema_dict, "instructions": instructions}
+            {
+                "text": text,
+                "preset": preset,
+                "schema_dict": schema_dict,
+                "instructions": instructions,
+                "lang": lang,
+            }
         )
         if fail_with is not None:
             raise fail_with
@@ -59,10 +66,16 @@ def _make_fake_batch():
     calls = []
 
     async def fake_batch(
-        texts, preset=None, schema_dict=None, *, model=None, instructions=None, return_exceptions=False
+        texts, preset=None, schema_dict=None, *, model=None, instructions=None,
+        return_exceptions=False, lang=None
     ):
         calls.append(
-            {"texts": list(texts), "instructions": instructions, "return_exceptions": return_exceptions}
+            {
+                "texts": list(texts),
+                "instructions": instructions,
+                "return_exceptions": return_exceptions,
+                "lang": lang,
+            }
         )
         results = []
         for t in texts:
@@ -119,8 +132,37 @@ async def test_extract_happy_path(app, client, test_db):
     assert body["cost_cny"] == pytest.approx(0.001 * 7.25)
     # The route forwards request fields to the extraction layer unchanged.
     assert calls == [
-        {"text": "John Smith", "preset": "contact", "schema_dict": None, "instructions": "be strict"}
+        {
+            "text": "John Smith",
+            "preset": "contact",
+            "schema_dict": None,
+            "instructions": "be strict",
+            "lang": None,
+        }
     ]
+
+
+async def test_extract_forwards_lang(app, client, test_db):
+    fake, calls = _make_fake_extract()
+    app.dependency_overrides[get_extract_fn] = lambda: fake
+
+    resp = await client.post(
+        "/extract",
+        json={"text": "张三，zhang@acme.cn", "preset": "contact", "lang": "zh-CN"},
+    )
+
+    assert resp.status_code == 200
+    assert calls[0]["lang"] == "zh-CN"
+
+
+async def test_extract_without_lang_passes_none(app, client, test_db):
+    fake, calls = _make_fake_extract()
+    app.dependency_overrides[get_extract_fn] = lambda: fake
+
+    resp = await client.post("/extract", json={"text": "x", "preset": "contact"})
+
+    assert resp.status_code == 200
+    assert calls[0]["lang"] is None
 
 
 async def test_extract_with_custom_schema(app, client):
@@ -198,6 +240,20 @@ async def test_batch_partial_failure_contract(app, client, test_db):
     # The API always opts into per-item tolerance and forwards instructions.
     assert calls[0]["return_exceptions"] is True
     assert calls[0]["instructions"] == "be strict"
+    assert calls[0]["lang"] is None
+
+
+async def test_batch_forwards_lang(app, client, test_db):
+    fake, calls = _make_fake_batch()
+    app.dependency_overrides[get_batch_fn] = lambda: fake
+
+    resp = await client.post(
+        "/batch_extract",
+        json={"texts": ["张三，zhang@acme.cn"], "preset": "contact", "lang": "zh"},
+    )
+
+    assert resp.status_code == 200
+    assert calls[0]["lang"] == "zh"
 
 
 async def test_batch_empty_texts_422(client):
@@ -216,6 +272,9 @@ async def test_preset_schema_returns_fields(client, test_db):
     assert email_field["format"] == "email"
     assert email_field["display_name_zh"] == "邮箱"
     assert email_field["display_name_en"] == "Email"
+    assert email_field["description_zh"] == "联系人电子邮箱"
+    assert email_field["description_en"] == "Email address of the contact"
+    assert "description" not in email_field
 
 
 async def test_preset_schema_invoice_has_date_type_no_line_items(client, test_db):

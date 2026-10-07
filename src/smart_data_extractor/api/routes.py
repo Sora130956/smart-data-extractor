@@ -71,7 +71,10 @@ async def extract(
     fn: Callable[..., Any] = Depends(get_extract_fn),
 ) -> dict:
     try:
-        result = await fn(req.text, req.preset, req.schema_, instructions=req.instructions)
+        result = await fn(
+            req.text, req.preset, req.schema_,
+            instructions=req.instructions, lang=req.lang,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
@@ -103,6 +106,7 @@ async def batch(
             req.schema_,
             instructions=req.instructions,
             return_exceptions=True,
+            lang=req.lang,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
