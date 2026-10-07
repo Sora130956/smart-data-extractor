@@ -145,7 +145,7 @@ async def test_extract_requires_exactly_one_source(client):
     assert neither.status_code == 422
 
 
-async def test_extract_unknown_preset_422(client):
+async def test_extract_unknown_preset_422(client, test_db):
     resp = await client.post("/extract", json={"text": "x", "preset": "nope"})
     assert resp.status_code == 422
 
