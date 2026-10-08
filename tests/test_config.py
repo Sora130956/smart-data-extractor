@@ -116,3 +116,51 @@ def test_settings_database_url_override(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/test.db")
     get_settings.cache_clear()
     assert get_settings().database_url == "sqlite:////tmp/test.db"
+
+
+def test_settings_glm_api_key_default_none(monkeypatch):
+    """Test glm_api_key defaults to None when not set."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_API_KEY", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().glm_api_key is None
+
+
+def test_settings_glm_api_key_override(monkeypatch):
+    """Test glm_api_key can be set via GLM_API_KEY."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_API_KEY", "glm-test-key")
+    get_settings.cache_clear()
+    assert get_settings().glm_api_key == "glm-test-key"
+
+
+def test_settings_glm_model_default(monkeypatch):
+    """Test glm_model defaults to glm-4v-flash."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_MODEL", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().glm_model == "glm-4v-flash"
+
+
+def test_settings_glm_model_override(monkeypatch):
+    """Test glm_model can be overridden via GLM_MODEL."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_MODEL", "glm-4.5v")
+    get_settings.cache_clear()
+    assert get_settings().glm_model == "glm-4.5v"
+
+
+def test_settings_glm_base_url_default(monkeypatch):
+    """Test glm_base_url defaults to the Zhipu OpenAI-compatible endpoint."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_BASE_URL", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().glm_base_url == "https://open.bigmodel.cn/api/paas/v4/"
+
+
+def test_settings_glm_base_url_override(monkeypatch):
+    """Test glm_base_url can be overridden via GLM_BASE_URL."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_BASE_URL", "https://example.com/v1/")
+    get_settings.cache_clear()
+    assert get_settings().glm_base_url == "https://example.com/v1/"

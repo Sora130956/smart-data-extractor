@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Display-currency conversion (approximate static rate, override via env).
     usd_to_cny: float = 7.25
     database_url: str = "sqlite:///./smart_data_extractor.db"
+    # GLM (Zhipu) vision model, used for OCR-based PDF parsing.
+    glm_api_key: str | None = None
+    glm_model: str = "glm-4v-flash"
+    glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
     
     model_config = SettingsConfigDict(
         env_file=".env",
