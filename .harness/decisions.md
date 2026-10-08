@@ -260,3 +260,51 @@
   - `build_glm_model` 返回类型注解不变（GlmChatModel is-a OpenAIChatModel，既有 isinstance 断言不受影响）
   - pydantic-ai 未来若放宽 `object`，`_validate_completion` 覆写自动变空操作，无兼容负担
   - 验证：测试先红（精确复现线上报错）后绿；全量 196 passed / 2 skipped
+
+## D-012：PDF 解析方式设置——header 设置面板 + 按页拆分来源
+
+- **日期**：2026-10-08
+- **状态**：已接受
+- **来源**：用户需求——一个 PDF 文件可能包含多条数据记录，整份拼接只能抽出一条
+- **背景**：
+  - `parse_pdf` 本就逐页 OCR 后拼接为单一 `text`，多记录 PDF 的信息在提交前即被合并
+  - `batch_extract` 下游天然支持多来源独立提取，缺的只是"每页一条来源"的入口
+  - 用户先要求在 PasteTextInput 内放开关，看过交互预览后改为：header「设置」按钮 + 设置 modal（可扩展模型选择等后续配置）
+- **决策**：
+  1. 后端：`parse_pdf` 返回增加 `pages: list[str | None]`——与 PDF 页数等长、按原始页序对齐、失败页为 `None`（`text` 仍为成功页拼接，向后兼容）；`ParsePdfResponse` 透传
+  2. 前端 schema：`parsePdfResponseSchema` 加 `pages: z.array(z.string().nullable())`（网络边界强校验契约漂移）
+  3. 前端 store：`useUiStore` 加 `pdfSplitMode: 'whole' | 'pages'`，localStorage `sde.pdfSplitMode` 持久化，默认 `whole`；非法存储值回退 `whole`
+  4. 前端 UI：Header 加「⚙ 设置」按钮 → `SettingsModal`（overlay 点击/Esc/✕ 三路关闭，aria dialog）；「文档解析」分组含 segmented 开关（aria-pressed，样式对齐 LanguageToggle）+ 随模式切换的 hint；「模型」分组占位（GLM-4.6V 默认 + 即将支持徽章，后续接模型自选）
+  5. 前端拆分：pages 模式下 `result.pages.forEach`，跳过 `null` 页，来源命名 `文件名 · P{原页码}`（index+1，失败页留空号不重排）；whole 模式行为不变
+- **理由（为什么不选备选方案）**：
+  - 备选 A：后端按页拆分逐页返回多次 → 放弃。`parse_pdf` 一次调用已拿到全部页文本，前端拆零成本；后端拆需改请求模型（页码参数）徒增往返
+  - 备选 B：开关放 PasteTextInput 内 → 放弃（用户看预览后拍板）。上传区职责单一；设置项会持续增多（模型自选等），收口到 header 设置面板
+  - 备选 C：`pages` 只返回成功页（压缩数组）→ 放弃。丢失页码对齐，前端需靠 `pages_failed` 反推页码，None 占位更直白
+- **影响**：
+  - API 响应新增必填字段 `pages`：旧后端 + 新前端会 400（zod 拒绝），前后端需同步部署；测试环境 fake 已同步补齐
+  - 测试注意：zustand store 模块级单例，跨测试用例须显式 `useUiStore.setState({ pdfSplitMode })` 防状态泄漏（本次 spinner 测试即因此先红）
+  - 验证：后端 196 passed / 2 skipped；前端 116 passed（17 files）+ `tsc --noEmit` 0 错误
+
+## D-013：图片 OCR 上传——独立 `/parse_image` 端点 + 共享 OCR 核心，不走分页拆分
+
+- **日期**：2026-10-08
+- **状态**：已接受
+- **来源**：用户需求——PasteTextInput 的拖拽区支持图片上传，逻辑与 PDF 类似但不需要分页拆分
+- **背景**：
+  - `parse_pdf` 的本质是"PDF 页面渲染为图片 → 逐图 GLM 视觉 OCR → 拼接"；图片文件可以跳过渲染步骤，直接作为一张"页"送入同一套 OCR 循环
+  - D-012 的 `pdfSplitMode`（whole/pages）是因为一份 PDF 可能含多条记录；单张图片天然只有一条记录，不存在拆分的意义
+  - 可选方案是把 `/parse_pdf` 泛化成通用 `/parse_document`（按 content-type 分支），或新增独立 `/parse_image`；经向用户确认，选择后者以保持现有 `/parse_pdf` 契约零变更
+- **决策**：
+  1. 后端 `extraction/ocr.py` 重构：抽出私有 `_ocr_images(images: list[bytes], *, media_type, model, model_ref) -> dict`（逐图 OCR + 成功/失败聚合 + token/cost 统计，原在 `parse_pdf` 内联）与 `_resolve_model(model, model_ref)`（生产默认 GLM 模型构建路径）；`_ocr_page` 增加 `media_type: str = "image/png"` 参数（原写死 png）
+  2. 新增公开函数 `parse_image(image_bytes, *, media_type="image/png", model=None, model_ref=None) -> dict`：不经过 `pdf_to_images` 渲染，直接把原始字节当作唯一一页送入 `_ocr_images`，返回形状与 `parse_pdf` 完全一致（`text/pages/pages_failed/tokens_used/cost_usd`，`pages` 恒为单元素列表）
+  3. 路由层新增独立 `POST /parse_image`（非合并进 `/parse_pdf`）：DI 缝 `get_parse_image_fn`，content-type 白名单 `{image/png, image/jpeg, image/jpg, image/bmp}`（智谱 GLM 视觉官方支持格式），非法类型 422；复用既有 `ParsePdfResponse` 响应模型（形状相同，无需新建 DTO）
+  4. 前端：`parseImageResponseSchema = parsePdfResponseSchema`（复用）；`client.parseImage` 对应新端点；`PasteTextInput.stage()` 新增 `imageFiles` 分支（扩展名白名单 png/jpg/jpeg/bmp），**始终** `onAdd(file.name, result.text)`，不读取 `pdfSplitMode`、不做按页判断
+- **理由（为什么不选备选方案）**：
+  - 备选 A：合并为通用 `/parse_document`（按 content-type 内部分支渲染或不渲染）→ 放弃（用户拍板）。会改动已上线的 `/parse_pdf` 契约和前端调用点，向后兼容收益不足以抵消改动面；两个端点各自职责单一，路由层保持薄
+  - 备选 B：图片也套用 `pdfSplitMode` 拆分逻辑（恒为 1 页，等效 whole）→ 放弃。徒增前端分支判断成本，语义上图片从不存在"按页拆分"的选项，直接硬编码整图行为更直白
+  - 备选 C：`_ocr_page` 不加 `media_type` 参数，图片单独写一套 OCR 循环 → 放弃。与 `parse_pdf` 的失败容错、token/cost 统计逻辑完全重复，违反"避免重复代码"原则
+- **影响**：
+  - `/parse_pdf` 端点与现有契约零变更，无需前端已有调用点回归
+  - `ParsePdfResponse` 复用到两个端点语义上略怪（命名含 Pdf），但避免重复 DTO；若后续图片/PDF 契约出现分歧需拆分
+  - 验证：后端新增测试（`test_ocr.py` 3 个 + `test_routes.py` 4 个），全量 203 passed / 2 skipped；前端新增测试（`client.test.ts` 2 个 + `PasteTextInput.test.tsx` 2 个），全量 121 passed（17 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
+
