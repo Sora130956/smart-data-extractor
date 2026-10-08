@@ -239,3 +239,24 @@
   - dev 库 `smart_data_extractor.db` 需删除重建（create_all 不做列迁移）
   - CLI 未暴露 lang（保持英文默认），后续如需再加
   - commits：a592b66 / fa9dd03 / 1b5732b / 5129618 / fe4a846
+## D-011：GLM OCR 响应缺 `object` 字段的兼容——GlmChatModel 回填 + http2 MockTransport 测试缝
+
+- **日期**：2026-10-08
+- **状态**：已接受
+- **来源**：真实 GLM OCR 调用逐页失败：`UnexpectedModelBehavior: Invalid response from openai chat completions endpoint ... Input should be 'chat.completion' [literal_error, input_value=None]`
+- **背景**：
+  - 智谱 open.bigmodel.cn 的"OpenAI 兼容"端点响应不含 `"object": "chat.completion"` 字段
+  - openai SDK 3.16.2 构造响应对象不做校验（`object` 保持 None 透传）；pydantic-ai 2.46 的 `_validate_completion` 严格复校验 `Literal['chat.completion']`（仅放宽过 `service_tier`）→ 整个响应被拒
+  - 另发现：respx 0.23.1 只 patch httpx，而 openai 3.16.2 走 httpx2 传输层 → respx 对该调用链拦不住（会真网外呼）
+- **决策**：
+  1. `GlmChatModel(OpenAIChatModel)` 覆写 pydantic-ai 提供的 `_validate_completion` 扩展钩子：`response.object is None` 时回填 `'chat.completion'` 再走父类校验
+  2. `build_glm_model(*, http_client=None)` 增加注入缝；`build_glm_model` 改返回 `GlmChatModel`
+  3. 回归测试 `test_parse_pdf_tolerates_glm_response_missing_object_field`：`httpx2.MockTransport` 假端点返回无 `object` 的 GLM 形状响应，走完整 `parse_pdf` 链路（SDK 解析 → pydantic-ai 校验 → 文本/usage 断言），零真实网络
+- **理由（为什么不选备选方案）**：
+  - 备选 A：respx 在 HTTP 层拦截 → 放弃。respx 不支持 httpx2，实测漏拦导致真网外呼（ConnectError）
+  - 备选 B：等 pydantic-ai 上游放宽 `object` → 放弃。2.46.0 无此放宽亦无时间表，OCR 当前就坏
+  - 备选 C：只做单测直接构造 ChatCompletion → 放弃。绕过了 openai SDK 实际解析路径（`object=None` 正是 SDK 不校验产生的），复现不忠实
+- **影响**：
+  - `build_glm_model` 返回类型注解不变（GlmChatModel is-a OpenAIChatModel，既有 isinstance 断言不受影响）
+  - pydantic-ai 未来若放宽 `object`，`_validate_completion` 覆写自动变空操作，无兼容负担
+  - 验证：测试先红（精确复现线上报错）后绿；全量 196 passed / 2 skipped

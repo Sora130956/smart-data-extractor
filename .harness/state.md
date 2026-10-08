@@ -133,6 +133,7 @@
 
 - [x] F1（脚手架 + token + 骨架 + i18n）：Vite 8.3.1 + React 18.3.1 + TS 5.9.3 + Tailwind v4（CSS-first，`--sde-*` 原始 token + `@theme inline` 映射，light/dark 双主题）+ TanStack Query + Zustand + i18next（EN/中文，`sde.lang` 持久化，`<html lang>` 同步）；组件 Header / StatsStrip / UploadZone / ConfigBar / ResultsHeader / ConfidenceBar / EmptyState / Button；`utils/confidence.ts` 为分档单一来源（0.85 / 0.70）。验证：`tsc -b` exit 0、`vitest run` 10 passed（2 files）、`vite build` exit 0（CSS 12.68 kB / JS 235.72 kB）、浏览器核对四态（light+dark × EN+中文）渲染正常、`sde.theme`/`sde.lang` 刷新后保持、console 无报错
 - [x] F2（文本粘贴输入 + `/batch_extract` 打通，Source/Result 两层渲染）：`api/schemas.ts`（Zod 响应校验）+ `api/client.ts`（fetch 封装，`ApiError`）+ `api/adapters.ts`（响应映射 + confidence 拆分）+ `hooks/useBatchExtract.ts`（TanStack Query mutation）+ `PasteTextInput`（粘贴/Add/待处理列表）+ `SourceGroup`/`ResultRow`（Source/Result 两层渲染）+ `App.tsx` 接入真实数据流（stagedTexts 本地 state、mutate 触发、StatsStrip/ResultsHeader 真实统计、EmptyState 条件渲染、请求失败 banner）。范围裁剪：仅支持纯文本（UploadZone 移除渲染但保留代码供 F5 复用）、无 Tab 切换、列表项不支持展开查看全文。验证：`tsc -b --noEmit` exit 0、`vitest run` 34 passed（9 files）、`vite build` exit 0（JS 333.43 kB / CSS 14.31 kB）
+  - F2.1（结果 chip 字段标签）：chip 由裸值改为「标签：值」（如 `姓名：张伟`，zh 全角冒号 / en 半角冒号）。链路：App 提交时快照 fieldLabels（preset 路径取 `usePresetSchema`；custom 路径取 `/schema/resolve` 回显的 `display_name`，zod `schemaFieldSpecSchema` 新增 `display_name` 可选列）→ `useBatchExtract` → `adapters` 挂到 `ExtractionSource.fieldLabels` → `SourceGroup` → `ResultRow`（`resultRow.fieldValue` i18n key；无标签时回退裸 key；null/list chip 同样用显示名）。快照随批次走，切预设后旧结果标签不错位。验证：vitest 69 passed（11 files）、tsc exit 0、build exit 0、浏览器实测 contact 预设中文界面 chips 全部带标签
 - [ ] F3：置信度体系（列 + 筛选）+ 结果详情弹窗
 - [ ] F4：Schema 编辑器 + custom schema 模式
 - [ ] F5（阻塞于后端 B1–B4）：文件上传
@@ -193,3 +194,8 @@
 - 决策：`schema_fields.description` 拆 `description_zh`/`description_en` 双列；`zh*` 优先 zh 回退 en，否则反之；前端 `i18n.resolvedLanguage` 经 `/extract`、`/batch_extract` 可选 `lang` 透传到 `get_preset`/`get_preset_agent`（lang 进缓存键）；`PresetFieldInfo` 与前端 schema 暴露双语列；`/schema/resolve` 保持单语言
 - 理由：中文界面描述显示英文且发给 LLM 的描述语言不可控；单语言自定义字段与 preset 统一走同一回退规则
 - 详见：`.harness/decisions.md`（commits：a592b66 / fa9dd03 / 1b5732b / 5129618 / fe4a846；后端 168 passed / 2 skipped，前端 typecheck+62 tests+build 全绿）
+
+### D-011: GLM OCR 响应缺 `object` 字段兼容
+- 决策：`GlmChatModel(OpenAIChatModel)` 覆写 `_validate_completion` 钩子回填缺失的 `object`；`build_glm_model` 加 `http_client` 注入缝，回归测试用 `httpx2.MockTransport`（respx 不兼容 httpx2，拦不住 openai 3.16 的调用链）
+- 理由：智谱端点响应无 `object` 字段，openai SDK 不校验透传 None，pydantic-ai 2.46 严格复校验 Literal 拒绝 → OCR 全页失败
+- 详见：`.harness/decisions.md`（验证：先红后绿，全量 196 passed / 2 skipped）
