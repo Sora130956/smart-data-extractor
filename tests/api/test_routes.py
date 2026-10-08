@@ -12,7 +12,9 @@ from smart_data_extractor.api import create_app
 from smart_data_extractor.api.routes import (
     get_batch_fn,
     get_extract_fn,
+    get_parse_image_fn,
     get_parse_pdf_fn,
+    get_schema_infer_fn,
     get_schema_resolve_fn,
 )
 
@@ -372,6 +374,74 @@ async def test_schema_resolve_empty_fields_422(client):
     assert resp.status_code == 422
 
 
+# --- /schema/infer ---
+
+
+def _make_fake_infer(fail_with: Exception | None = None):
+    calls = []
+
+    async def fake_infer(text):
+        calls.append(text)
+        if fail_with is not None:
+            raise fail_with
+        return {
+            "schema": {
+                "fields": {
+                    "invoice_number": {
+                        "type": "string",
+                        "description": "d",
+                        "required": True,
+                        "display_name": "发票号",
+                        "display_name_en": "Invoice Number",
+                    }
+                }
+            },
+            "tokens_used": {"input": 20, "output": 5},
+            "cost_usd": 0.002,
+        }
+
+    return fake_infer, calls
+
+
+async def test_schema_infer_happy_path(app, client):
+    fake, calls = _make_fake_infer()
+    app.dependency_overrides[get_schema_infer_fn] = lambda: fake
+
+    resp = await client.post("/schema/infer", json={"text": "发票号：12345"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["schema"] == {
+        "fields": {
+            "invoice_number": {
+                "type": "string",
+                "description": "d",
+                "required": True,
+                "display_name": "发票号",
+                "display_name_en": "Invoice Number",
+            }
+        }
+    }
+    assert body["cost_usd"] == 0.002
+    assert body["cost_cny"] == pytest.approx(0.002 * 7.25)
+    assert calls == ["发票号：12345"]
+
+
+async def test_schema_infer_value_error_becomes_400(app, client):
+    fake, _ = _make_fake_infer(fail_with=ValueError("no fields"))
+    app.dependency_overrides[get_schema_infer_fn] = lambda: fake
+
+    resp = await client.post("/schema/infer", json={"text": "some text"})
+
+    assert resp.status_code == 400
+    assert "no fields" in resp.json()["detail"]
+
+
+async def test_schema_infer_empty_text_422(client):
+    resp = await client.post("/schema/infer", json={"text": ""})
+    assert resp.status_code == 422
+
+
 # --- /parse_pdf ---
 
 
@@ -384,6 +454,7 @@ def _make_fake_parse_pdf(fail_with: Exception | None = None):
             raise fail_with
         return {
             "text": "extracted OCR text",
+            "pages": ["extracted OCR text"],
             "pages_failed": [],
             "tokens_used": {"input": 100, "output": 20},
             "cost_usd": 0.0,
@@ -404,6 +475,7 @@ async def test_parse_pdf_happy_path(app, client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["text"] == "extracted OCR text"
+    assert body["pages"] == ["extracted OCR text"]
     assert body["pages_failed"] == []
     assert body["tokens_used"] == {"input": 100, "output": 20}
     assert body["cost_usd"] == 0.0
@@ -418,6 +490,7 @@ async def test_parse_pdf_reports_failed_pages_and_cost_cny(app, client):
     async def fake_with_failures(pdf_bytes, *, model=None, model_ref=None):
         return {
             "text": "page one",
+            "pages": ["page one", None],
             "pages_failed": [1],
             "tokens_used": {"input": 50, "output": 10},
             "cost_usd": 0.001,
@@ -455,3 +528,78 @@ async def test_parse_pdf_value_error_becomes_400(app, client):
 
     assert resp.status_code == 400
     assert "broken pdf" in resp.json()["detail"]
+
+
+# --- /parse_image ---
+
+
+def _make_fake_parse_image(fail_with: Exception | None = None):
+    calls = []
+
+    async def fake_parse_image(image_bytes, *, media_type, model=None, model_ref=None):
+        calls.append({"image_bytes": image_bytes, "media_type": media_type})
+        if fail_with is not None:
+            raise fail_with
+        return {
+            "text": "image OCR text",
+            "pages": ["image OCR text"],
+            "pages_failed": [],
+            "tokens_used": {"input": 100, "output": 20},
+            "cost_usd": 0.0,
+        }
+
+    return fake_parse_image, calls
+
+
+async def test_parse_image_happy_path(app, client):
+    fake, calls = _make_fake_parse_image()
+    app.dependency_overrides[get_parse_image_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_image",
+        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["text"] == "image OCR text"
+    assert body["pages"] == ["image OCR text"]
+    assert body["pages_failed"] == []
+    assert body["tokens_used"] == {"input": 100, "output": 20}
+    assert body["cost_usd"] == 0.0
+    assert calls[0]["image_bytes"] == b"\x89PNG fake bytes"
+    assert calls[0]["media_type"] == "image/png"
+
+
+async def test_parse_image_accepts_jpeg(app, client):
+    fake, calls = _make_fake_parse_image()
+    app.dependency_overrides[get_parse_image_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_image",
+        files={"file": ("scan.jpg", b"jpeg fake bytes", "image/jpeg")},
+    )
+
+    assert resp.status_code == 200
+    assert calls[0]["media_type"] == "image/jpeg"
+
+
+async def test_parse_image_rejects_unsupported_content_type(client):
+    resp = await client.post(
+        "/parse_image",
+        files={"file": ("scan.webp", b"webp fake bytes", "image/webp")},
+    )
+    assert resp.status_code == 422
+
+
+async def test_parse_image_value_error_becomes_400(app, client):
+    fake, _ = _make_fake_parse_image(fail_with=ValueError("broken image"))
+    app.dependency_overrides[get_parse_image_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_image",
+        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
+    )
+
+    assert resp.status_code == 400
+    assert "broken image" in resp.json()["detail"]

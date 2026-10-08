@@ -25,6 +25,25 @@ digit). Also produce a concise English display name (title-case phrase, e.g.
 input field, echoing its original index.
 """
 
+INFER_INSTRUCTIONS = """\
+You design a JSON extraction schema for a piece of raw text.
+
+Read the text and decide which fields a data-extraction form should have to
+capture its key structured information. For each field, produce:
+- field_name: a concise snake_case name suitable as a Python identifier
+  (lowercase letters, digits, underscores; must not start with a digit).
+- display_name: a concise display label in the same language as the input
+  text (e.g. Chinese text -> Chinese label).
+- display_name_en: a concise English display label (title-case phrase).
+- description: a short description of what the field captures, in the same
+  language as display_name.
+- type: one of "string", "number", "boolean", "date".
+- required: whether the field is essential to this kind of document.
+
+Return 3 to 12 fields that best represent the text's structure. Do not
+invent fields unrelated to the content.
+"""
+
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
@@ -36,6 +55,19 @@ class _FieldNameItem(BaseModel):
 
 class _FieldNameList(BaseModel):
     fields: list[_FieldNameItem]
+
+
+class _InferredField(BaseModel):
+    field_name: str
+    display_name: str
+    display_name_en: str
+    description: str | None
+    type: str
+    required: bool
+
+
+class _InferredSchema(BaseModel):
+    fields: list[_InferredField]
 
 
 def _validate_identifier(name: str) -> None:
@@ -127,6 +159,67 @@ async def resolve_schema(
             "display_name": f["display_name"],
             "display_name_en": f.get("display_name_en")
             or (generated[i].display_name_en if i in generated else None),
+        }
+
+    return {
+        "schema": {"fields": schema_fields},
+        "tokens_used": tokens,
+        "cost_usd": cost_usd,
+    }
+
+
+async def infer_schema(
+    text: str,
+    *,
+    model: Any = None,
+    model_ref: str | None = None,
+) -> dict:
+    """Infer an extraction schema from a sample of raw text.
+
+    Args:
+        text: A sample of the raw text the user wants to extract from.
+        model: Optional model override (TestModel for offline tests).
+        model_ref: Optional genai-prices ref override for cost tracking.
+
+    Returns:
+        {"schema": {"fields": {name: {type, description, required,
+         display_name, display_name_en}}},
+         "tokens_used": {"input": int, "output": int}, "cost_usd": float}
+
+    Raises:
+        ValueError: A generated field name is not a valid snake_case
+            identifier, collides with another field's name, uses the
+            reserved "_confidence" suffix, or no field was returned.
+    """
+    if model is None:
+        agent = build_agent(
+            _InferredSchema,
+            model=get_settings().model,
+            instructions=INFER_INSTRUCTIONS,
+            limiter=shared_concurrency_limiter(),
+        )
+    else:
+        agent = build_agent(_InferredSchema, model=model, instructions=INFER_INSTRUCTIONS)
+
+    result = await agent.run(text)
+    usage = result.usage
+    tokens = {"input": usage.input_tokens, "output": usage.output_tokens}
+    cost_usd = _resolve_cost(usage, model=model, model_ref=model_ref)
+
+    if not result.output.fields:
+        raise ValueError("Schema inference did not return any fields")
+
+    schema_fields: dict[str, Any] = {}
+    for item in result.output.fields:
+        _validate_identifier(item.field_name)
+        if item.field_name in schema_fields:
+            raise ValueError(f"Generated field name {item.field_name!r} conflicts with another field")
+        schema_fields[item.field_name] = {
+            "type": item.type,
+            "description": item.description,
+            "required": item.required,
+            "display_name": item.display_name,
+            "display_name_en": item.display_name_en,
         }
 
     return {

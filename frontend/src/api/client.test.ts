@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, batchExtract, getPresets, getPresetSchema, parsePdf, resolveSchema } from './client';
+import { ApiError, batchExtract, getPresets, getPresetSchema, parseImage, parsePdf, resolveSchema } from './client';
 
 describe('batchExtract', () => {
   afterEach(() => {
@@ -275,6 +275,7 @@ describe('parsePdf', () => {
   it('posts the file as multipart form data and parses a successful response', async () => {
     const payload = {
       text: 'extracted OCR text',
+      pages: ['extracted OCR text'],
       pages_failed: [],
       tokens_used: { input: 100, output: 20 },
       cost_usd: 0,
@@ -312,6 +313,57 @@ describe('parsePdf', () => {
     await expect(parsePdf(file)).rejects.toMatchObject({
       status: 422,
       message: 'File must be a PDF',
+    });
+  });
+});
+
+describe('parseImage', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('posts the file as multipart form data and parses a successful response', async () => {
+    const payload = {
+      text: 'image OCR text',
+      pages: ['image OCR text'],
+      pages_failed: [],
+      tokens_used: { input: 100, output: 20 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => payload,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File([new Uint8Array([1, 2, 3])], 'scan.png', { type: 'image/png' });
+    const result = await parseImage(file);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/parse_image',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const call = fetchMock.mock.calls[0][1];
+    expect(call.body).toBeInstanceOf(FormData);
+    expect(call.body.get('file')).toBe(file);
+    expect(result.text).toBe('image OCR text');
+    expect(result.pages).toEqual(['image OCR text']);
+  });
+
+  it('throws ApiError on a non-ok response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      statusText: 'Unprocessable Entity',
+      text: async () => 'File must be an image',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File([new Uint8Array([1])], 'scan.webp', { type: 'image/webp' });
+    await expect(parseImage(file)).rejects.toMatchObject({
+      status: 422,
+      message: 'File must be an image',
     });
   });
 });

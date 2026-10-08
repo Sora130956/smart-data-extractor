@@ -3,7 +3,7 @@
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from smart_data_extractor.extraction import resolve_schema
+from smart_data_extractor.extraction import infer_schema, resolve_schema
 
 
 def _field(display_name, description="d", type_="string", required=False, field_name=None, display_name_en=None):
@@ -144,3 +144,95 @@ async def test_resolve_missing_generation_raises():
 
     with pytest.raises(ValueError, match="did not return a name"):
         await resolve_schema(fields, model=model)
+
+
+async def test_infer_schema_happy_path():
+    """The Agent's inferred fields become the schema, keyed by field_name."""
+    model = TestModel(
+        custom_output_args={
+            "fields": [
+                {
+                    "field_name": "invoice_number",
+                    "display_name": "发票号",
+                    "display_name_en": "Invoice Number",
+                    "description": "The invoice number",
+                    "type": "string",
+                    "required": True,
+                }
+            ]
+        }
+    )
+
+    result = await infer_schema("发票号：12345", model=model)
+
+    assert result["schema"] == {
+        "fields": {
+            "invoice_number": {
+                "type": "string",
+                "description": "The invoice number",
+                "required": True,
+                "display_name": "发票号",
+                "display_name_en": "Invoice Number",
+            }
+        }
+    }
+    assert result["tokens_used"]["input"] > 0
+    assert result["cost_usd"] >= 0.0
+
+
+async def test_infer_schema_no_fields_raises():
+    """An empty field list from the Agent is rejected."""
+    model = TestModel(custom_output_args={"fields": []})
+
+    with pytest.raises(ValueError, match="did not return any fields"):
+        await infer_schema("some text", model=model)
+
+
+async def test_infer_schema_invalid_identifier_raises():
+    """A generated field_name that isn't valid snake_case fails."""
+    model = TestModel(
+        custom_output_args={
+            "fields": [
+                {
+                    "field_name": "InvoiceNumber",
+                    "display_name": "发票号",
+                    "display_name_en": "Invoice Number",
+                    "description": "d",
+                    "type": "string",
+                    "required": True,
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="not a valid snake_case identifier"):
+        await infer_schema("发票号：12345", model=model)
+
+
+async def test_infer_schema_duplicate_field_name_raises():
+    """Two inferred fields sharing the same field_name conflict."""
+    model = TestModel(
+        custom_output_args={
+            "fields": [
+                {
+                    "field_name": "name",
+                    "display_name": "甲方",
+                    "display_name_en": "Party A",
+                    "description": "d",
+                    "type": "string",
+                    "required": True,
+                },
+                {
+                    "field_name": "name",
+                    "display_name": "乙方",
+                    "display_name_en": "Party B",
+                    "description": "d",
+                    "type": "string",
+                    "required": True,
+                },
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="conflicts"):
+        await infer_schema("some contract text", model=model)

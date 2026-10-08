@@ -97,11 +97,33 @@ describe('adaptBatchExtractResponse', () => {
     const sources = adaptBatchExtractResponse(response, ['first text', 'second text']);
 
     expect(sources).toHaveLength(2);
-    expect(sources[0].id).toBe('text-0');
+    expect(sources[0].id).toMatch(/^text-/);
+    expect(sources[0].id).not.toBe(sources[1].id);
     expect(sources[0].name).toBe('Manual Input 1');
-    expect(sources[1].id).toBe('text-1');
     expect(sources[1].name).toBe('Manual Input 2');
     expect(sources[1].results[0].status).toBe('failed');
+  });
+
+  it('generates ids unique across batches (accumulated results need distinct keys)', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0.0001, cost_cny: 0.000725,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0.0001, total_cost_cny: 0.000725,
+      total_tokens: { input: 1, output: 1 },
+      succeeded: 1,
+      failed: 0,
+    };
+
+    const batch1 = adaptBatchExtractResponse(response, ['first batch text']);
+    const batch2 = adaptBatchExtractResponse(response, ['second batch text']);
+
+    expect(batch1[0].id).not.toBe(batch2[0].id);
   });
 
   it('attributes the schema resolve cost to the first source only', () => {

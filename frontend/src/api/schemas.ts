@@ -68,11 +68,16 @@ export const schemaResolveResponseSchema = z.object({
 
 export const parsePdfResponseSchema = z.object({
   text: z.string(),
+  // Per-page OCR text aligned to the original page order; null marks a failed page.
+  pages: z.array(z.string().nullable()),
   pages_failed: z.array(z.number()),
   tokens_used: tokensUsedSchema,
   cost_usd: z.number(),
   cost_cny: z.number(),
 });
+
+// /parse_image returns the same shape (one image = one "page").
+export const parseImageResponseSchema = parsePdfResponseSchema;
 
 export type TokensUsed = z.infer<typeof tokensUsedSchema>;
 export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
@@ -82,3 +87,4 @@ export type PresetSchemaResponse = z.infer<typeof presetSchemaResponseSchema>;
 export type PresetListItem = z.infer<typeof presetListItemSchema>;
 export type SchemaResolveResponse = z.infer<typeof schemaResolveResponseSchema>;
 export type ParsePdfResponse = z.infer<typeof parsePdfResponseSchema>;
+export type ParseImageResponse = ParsePdfResponse;

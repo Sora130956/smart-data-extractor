@@ -8,8 +8,35 @@
     "themeLight": "浅色",
     "themeDark": "深色",
     "language": "EN / 中文",
+    "settings": "设置",
     "history": "历史记录",
     "github": "GitHub"
+  },
+  "history": {
+    "title": "历史记录",
+    "close": "关闭",
+    "clear": "清空全部",
+    "empty": "还没有历史记录 — 提取成功的批次会自动保存在本浏览器中。",
+    "sourcesCount": "{{count}} 个来源",
+    "customSchema": "自定义字段"
+  },
+  "settings": {
+    "title": "设置",
+    "close": "关闭",
+    "groupParsing": "文档解析",
+    "pdfSplitMode": "PDF 解析方式",
+    "splitMode": {
+      "whole": "整份一条",
+      "pages": "每页一条"
+    },
+    "splitModeHint": {
+      "whole": "整个 PDF 合并为一条文本来源",
+      "pages": "每页单独成为一条文本来源（文件 · P1、P2、…）"
+    },
+    "groupModel": "模型",
+    "defaultModel": "GLM-4.6V（默认）",
+    "comingSoon": "即将支持",
+    "modelHint": "此处后续可自选模型"
   },
   "stats": {
     "sources": "来源数",
@@ -27,11 +54,11 @@
     "remove": "移除"
   },
   "paste": {
-    "title": "拖拽 txt 或 pdf 文件到此处，或点击选择",
-    "hint": "支持 .txt 和 .pdf（自动 OCR） · 可多选",
+    "title": "拖拽 txt、pdf 或图片文件到此处，或点击选择",
+    "hint": "支持 .txt、.pdf 和图片 png/jpg/jpeg/bmp（自动 OCR） · 可多选",
     "dropActive": "松开即可添加文件",
-    "empty": "还没有文本来源 — 在左侧上传 txt 或 pdf 文件",
-    "parsing": "正在解析 PDF（OCR），请稍候…",
+    "empty": "还没有文本来源 — 在左侧上传 txt、pdf 或图片文件",
+    "parsing": "正在解析文件（OCR），请稍候…",
     "itemLabel": "文本 {{index}}",
     "itemChars": "{{count}} 字符",
     "remove": "移除"
@@ -43,7 +70,11 @@
     "instructions": "描述你要提取什么内容…（可选）",
     "start": "开始提取",
     "starting": "提取中…",
-    "requestError": "提取请求失败：{{message}}"
+    "requestError": "提取请求失败：{{message}}",
+    "smartPreset": "智能推断",
+    "mySchemas": "我的模板",
+    "manageSchemas": "管理",
+    "smartSavedNamePrefix": "智能推断"
   },
   "schema": {
     "loading": "加载中…",
@@ -55,6 +86,7 @@
     "fieldDescription": "描述",
     "removeField": "删除字段",
     "addField": "+ 添加字段",
+    "smartEmpty": "上传文件后点击「开始提取」，AI 将自动推断字段结构",
     "type": {
       "string": "文本",
       "number": "数值",
@@ -62,6 +94,16 @@
       "boolean": "布尔值",
       "date": "日期"
     }
+  },
+  "manageSchemas": {
+    "title": "管理我的模板",
+    "close": "关闭",
+    "empty": "还没有保存的模板",
+    "fieldsCount": "{{count}} 个字段",
+    "rename": "重命名",
+    "delete": "删除",
+    "cancel": "取消",
+    "confirmDelete": "确定删除「{{name}}」？"
   },
   "results": {
     "title": "提取结果",

@@ -133,6 +133,10 @@ class SchemaResolveRequest(BaseModel):
     fields: list[SchemaFieldInput] = Field(min_length=1)
 
 
+class SchemaInferRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
 class SchemaResolveResponse(BaseModel):
     # Aliased: a field literally named "schema" would shadow BaseModel.schema.
     schema_: dict[str, Any] = Field(alias="schema")
@@ -145,6 +149,8 @@ class SchemaResolveResponse(BaseModel):
 
 class ParsePdfResponse(BaseModel):
     text: str
+    """Per-page OCR text aligned to the original page order; None marks a failed page."""
+    pages: list[str | None]
     pages_failed: list[int]
     tokens_used: TokensUsed
     cost_usd: float

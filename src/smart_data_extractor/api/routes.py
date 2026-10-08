@@ -17,11 +17,19 @@ from smart_data_extractor.api.schemas import (
     ParsePdfResponse,
     PresetListItem,
     PresetSchemaResponse,
+    SchemaInferRequest,
     SchemaResolveRequest,
     SchemaResolveResponse,
 )
 from smart_data_extractor.config import get_settings
-from smart_data_extractor.extraction import batch_extract, extract_data, parse_pdf, resolve_schema
+from smart_data_extractor.extraction import (
+    batch_extract,
+    extract_data,
+    infer_schema,
+    parse_image,
+    parse_pdf,
+    resolve_schema,
+)
 from smart_data_extractor.presets import get_preset_fields, list_presets
 
 router = APIRouter()
@@ -47,9 +55,23 @@ def get_schema_resolve_fn() -> Callable[..., Any]:
     return resolve_schema
 
 
+def get_schema_infer_fn() -> Callable[..., Any]:
+    """DI seam: the schema inference function (production default)."""
+    return infer_schema
+
+
 def get_parse_pdf_fn() -> Callable[..., Any]:
     """DI seam: the PDF OCR parsing function (production default)."""
     return parse_pdf
+
+
+def get_parse_image_fn() -> Callable[..., Any]:
+    """DI seam: the image OCR parsing function (production default)."""
+    return parse_image
+
+
+# Image formats GLM vision officially supports (Zhipu docs: png/jpg/jpeg/bmp).
+SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/bmp"}
 
 
 @router.get("/health")
@@ -98,6 +120,18 @@ async def schema_resolve(
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 
 
+@router.post("/schema/infer", response_model=SchemaResolveResponse)
+async def schema_infer(
+    req: SchemaInferRequest,
+    fn: Callable[..., Any] = Depends(get_schema_infer_fn),
+) -> dict:
+    try:
+        result = await fn(req.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "cost_cny": _to_cny(result["cost_usd"])}
+
+
 @router.post("/batch_extract", response_model=BatchExtractResponse)
 async def batch(
     req: BatchExtractRequest,
@@ -140,6 +174,25 @@ async def parse_pdf_route(
     pdf_bytes = await file.read()
     try:
         result = await fn(pdf_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "cost_cny": _to_cny(result["cost_usd"])}
+
+
+@router.post("/parse_image", response_model=ParsePdfResponse)
+async def parse_image_route(
+    file: UploadFile,
+    fn: Callable[..., Any] = Depends(get_parse_image_fn),
+) -> dict:
+    media_type = (file.content_type or "").lower()
+    if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail="File must be an image (png, jpg, jpeg or bmp)",
+        )
+    image_bytes = await file.read()
+    try:
+        result = await fn(image_bytes, media_type=media_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}

@@ -64,3 +64,12 @@ export interface SchemaField {
 export type PresetId = string;
 export type ExtractionMode = 'preset' | 'custom';
 export type ResultFilter = 'all' | 'high' | 'review';
+
+/** A schema the user saved locally, either from the "smart" inference flow
+ * or (in the future) some other source. Persisted to localStorage. */
+export interface SavedSchema {
+  id: string;
+  name: string;
+  fields: SchemaField[];
+  createdAt: string;
+}

@@ -8,8 +8,35 @@
     "themeLight": "Light",
     "themeDark": "Dark",
     "language": "EN / 中文",
+    "settings": "Settings",
     "history": "History",
     "github": "GitHub"
+  },
+  "history": {
+    "title": "History",
+    "close": "Close",
+    "clear": "Clear All",
+    "empty": "No history yet — completed extraction batches are saved in this browser automatically.",
+    "sourcesCount": "{{count}} sources",
+    "customSchema": "Custom Fields"
+  },
+  "settings": {
+    "title": "Settings",
+    "close": "Close",
+    "groupParsing": "Document Parsing",
+    "pdfSplitMode": "PDF extraction mode",
+    "splitMode": {
+      "whole": "Whole document",
+      "pages": "Per page"
+    },
+    "splitModeHint": {
+      "whole": "The entire PDF is merged into a single text source",
+      "pages": "Each page becomes its own text source (file · P1, P2, …)"
+    },
+    "groupModel": "Model",
+    "defaultModel": "GLM-4.6V (default)",
+    "comingSoon": "Coming soon",
+    "modelHint": "Custom model selection will be available here"
   },
   "stats": {
     "sources": "Sources",
@@ -27,11 +54,11 @@
     "remove": "Remove"
   },
   "paste": {
-    "title": "Drop a .txt or .pdf file here, or click to browse",
-    "hint": "Supports .txt and .pdf (OCR) · multiple files allowed",
+    "title": "Drop a .txt, .pdf or image file here, or click to browse",
+    "hint": "Supports .txt, .pdf and png/jpg/jpeg/bmp images (OCR) · multiple files allowed",
     "dropActive": "Release to add these files",
-    "empty": "No text sources yet — upload a .txt or .pdf file on the left",
-    "parsing": "Parsing PDF (OCR)…",
+    "empty": "No text sources yet — upload a .txt, .pdf or image file on the left",
+    "parsing": "Parsing file (OCR)…",
     "itemLabel": "Text {{index}}",
     "itemChars": "{{count}} chars",
     "remove": "Remove"
@@ -43,7 +70,11 @@
     "instructions": "Describe what you want to extract… (optional)",
     "start": "Start Extraction",
     "starting": "Extracting…",
-    "requestError": "Extraction request failed: {{message}}"
+    "requestError": "Extraction request failed: {{message}}",
+    "smartPreset": "Smart Inference",
+    "mySchemas": "My Templates",
+    "manageSchemas": "Manage",
+    "smartSavedNamePrefix": "Smart inference"
   },
   "schema": {
     "loading": "Loading…",
@@ -55,6 +86,7 @@
     "fieldDescription": "Description",
     "removeField": "Remove field",
     "addField": "+ Add Field",
+    "smartEmpty": "Upload a file, then click Start Extraction to let AI infer the field structure",
     "type": {
       "string": "Text",
       "number": "Number",
@@ -62,6 +94,16 @@
       "boolean": "Boolean",
       "date": "Date"
     }
+  },
+  "manageSchemas": {
+    "title": "Manage My Templates",
+    "close": "Close",
+    "empty": "No saved templates yet",
+    "fieldsCount": "{{count}} fields",
+    "rename": "Rename",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "confirmDelete": "Delete \"{{name}}\"?"
   },
   "results": {
     "title": "Extraction Results",

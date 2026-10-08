@@ -205,6 +205,7 @@ describe('parsePdfResponseSchema', () => {
   it('parses a successful OCR response', () => {
     const payload = {
       text: 'extracted OCR text',
+      pages: ['extracted OCR text'],
       pages_failed: [],
       tokens_used: { input: 100, output: 20 },
       cost_usd: 0,
@@ -213,12 +214,14 @@ describe('parsePdfResponseSchema', () => {
 
     const parsed = parsePdfResponseSchema.parse(payload);
     expect(parsed.text).toBe('extracted OCR text');
+    expect(parsed.pages).toEqual(['extracted OCR text']);
     expect(parsed.pages_failed).toEqual([]);
   });
 
-  it('parses a response with failed pages', () => {
+  it('parses a response with failed pages as null entries', () => {
     const payload = {
       text: 'page one',
+      pages: ['page one', null, 'page three'],
       pages_failed: [1],
       tokens_used: { input: 50, output: 10 },
       cost_usd: 0.001,
@@ -226,11 +229,25 @@ describe('parsePdfResponseSchema', () => {
     };
 
     const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages).toEqual(['page one', null, 'page three']);
     expect(parsed.pages_failed).toEqual([1]);
   });
 
   it('rejects a payload missing text', () => {
     const payload = {
+      pages: ['text'],
+      pages_failed: [],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    expect(() => parsePdfResponseSchema.parse(payload)).toThrow();
+  });
+
+  it('rejects a payload missing pages', () => {
+    const payload = {
+      text: 'extracted OCR text',
       pages_failed: [],
       tokens_used: { input: 0, output: 0 },
       cost_usd: 0,

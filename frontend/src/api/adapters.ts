@@ -58,8 +58,11 @@ export function adaptBatchExtractResponse(
   schemaResolveCost?: { costUsd: number; costCny: number },
   fieldLabels?: Record<string, string>,
 ): ExtractionSource[] {
+  // Ids must stay unique across batches: the UI accumulates results from
+  // successive extractions, so `text-${i}` alone would collide as a React key.
+  const batchId = crypto.randomUUID().slice(0, 8);
   return response.results.map((item, i) => {
-    const sourceId = `text-${i}`;
+    const sourceId = `text-${batchId}-${i}`;
     const result = toResult(item, sourceId);
     const preview = (texts[i] ?? '').trim().replace(/\s+/g, ' ').slice(0, 60);
     // Attribute the one-off /schema/resolve cost to the first source only,

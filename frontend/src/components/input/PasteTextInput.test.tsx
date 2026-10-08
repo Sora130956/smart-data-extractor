@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import '@/i18n';
-import { parsePdf } from '@/api/client';
+import { parseImage, parsePdf } from '@/api/client';
+import { useUiStore } from '@/store/uiStore';
 import { PasteTextInput, type StagedText } from './PasteTextInput';
 
 vi.mock('@/api/client', () => ({
   parsePdf: vi.fn(),
+  parseImage: vi.fn(),
 }));
 
 function makeFile(name: string, content: string, type = 'text/plain'): File {
@@ -49,16 +51,18 @@ describe('PasteTextInput', () => {
     expect(onAdd).toHaveBeenCalledWith('b.txt', 'Content B');
   });
 
-  it('ignores non-txt files', async () => {
+  it('ignores unsupported files', async () => {
     const onAdd = vi.fn();
     const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
-    const file = makeFile('image.png', 'binary');
+    const file = makeFile('archive.zip', 'binary');
     fireEvent.change(input, { target: { files: [file] } });
 
     await Promise.resolve();
     expect(onAdd).not.toHaveBeenCalled();
+    expect(parsePdf).not.toHaveBeenCalled();
+    expect(parseImage).not.toHaveBeenCalled();
   });
 
   it('renders each staged item with its file name and character count', () => {
@@ -88,8 +92,10 @@ describe('PasteTextInput', () => {
   });
 
   it('calls parsePdf and onAdd with the extracted text when a pdf file is selected', async () => {
+    useUiStore.setState({ pdfSplitMode: 'whole' });
     vi.mocked(parsePdf).mockResolvedValue({
       text: 'OCR extracted text',
+      pages: ['OCR extracted text'],
       pages_failed: [],
       tokens_used: { input: 10, output: 5 },
       cost_usd: 0,
@@ -106,6 +112,29 @@ describe('PasteTextInput', () => {
     expect(parsePdf).toHaveBeenCalledWith(file);
   });
 
+  it('adds one source per pdf page when pdfSplitMode is pages', async () => {
+    useUiStore.setState({ pdfSplitMode: 'pages' });
+    vi.mocked(parsePdf).mockResolvedValue({
+      text: 'page one\n\npage three',
+      pages: ['page one', null, 'page three'],
+      pages_failed: [1],
+      tokens_used: { input: 30, output: 15 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('records.pdf', 'ignored', 'application/pdf');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one');
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three');
+    expect(onAdd).not.toHaveBeenCalledWith(expect.stringContaining('P2'), expect.anything());
+  });
+
   it('shows an error and does not call onAdd when pdf parsing fails', async () => {
     vi.mocked(parsePdf).mockRejectedValue(new Error('File must be a PDF'));
     const onAdd = vi.fn();
@@ -119,7 +148,44 @@ describe('PasteTextInput', () => {
     expect(onAdd).not.toHaveBeenCalled();
   });
 
+  it('calls parseImage and onAdd once when an image file is selected, even in pages split mode', async () => {
+    useUiStore.setState({ pdfSplitMode: 'pages' });
+    vi.mocked(parseImage).mockResolvedValue({
+      text: 'image OCR text',
+      pages: ['image OCR text'],
+      pages_failed: [],
+      tokens_used: { input: 10, output: 5 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('scan.jpg', 'ignored', 'image/jpeg');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
+    expect(onAdd).toHaveBeenCalledWith('scan.jpg', 'image OCR text');
+    expect(parseImage).toHaveBeenCalledWith(file);
+    expect(parsePdf).not.toHaveBeenCalled();
+  });
+
+  it('shows an error and does not call onAdd when image parsing fails', async () => {
+    vi.mocked(parseImage).mockRejectedValue(new Error('File must be an image'));
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('scan.bmp', 'ignored', 'image/bmp');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText('File must be an image')).toBeInTheDocument());
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
   it('shows a spinner while a pdf is being parsed, then removes it', async () => {
+    useUiStore.setState({ pdfSplitMode: 'whole' });
     let resolvePdf!: () => void;
     vi.mocked(parsePdf).mockImplementation(
       () =>
@@ -127,6 +193,7 @@ describe('PasteTextInput', () => {
           resolvePdf = () =>
             resolve({
               text: 'OCR extracted text',
+              pages: ['OCR extracted text'],
               pages_failed: [],
               tokens_used: { input: 10, output: 5 },
               cost_usd: 0,
@@ -141,7 +208,7 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [makeFile('scan.pdf', 'ignored', 'application/pdf')] } });
 
     const status = await screen.findByRole('status');
-    expect(status).toHaveTextContent('Parsing PDF');
+    expect(status).toHaveTextContent('Parsing file');
     expect(status.querySelector('.animate-spin')).not.toBeNull();
 
     resolvePdf();

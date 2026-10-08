@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { SchemaEditor } from '@/components/input/SchemaEditor';
+import { ManageSchemasPanel } from '@/components/input/ManageSchemasPanel';
 import { getPresets } from '@/api/client';
-import { useUiStore } from '@/store/uiStore';
+import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
 
 const selectClass =
   'rounded-token border border-border bg-surface px-2.5 py-1.5 text-body text-text';
@@ -18,13 +20,21 @@ export function ConfigBar({
   onStart?: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const { preset, instructions, setPreset, setInstructions } = useUiStore();
+  const { preset, instructions, savedSchemas, setPreset, setInstructions, setCustomFields } =
+    useUiStore();
+  const [isManageOpen, setManageOpen] = useState(false);
   const {
     data: presets,
     isPending: presetsLoading,
     isError: presetsError,
   } = useQuery({ queryKey: ['presets'], queryFn: getPresets });
   const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
+
+  function handlePresetChange(value: string) {
+    setPreset(value);
+    const saved = savedSchemas.find((s) => s.id === value);
+    if (saved) setCustomFields(saved.fields);
+  }
 
   return (
     <div className="mt-4">
@@ -37,20 +47,41 @@ export function ConfigBar({
           className={selectClass}
           value={preset}
           disabled={presetsLoading || presetsError}
-          onChange={(e) => setPreset(e.target.value)}
+          onChange={(e) => handlePresetChange(e.target.value)}
         >
           {presetsLoading ? (
             <option value={preset}>{t('config.presetsLoading')}</option>
           ) : presetsError ? (
             <option value={preset}>{preset}</option>
           ) : (
-            (presets ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {`${t('config.preset')}: ${isZh ? p.display_name_zh : p.display_name_en}`}
-              </option>
-            ))
+            <>
+              {(presets ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {isZh ? p.display_name_zh : p.display_name_en}
+                </option>
+              ))}
+              <option value={SMART_PRESET_ID}>{`${t('config.smartPreset')} ✨`}</option>
+              {savedSchemas.length > 0 ? (
+                <optgroup label={t('config.mySchemas')}>
+                  {savedSchemas.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </>
           )}
         </select>
+
+        <button
+          type="button"
+          onClick={() => setManageOpen(true)}
+          aria-label={t('config.manageSchemas')}
+          className="rounded-token border border-border bg-surface px-2 py-1.5 text-caption text-text-muted hover:text-text"
+        >
+          {t('config.manageSchemas')}
+        </button>
 
         <input
           type="text"
@@ -72,6 +103,8 @@ export function ConfigBar({
       ) : null}
 
       <SchemaEditor />
+
+      {isManageOpen ? <ManageSchemasPanel onClose={() => setManageOpen(false)} /> : null}
     </div>
   );
 }

@@ -3,11 +3,13 @@
 
 import {
   batchExtractResponseSchema,
+  parseImageResponseSchema,
   parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
   type BatchExtractResponse,
+  type ParseImageResponse,
   type ParsePdfResponse,
   type PresetListItem,
   type PresetSchemaResponse,
@@ -106,6 +108,21 @@ export async function resolveSchema(
   return schemaResolveResponseSchema.parse(await res.json());
 }
 
+export async function inferSchema(text: string): Promise<SchemaResolveResponse> {
+  const res = await fetch('/api/schema/infer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new ApiError(detail || res.statusText, res.status);
+  }
+
+  return schemaResolveResponseSchema.parse(await res.json());
+}
+
 export async function parsePdf(file: File): Promise<ParsePdfResponse> {
   const formData = new FormData();
   formData.append('file', file);
@@ -121,4 +138,21 @@ export async function parsePdf(file: File): Promise<ParsePdfResponse> {
   }
 
   return parsePdfResponseSchema.parse(await res.json());
+}
+
+export async function parseImage(file: File): Promise<ParseImageResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch('/api/parse_image', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new ApiError(detail || res.statusText, res.status);
+  }
+
+  return parseImageResponseSchema.parse(await res.json());
 }

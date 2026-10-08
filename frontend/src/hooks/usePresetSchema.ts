@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { getPresetSchema } from '@/api/client';
 import type { SchemaField } from '@/types/extraction';
 
-export function usePresetSchema(preset: string) {
+export function usePresetSchema(preset: string, options?: { enabled?: boolean }) {
   // useTranslation (not the i18n singleton) so a language switch re-renders
   // and the lang in the queryKey busts the cached previous-language fields.
   const { i18n } = useTranslation();
@@ -15,6 +15,7 @@ export function usePresetSchema(preset: string) {
 
   return useQuery<SchemaField[], Error>({
     queryKey: ['preset-schema', preset, lang],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       const response = await getPresetSchema(preset);
       return response.fields.map((f) => {

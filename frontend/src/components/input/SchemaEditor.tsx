@@ -6,7 +6,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
-import { useUiStore } from '@/store/uiStore';
+import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
 import type { SchemaField } from '@/types/extraction';
 
 const FIELD_TYPES: SchemaField['type'][] = [
@@ -22,14 +22,21 @@ const cellClass =
 
 export function SchemaEditor() {
   const { t } = useTranslation();
-  const { preset, customFields, isSchemaModified, setCustomFields, resetToPreset } = useUiStore();
-  const { data: presetFields, isLoading } = usePresetSchema(preset);
+  const { preset, customFields, isSchemaModified, savedSchemas, setCustomFields, resetToPreset } =
+    useUiStore();
+  const isSavedSchema = savedSchemas.some((s) => s.id === preset);
+  const isSmart = preset === SMART_PRESET_ID;
+  const { data: presetFields, isLoading } = usePresetSchema(preset, {
+    enabled: !isSmart && !isSavedSchema,
+  });
 
   // Seed the editable field set from the preset's schema. Runs again after
   // a preset switch (setPreset clears customFields) or a language switch
   // (queryKey includes the language), as long as the user has no edits.
+  // Skipped for "smart" (no schema until extraction runs) and for saved
+  // schemas (ConfigBar's onChange already seeded customFields for those).
   useEffect(() => {
-    if (presetFields && !isSchemaModified) {
+    if (presetFields && !isSchemaModified && !isSmart && !isSavedSchema) {
       resetToPreset(presetFields);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -53,6 +60,14 @@ export function SchemaEditor() {
 
   if (isLoading) {
     return <div className="mt-3 text-caption text-text-muted">{t('schema.loading')}</div>;
+  }
+
+  if (isSmart && customFields.length === 0) {
+    return (
+      <div className="mt-3 rounded-card border border-border p-3 text-caption text-text-muted">
+        {t('schema.smartEmpty')}
+      </div>
+    );
   }
 
   return (

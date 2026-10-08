@@ -1,9 +1,17 @@
 import { useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { parsePdf } from '@/api/client';
+import { parseImage, parsePdf } from '@/api/client';
+import { useUiStore } from '@/store/uiStore';
 
-const ACCEPT = '.txt,.pdf';
+const ACCEPT = '.txt,.pdf,.png,.jpg,.jpeg,.bmp';
+// Extensions the backend /parse_image endpoint accepts (GLM vision formats).
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'bmp']);
+
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+}
 
 export interface StagedText {
   id: string;
@@ -21,8 +29,9 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [pdfErrors, setPdfErrors] = useState<string[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  const pdfSplitMode = useUiStore((s) => s.pdfSplitMode);
 
   // The browser fires dragleave on child elements too; count entries instead.
   const depth = useRef(0);
@@ -32,6 +41,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
     const files = Array.from(fileList);
     const txtFiles = files.filter((f) => f.name.toLowerCase().endsWith('.txt'));
     const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    const imageFiles = files.filter((f) => IMAGE_EXTENSIONS.has(extensionOf(f.name)));
 
     await Promise.all(
       txtFiles.map(async (file) => {
@@ -42,17 +52,34 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
 
     setParsing(true);
     try {
-      await Promise.all(
-        pdfFiles.map(async (file) => {
+      await Promise.all([
+        ...pdfFiles.map(async (file) => {
           try {
             const result = await parsePdf(file);
+            if (pdfSplitMode === 'pages') {
+              // Failed pages come back as null; index+1 is the original page number.
+              result.pages.forEach((page, i) => {
+                if (page !== null) onAdd(`${file.name} · P${i + 1}`, page);
+              });
+            } else {
+              onAdd(file.name, result.text);
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setParseErrors((prev) => [...prev, message]);
+          }
+        }),
+        // Images have no pages to split: one image = one source, always whole.
+        ...imageFiles.map(async (file) => {
+          try {
+            const result = await parseImage(file);
             onAdd(file.name, result.text);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            setPdfErrors((prev) => [...prev, message]);
+            setParseErrors((prev) => [...prev, message]);
           }
         }),
-      );
+      ]);
     } finally {
       setParsing(false);
     }
@@ -121,9 +148,9 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
             }}
           />
         </div>
-        {pdfErrors.length > 0 && (
+        {parseErrors.length > 0 && (
           <div className="mt-2 flex flex-col gap-1">
-            {pdfErrors.map((message, i) => (
+            {parseErrors.map((message, i) => (
               <div key={i} className="text-caption text-error">
                 {message}
               </div>
