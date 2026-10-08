@@ -56,6 +56,7 @@ export function adaptBatchExtractResponse(
   response: BatchExtractResponse,
   texts: string[],
   schemaResolveCost?: { costUsd: number; costCny: number },
+  fieldLabels?: Record<string, string>,
 ): ExtractionSource[] {
   return response.results.map((item, i) => {
     const sourceId = `text-${i}`;
@@ -72,6 +73,7 @@ export function adaptBatchExtractResponse(
       ordinal: i + 1,
       uploadedAt: new Date().toISOString(),
       meta: preview,
+      ...(fieldLabels ? { fieldLabels } : {}),
       results: [result],
       stats: {
         succeeded: result.status === 'success' ? 1 : 0,

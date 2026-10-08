@@ -27,10 +27,10 @@
     "remove": "移除"
   },
   "paste": {
-    "title": "拖拽 txt 文件到此处，或点击选择",
-    "hint": "仅支持 .txt 文件 · 可多选",
+    "title": "拖拽 txt 或 pdf 文件到此处，或点击选择",
+    "hint": "支持 .txt 和 .pdf（自动 OCR） · 可多选",
     "dropActive": "松开即可添加文件",
-    "empty": "还没有文本来源 — 在左侧上传 txt 文件",
+    "empty": "还没有文本来源 — 在左侧上传 txt 或 pdf 文件",
     "itemLabel": "文本 {{index}}",
     "itemChars": "{{count}} 字符",
     "remove": "移除"
@@ -86,9 +86,31 @@
     "failed": "提取失败：{{message}}",
     "badgeOk": "{{count}} 成功",
     "badgeFailed": "{{count}} 失败",
+    "fieldValue": "{{label}}：{{value}}",
     "nullField": "— {{field}} 为空",
     "listField": "{{field}}：{{count}} 项",
     "collapse": "收起",
     "expand": "展开"
+  },
+  "resultDetail": {
+    "title": "提取结果 — {{index}}",
+    "copyJson": "复制 JSON",
+    "copied": "已复制",
+    "exportJson": "导出 JSON",
+    "exportExcel": "导出 Excel（即将支持）",
+    "close": "关闭",
+    "retryThisItem": "重试此项",
+    "needsReviewWarning": "需人工复核 — {{count}} 个字段置信度低于 {{threshold}}（{{fields}}）",
+    "rawJson": "原始 JSON",
+    "nullValue": "空值",
+    "itemsCount": "{{count}} 项",
+    "fieldsValue": "{{count}}（{{nullCount}} 为空）",
+    "stats": {
+      "inputTokens": "输入 Token",
+      "outputTokens": "输出 Token",
+      "cost": "成本",
+      "avgConfidence": "平均置信度",
+      "fields": "字段数"
+    }
   }
 }

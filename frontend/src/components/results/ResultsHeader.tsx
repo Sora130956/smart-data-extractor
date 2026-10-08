@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { useUiStore } from '@/store/uiStore';
-import type { ResultFilter } from '@/types/extraction';
+import type { ExtractionSource, ResultFilter } from '@/types/extraction';
 
 export interface FilterCounts {
   all: number;
@@ -43,10 +43,26 @@ function Chip({
   );
 }
 
-export function ResultsHeader({ counts = EMPTY_COUNTS }: { counts?: FilterCounts }) {
+export function ResultsHeader({
+  counts = EMPTY_COUNTS,
+  sources = [],
+}: {
+  counts?: FilterCounts;
+  sources?: ExtractionSource[];
+}) {
   const { t } = useTranslation();
   const filter = useUiStore((s) => s.filter);
   const setFilter = useUiStore((s) => s.setFilter);
+
+  function handleExportAll() {
+    const blob = new Blob([JSON.stringify(sources, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'extraction-results.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const chips: Array<{ id: ResultFilter; label: string; count: number; warn?: boolean }> = [
     { id: 'all', label: t('results.filterAll'), count: counts.all },
@@ -71,7 +87,7 @@ export function ResultsHeader({ counts = EMPTY_COUNTS }: { counts?: FilterCounts
 
       <div className="flex-1" />
 
-      <Button size="sm" disabled={counts.all === 0}>
+      <Button size="sm" disabled={counts.all === 0} onClick={handleExportAll}>
         {t('results.exportJson')}
       </Button>
       <Button size="sm" disabled>

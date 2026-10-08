@@ -38,13 +38,18 @@ describe('useBatchExtract', () => {
 
     const { result } = renderHook(() => useBatchExtract(), { wrapper });
 
-    result.current.mutate({ texts: ['hello world'], preset: 'contact' });
+    result.current.mutate({
+      texts: ['hello world'],
+      preset: 'contact',
+      fieldLabels: { name: 'Name' },
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data?.[0].results[0].data).toEqual({ name: 'Acme' });
     expect(result.current.data?.[0].results[0].confidence).toEqual({ name: 0.9 });
+    expect(result.current.data?.[0].fieldLabels).toEqual({ name: 'Name' });
   });
 
   it('forwards lang into the request body', async () => {

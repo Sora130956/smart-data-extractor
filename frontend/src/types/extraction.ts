@@ -31,6 +31,9 @@ export interface ExtractionSource {
   uploadedAt: string;
   /** "15 pages" | "OCR processed" */
   meta?: string;
+  /** field_name -> localized display label, snapshotted at submit time so
+   * chips stay labeled with the schema that produced them. */
+  fieldLabels?: Record<string, string>;
   results: ExtractionResult[];
   stats: {
     succeeded: number;

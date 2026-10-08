@@ -158,4 +158,54 @@ describe('adaptBatchExtractResponse', () => {
     expect(source.meta).toHaveLength(60);
     expect(source.meta).not.toContain('\n');
   });
+
+  it('attaches the submitted field-label map to every source', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1, a_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0.0001, cost_cny: 0.000725,
+          error: null,
+        },
+        {
+          data: { b: 2, b_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0.0001, cost_cny: 0.000725,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0.0002, total_cost_cny: 0.00145,
+      total_tokens: { input: 2, output: 2 },
+      succeeded: 2,
+      failed: 0,
+    };
+    const fieldLabels = { a: '数量', b: 'Number' };
+
+    const sources = adaptBatchExtractResponse(response, ['first', 'second'], undefined, fieldLabels);
+
+    expect(sources[0].fieldLabels).toEqual(fieldLabels);
+    expect(sources[1].fieldLabels).toEqual(fieldLabels);
+  });
+
+  it('omits fieldLabels when none were submitted', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1, a_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 1, output: 1 },
+      succeeded: 1,
+      failed: 0,
+    };
+
+    const [source] = adaptBatchExtractResponse(response, ['only']);
+
+    expect(source.fieldLabels).toBeUndefined();
+  });
 });

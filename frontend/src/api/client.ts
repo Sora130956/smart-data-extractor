@@ -3,10 +3,12 @@
 
 import {
   batchExtractResponseSchema,
+  parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
   type BatchExtractResponse,
+  type ParsePdfResponse,
   type PresetListItem,
   type PresetSchemaResponse,
   type SchemaResolveResponse,
@@ -102,4 +104,21 @@ export async function resolveSchema(
   }
 
   return schemaResolveResponseSchema.parse(await res.json());
+}
+
+export async function parsePdf(file: File): Promise<ParsePdfResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch('/api/parse_pdf', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new ApiError(detail || res.statusText, res.status);
+  }
+
+  return parsePdfResponseSchema.parse(await res.json());
 }

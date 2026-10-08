@@ -1,10 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import '@/i18n';
+import { parsePdf } from '@/api/client';
 import { PasteTextInput, type StagedText } from './PasteTextInput';
 
-function makeFile(name: string, content: string): File {
-  const file = new File([content], name, { type: 'text/plain' });
+vi.mock('@/api/client', () => ({
+  parsePdf: vi.fn(),
+}));
+
+function makeFile(name: string, content: string, type = 'text/plain'): File {
+  const file = new File([content], name, { type });
   // jsdom's File does not implement .text() yet.
   if (typeof file.text !== 'function') {
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
@@ -80,5 +85,37 @@ describe('PasteTextInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove Text 1' }));
 
     expect(onRemove).toHaveBeenCalledWith('a');
+  });
+
+  it('calls parsePdf and onAdd with the extracted text when a pdf file is selected', async () => {
+    vi.mocked(parsePdf).mockResolvedValue({
+      text: 'OCR extracted text',
+      pages_failed: [],
+      tokens_used: { input: 10, output: 5 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text'));
+    expect(parsePdf).toHaveBeenCalledWith(file);
+  });
+
+  it('shows an error and does not call onAdd when pdf parsing fails', async () => {
+    vi.mocked(parsePdf).mockRejectedValue(new Error('File must be a PDF'));
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText('File must be a PDF')).toBeInTheDocument());
+    expect(onAdd).not.toHaveBeenCalled();
   });
 });

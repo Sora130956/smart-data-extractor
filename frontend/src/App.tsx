@@ -8,11 +8,13 @@ import { ConfigBar } from '@/components/input/ConfigBar';
 import { ResultsHeader, type FilterCounts } from '@/components/results/ResultsHeader';
 import { EmptyState } from '@/components/results/EmptyState';
 import { SourceGroup } from '@/components/results/SourceGroup';
+import { ResultDetailModal } from '@/components/results/ResultDetailModal';
 import { resolveSchema, type SchemaResolveFieldParams } from '@/api/client';
 import { useBatchExtract } from '@/hooks/useBatchExtract';
+import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useUiStore } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
-import type { SchemaField } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
 
@@ -33,7 +35,15 @@ function AppShell() {
   const [staged, setStaged] = useState<StagedText[]>([]);
   const [isResolving, setIsResolving] = useState(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<{
+    source: ExtractionSource;
+    result: ExtractionResult;
+    resultIndex: number;
+  } | null>(null);
   const { mutate, data: sources = [], isPending, error } = useBatchExtract();
+  // Same cached query as the SchemaEditor: gives fieldName -> displayName
+  // for labeling result chips on the preset submit path.
+  const { data: presetFields } = usePresetSchema(preset);
 
   function handleAdd(name: string, text: string) {
     setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text }]);
@@ -48,6 +58,7 @@ function AppShell() {
 
     let target: { schema: Record<string, unknown> } | { preset: string };
     let schemaResolveCost: { costUsd: number; costCny: number } | undefined;
+    let fieldLabels: Record<string, string> | undefined;
 
     if (isSchemaModified) {
       const fields: SchemaResolveFieldParams[] = customFields.map((f) => {
@@ -65,6 +76,13 @@ function AppShell() {
         const resolved = await resolveSchema(fields);
         target = { schema: resolved.schema };
         schemaResolveCost = { costUsd: resolved.cost_usd, costCny: resolved.cost_cny };
+        // The resolved schema echoes each field's display name; snapshot it
+        // so chips keep their labels even for freshly generated field names.
+        fieldLabels = Object.fromEntries(
+          Object.entries(resolved.schema.fields)
+            .filter(([, spec]) => spec.display_name)
+            .map(([name, spec]) => [name, spec.display_name as string]),
+        );
       } catch (err) {
         setResolveError(err instanceof Error ? err.message : String(err));
         return;
@@ -73,6 +91,13 @@ function AppShell() {
       }
     } else {
       target = { preset };
+      fieldLabels = presetFields
+        ? Object.fromEntries(
+            presetFields
+              .filter((f) => f.fieldName)
+              .map((f) => [f.fieldName as string, f.displayName]),
+          )
+        : undefined;
     }
 
     mutate(
@@ -83,6 +108,7 @@ function AppShell() {
         // UI language: preset field descriptions sent to the LLM follow it.
         lang: i18n.resolvedLanguage ?? undefined,
         schemaResolveCost,
+        fieldLabels,
       },
       { onSuccess: () => setStaged([]) },
     );
@@ -162,14 +188,29 @@ function AppShell() {
 
         <section>
           <StatsStrip stats={stats} />
-          <ResultsHeader counts={counts} />
+          <ResultsHeader counts={counts} sources={sources} />
           {sources.length === 0 ? (
             <EmptyState />
           ) : (
-            visibleSources.map((source) => <SourceGroup key={source.id} source={source} />)
+            visibleSources.map((source) => (
+              <SourceGroup
+                key={source.id}
+                source={source}
+                onView={(result, resultIndex) => setSelected({ source, result, resultIndex })}
+              />
+            ))
           )}
         </section>
       </div>
+
+      {selected ? (
+        <ResultDetailModal
+          source={selected.source}
+          result={selected.result}
+          label={t('paste.itemLabel', { index: selected.resultIndex + 1 })}
+          onClose={() => setSelected(null)}
+        />
+      ) : null}
     </div>
   );
 }

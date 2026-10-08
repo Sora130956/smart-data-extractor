@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { ExtractionSource } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import { ResultRow } from './ResultRow';
 
 const TYPE_ICON: Record<ExtractionSource['type'], string> = {
@@ -15,7 +15,7 @@ export function SourceGroup({
   onRetry,
 }: {
   source: ExtractionSource;
-  onView?: (resultIndex: number) => void;
+  onView?: (result: ExtractionResult, resultIndex: number) => void;
   onRetry?: (resultIndex: number) => void;
 }) {
   const { t } = useTranslation();
@@ -50,7 +50,8 @@ export function SourceGroup({
           key={`${result.sourceId}-${i}`}
           result={result}
           label={t('paste.itemLabel', { index: i + 1 })}
-          onView={onView ? () => onView(i) : undefined}
+          fieldLabels={source.fieldLabels}
+          onView={onView ? () => onView(result, i) : undefined}
           onRetry={onRetry ? () => onRetry(i) : undefined}
         />
       ))}

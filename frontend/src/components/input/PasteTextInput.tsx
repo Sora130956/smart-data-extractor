@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { parsePdf } from '@/api/client';
 
-const ACCEPT = '.txt';
+const ACCEPT = '.txt,.pdf';
 
 export interface StagedText {
   id: string;
@@ -20,17 +21,33 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [pdfErrors, setPdfErrors] = useState<string[]>([]);
 
   // The browser fires dragleave on child elements too; count entries instead.
   const depth = useRef(0);
 
   async function stage(fileList: FileList | null) {
     if (!fileList) return;
-    const txtFiles = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.txt'));
+    const files = Array.from(fileList);
+    const txtFiles = files.filter((f) => f.name.toLowerCase().endsWith('.txt'));
+    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+
     await Promise.all(
       txtFiles.map(async (file) => {
         const text = await file.text();
         onAdd(file.name, text);
+      }),
+    );
+
+    await Promise.all(
+      pdfFiles.map(async (file) => {
+        try {
+          const result = await parsePdf(file);
+          onAdd(file.name, result.text);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setPdfErrors((prev) => [...prev, message]);
+        }
       }),
     );
   }
@@ -98,6 +115,15 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
             }}
           />
         </div>
+        {pdfErrors.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1">
+            {pdfErrors.map((message, i) => (
+              <div key={i} className="text-caption text-error">
+                {message}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="min-w-0 flex-1">

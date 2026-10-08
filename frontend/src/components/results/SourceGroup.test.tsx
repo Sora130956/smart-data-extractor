@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import i18next from 'i18next';
+import { afterEach, describe, expect, it } from 'vitest';
 import '@/i18n';
 import { SourceGroup } from './SourceGroup';
 import type { ExtractionSource } from '@/types/extraction';
@@ -54,6 +55,11 @@ const mixedSource: ExtractionSource = {
 };
 
 describe('SourceGroup', () => {
+  // Restore the default language even if a test fails mid-switch.
+  afterEach(async () => {
+    await i18next.changeLanguage('en');
+  });
+
   it('renders the source name, meta, and an "ok" badge with its result rows', () => {
     render(<SourceGroup source={source} />);
 
@@ -62,7 +68,19 @@ describe('SourceGroup', () => {
     expect(screen.getByText('1 ok')).toBeInTheDocument();
     expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
     expect(screen.getByText('Text 1')).toBeInTheDocument();
-    expect(screen.getByText('INV-2024-001')).toBeInTheDocument();
+    expect(screen.getByText('invoice_number: INV-2024-001')).toBeInTheDocument();
+  });
+
+  it('labels result chips with the source display-name map', async () => {
+    await i18next.changeLanguage('zh');
+    render(
+      <SourceGroup
+        source={{ ...source, fieldLabels: { invoice_number: '发票号', vendor: '供应商' } }}
+      />,
+    );
+
+    expect(screen.getByText('发票号：INV-2024-001')).toBeInTheDocument();
+    expect(screen.getByText('供应商：Acme Corp')).toBeInTheDocument();
   });
 
   it('renders a "failed" badge when the source has failed results', () => {

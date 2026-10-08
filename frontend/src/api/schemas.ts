@@ -53,12 +53,22 @@ export const schemaFieldSpecSchema = z.object({
   type: z.string(),
   description: z.string().nullable(),
   required: z.boolean(),
+  // Echoed by /schema/resolve so the UI can label chips per resolved field.
+  display_name: z.string().nullable().optional(),
 });
 
 export const schemaResolveResponseSchema = z.object({
   schema: z.object({
     fields: z.record(z.string(), schemaFieldSpecSchema),
   }),
+  tokens_used: tokensUsedSchema,
+  cost_usd: z.number(),
+  cost_cny: z.number(),
+});
+
+export const parsePdfResponseSchema = z.object({
+  text: z.string(),
+  pages_failed: z.array(z.number()),
   tokens_used: tokensUsedSchema,
   cost_usd: z.number(),
   cost_cny: z.number(),
@@ -71,3 +81,4 @@ export type PresetFieldDto = z.infer<typeof presetFieldSchema>;
 export type PresetSchemaResponse = z.infer<typeof presetSchemaResponseSchema>;
 export type PresetListItem = z.infer<typeof presetListItemSchema>;
 export type SchemaResolveResponse = z.infer<typeof schemaResolveResponseSchema>;
+export type ParsePdfResponse = z.infer<typeof parsePdfResponseSchema>;

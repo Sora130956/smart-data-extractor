@@ -4,35 +4,47 @@ import type { ExtractionResult } from '@/types/extraction';
 import { formatCost } from '@/utils/currency';
 import { ConfidenceBar } from './ConfidenceBar';
 
-/** main-interface.html .fchip: render each field value as a short chip. */
+type TFunction = ReturnType<typeof useTranslation>['t'];
+
+/** main-interface.html .fchip: render each field value as a short chip,
+ * prefixed with the field's display label ("姓名：张伟"). Falls back to the
+ * raw field key when no label map is available. */
 function fieldChip(
   key: string,
   value: unknown,
-  nullLabel: string,
-  listLabel: string,
+  fieldLabels: Record<string, string> | undefined,
+  t: TFunction,
 ): string {
-  if (value === null || value === undefined) return nullLabel.replace('{{field}}', key);
+  const label = fieldLabels?.[key] ?? key;
+  if (value === null || value === undefined) {
+    return t('resultRow.nullField', { field: label });
+  }
   if (Array.isArray(value)) {
     // Nested records (e.g. invoice line_items) summarize as "field: N items";
     // primitive arrays (e.g. tags) join their values.
     const hasObjects = value.some((v) => v !== null && typeof v === 'object');
     if (hasObjects) {
-      return listLabel.replace('{{field}}', key).replace('{{count}}', String(value.length));
+      return t('resultRow.listField', { field: label, count: value.length });
     }
-    return value.map((v) => String(v)).join(', ');
+    return t('resultRow.fieldValue', { label, value: value.map((v) => String(v)).join(', ') });
   }
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+  if (typeof value === 'object') {
+    return t('resultRow.fieldValue', { label, value: JSON.stringify(value) });
+  }
+  return t('resultRow.fieldValue', { label, value: String(value) });
 }
 
 export function ResultRow({
   result,
   label,
+  fieldLabels,
   onView,
   onRetry,
 }: {
   result: ExtractionResult;
   label: string;
+  /** field_name -> display label snapshot from the source. */
+  fieldLabels?: Record<string, string>;
   onView?: () => void;
   onRetry?: () => void;
 }) {
@@ -70,7 +82,7 @@ export function ResultRow({
             key={key}
             className="whitespace-nowrap rounded-token border border-border bg-surface-muted px-2 py-0.5 text-caption"
           >
-            {fieldChip(key, value, t('resultRow.nullField'), t('resultRow.listField'))}
+            {fieldChip(key, value, fieldLabels, t)}
           </span>
         ))}
       </span>

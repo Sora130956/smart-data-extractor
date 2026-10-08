@@ -56,16 +56,56 @@ describe('ResultRow', () => {
     render(<ResultRow result={successResult} label="Text 1" />);
 
     expect(screen.getByText('Text 1')).toBeInTheDocument();
-    expect(screen.getByText('INV-2024-001')).toBeInTheDocument();
-    expect(screen.getByText('Acme Corp')).toBeInTheDocument();
+    expect(screen.getByText('invoice_number: INV-2024-001')).toBeInTheDocument();
+    expect(screen.getByText('vendor: Acme Corp')).toBeInTheDocument();
     expect(screen.getByText('0.90')).toBeInTheDocument();
     expect(screen.getByText('$0.0002')).toBeInTheDocument();
+  });
+
+  it('prefixes each chip with the field display label when provided', () => {
+    render(
+      <ResultRow
+        result={successResult}
+        label="Text 1"
+        fieldLabels={{ invoice_number: 'Invoice Number', vendor: 'Vendor' }}
+      />,
+    );
+
+    expect(screen.getByText('Invoice Number: INV-2024-001')).toBeInTheDocument();
+    expect(screen.getByText('Vendor: Acme Corp')).toBeInTheDocument();
+  });
+
+  it('uses the full-width colon for labeled chips in Chinese', async () => {
+    await i18next.changeLanguage('zh');
+    render(
+      <ResultRow
+        result={successResult}
+        label="文本 1"
+        fieldLabels={{ invoice_number: '发票号', vendor: '供应商' }}
+      />,
+    );
+
+    expect(screen.getByText('发票号：INV-2024-001')).toBeInTheDocument();
+    expect(screen.getByText('供应商：Acme Corp')).toBeInTheDocument();
+    await i18next.changeLanguage('en');
   });
 
   it('renders a null-value field as a "— field null" chip', () => {
     render(<ResultRow result={successResult} label="Text 1" />);
 
     expect(screen.getByText('— date null')).toBeInTheDocument();
+  });
+
+  it('uses the display label in null-field chips when provided', () => {
+    render(
+      <ResultRow
+        result={successResult}
+        label="Text 1"
+        fieldLabels={{ invoice_number: 'Invoice Number', date: 'Date', vendor: 'Vendor' }}
+      />,
+    );
+
+    expect(screen.getByText('— Date null')).toBeInTheDocument();
   });
 
   it('renders an array of objects as a "field: N items" chip instead of [object Object]', () => {
@@ -78,7 +118,7 @@ describe('ResultRow', () => {
   it('renders an array of primitives as a comma-joined chip', () => {
     render(<ResultRow result={nestedResult} label="Text 3" />);
 
-    expect(screen.getByText('net-30, urgent')).toBeInTheDocument();
+    expect(screen.getByText('tags: net-30, urgent')).toBeInTheDocument();
   });
 
   it('shows the cost in CNY when the UI language is Chinese', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   batchExtractResponseSchema,
+  parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
@@ -175,9 +176,67 @@ describe('schemaResolveResponseSchema', () => {
     expect(parsed.schema.fields.company_name.required).toBe(true);
   });
 
+  it('keeps the per-field display name echoed by the backend', () => {
+    const payload = {
+      schema: {
+        fields: {
+          urgency_level: { type: 'string', description: null, required: false, display_name: 'Urgency Level' },
+          company_name: { type: 'string', description: null, required: true, display_name: null },
+        },
+      },
+      tokens_used: { input: 50, output: 20 },
+      cost_usd: 0.0001,
+      cost_cny: 0.000725,
+    };
+
+    const parsed = schemaResolveResponseSchema.parse(payload);
+    expect(parsed.schema.fields.urgency_level.display_name).toBe('Urgency Level');
+    expect(parsed.schema.fields.company_name.display_name).toBeNull();
+  });
+
   it('rejects a payload missing the schema key', () => {
     const payload = { tokens_used: { input: 0, output: 0 }, cost_usd: 0, cost_cny: 0 };
 
     expect(() => schemaResolveResponseSchema.parse(payload)).toThrow();
+  });
+});
+
+describe('parsePdfResponseSchema', () => {
+  it('parses a successful OCR response', () => {
+    const payload = {
+      text: 'extracted OCR text',
+      pages_failed: [],
+      tokens_used: { input: 100, output: 20 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.text).toBe('extracted OCR text');
+    expect(parsed.pages_failed).toEqual([]);
+  });
+
+  it('parses a response with failed pages', () => {
+    const payload = {
+      text: 'page one',
+      pages_failed: [1],
+      tokens_used: { input: 50, output: 10 },
+      cost_usd: 0.001,
+      cost_cny: 0.00725,
+    };
+
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages_failed).toEqual([1]);
+  });
+
+  it('rejects a payload missing text', () => {
+    const payload = {
+      pages_failed: [],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    expect(() => parsePdfResponseSchema.parse(payload)).toThrow();
   });
 });

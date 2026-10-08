@@ -27,10 +27,10 @@
     "remove": "Remove"
   },
   "paste": {
-    "title": "Drop a .txt file here, or click to browse",
-    "hint": "Only .txt files supported · multiple files allowed",
+    "title": "Drop a .txt or .pdf file here, or click to browse",
+    "hint": "Supports .txt and .pdf (OCR) · multiple files allowed",
     "dropActive": "Release to add these files",
-    "empty": "No text sources yet — upload a .txt file on the left",
+    "empty": "No text sources yet — upload a .txt or .pdf file on the left",
     "itemLabel": "Text {{index}}",
     "itemChars": "{{count}} chars",
     "remove": "Remove"
@@ -86,9 +86,31 @@
     "failed": "Extraction failed: {{message}}",
     "badgeOk": "{{count}} ok",
     "badgeFailed": "{{count}} failed",
+    "fieldValue": "{{label}}: {{value}}",
     "nullField": "— {{field}} null",
     "listField": "{{field}}: {{count}} items",
     "collapse": "Collapse",
     "expand": "Expand"
+  },
+  "resultDetail": {
+    "title": "Extraction Result — {{index}}",
+    "copyJson": "Copy JSON",
+    "copied": "Copied",
+    "exportJson": "Export JSON",
+    "exportExcel": "Export Excel (Coming)",
+    "close": "Close",
+    "retryThisItem": "Retry This Item",
+    "needsReviewWarning": "Needs review — {{count}} field(s) below {{threshold}} confidence ({{fields}})",
+    "rawJson": "Raw JSON",
+    "nullValue": "null",
+    "itemsCount": "{{count}} items",
+    "fieldsValue": "{{count}} ({{nullCount}} null)",
+    "stats": {
+      "inputTokens": "Input Tokens",
+      "outputTokens": "Output Tokens",
+      "cost": "Cost",
+      "avgConfidence": "Avg Confidence",
+      "fields": "Fields"
+    }
   }
 }
