@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { SettingsModal } from '@/components/settings/SettingsModal';
 import { useUiStore } from '@/store/uiStore';
 import { LANGUAGES } from '@/i18n';
 
@@ -37,10 +39,11 @@ function LanguageToggle() {
   );
 }
 
-export function Header() {
+export function Header({ onOpenHistory }: { onOpenHistory?: () => void }) {
   const { t } = useTranslation();
   const theme = useUiStore((s) => s.theme);
   const toggleTheme = useUiStore((s) => s.toggleTheme);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -60,7 +63,11 @@ export function Header() {
           {theme === 'dark' ? t('header.themeDark') : t('header.themeLight')}
         </Button>
         <LanguageToggle />
-        <Button size="sm">{t('header.history')}</Button>
+        <Button size="sm" onClick={() => setSettingsOpen(true)} aria-label={t('header.settings')}>
+          <span aria-hidden>⚙</span>
+          {t('header.settings')}
+        </Button>
+        <Button size="sm" onClick={onOpenHistory}>{t('header.history')}</Button>
         <a
           href={GITHUB_URL}
           target="_blank"
@@ -69,6 +76,7 @@ export function Header() {
         >
           {t('header.github')}
         </a>
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
     </header>
   );
