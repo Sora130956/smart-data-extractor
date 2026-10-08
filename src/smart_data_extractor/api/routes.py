@@ -7,20 +7,21 @@ the object under test).
 
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
 from smart_data_extractor.api.schemas import (
     BatchExtractRequest,
     BatchExtractResponse,
     ExtractRequest,
     ExtractResponse,
+    ParsePdfResponse,
     PresetListItem,
     PresetSchemaResponse,
     SchemaResolveRequest,
     SchemaResolveResponse,
 )
 from smart_data_extractor.config import get_settings
-from smart_data_extractor.extraction import batch_extract, extract_data, resolve_schema
+from smart_data_extractor.extraction import batch_extract, extract_data, parse_pdf, resolve_schema
 from smart_data_extractor.presets import get_preset_fields, list_presets
 
 router = APIRouter()
@@ -44,6 +45,11 @@ def get_batch_fn() -> Callable[..., Any]:
 def get_schema_resolve_fn() -> Callable[..., Any]:
     """DI seam: the field-name resolution function (production default)."""
     return resolve_schema
+
+
+def get_parse_pdf_fn() -> Callable[..., Any]:
+    """DI seam: the PDF OCR parsing function (production default)."""
+    return parse_pdf
 
 
 @router.get("/health")
@@ -122,3 +128,18 @@ async def batch(
         succeeded=len(items) - failed,
         failed=failed,
     )
+
+
+@router.post("/parse_pdf", response_model=ParsePdfResponse)
+async def parse_pdf_route(
+    file: UploadFile,
+    fn: Callable[..., Any] = Depends(get_parse_pdf_fn),
+) -> dict:
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=422, detail="File must be a PDF")
+    pdf_bytes = await file.read()
+    try:
+        result = await fn(pdf_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "cost_cny": _to_cny(result["cost_usd"])}

@@ -9,7 +9,12 @@ import httpx
 import pytest
 
 from smart_data_extractor.api import create_app
-from smart_data_extractor.api.routes import get_batch_fn, get_extract_fn, get_schema_resolve_fn
+from smart_data_extractor.api.routes import (
+    get_batch_fn,
+    get_extract_fn,
+    get_parse_pdf_fn,
+    get_schema_resolve_fn,
+)
 
 
 @pytest.fixture
@@ -365,3 +370,88 @@ async def test_schema_resolve_value_error_becomes_400(app, client):
 async def test_schema_resolve_empty_fields_422(client):
     resp = await client.post("/schema/resolve", json={"fields": []})
     assert resp.status_code == 422
+
+
+# --- /parse_pdf ---
+
+
+def _make_fake_parse_pdf(fail_with: Exception | None = None):
+    calls = []
+
+    async def fake_parse_pdf(pdf_bytes, *, model=None, model_ref=None):
+        calls.append({"pdf_bytes": pdf_bytes, "model_ref": model_ref})
+        if fail_with is not None:
+            raise fail_with
+        return {
+            "text": "extracted OCR text",
+            "pages_failed": [],
+            "tokens_used": {"input": 100, "output": 20},
+            "cost_usd": 0.0,
+        }
+
+    return fake_parse_pdf, calls
+
+
+async def test_parse_pdf_happy_path(app, client):
+    fake, calls = _make_fake_parse_pdf()
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["text"] == "extracted OCR text"
+    assert body["pages_failed"] == []
+    assert body["tokens_used"] == {"input": 100, "output": 20}
+    assert body["cost_usd"] == 0.0
+    assert body["cost_cny"] == 0.0
+    assert calls[0]["pdf_bytes"] == b"%PDF-1.4 fake bytes"
+
+
+async def test_parse_pdf_reports_failed_pages_and_cost_cny(app, client):
+    fake, _ = _make_fake_parse_pdf()
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+
+    async def fake_with_failures(pdf_bytes, *, model=None, model_ref=None):
+        return {
+            "text": "page one",
+            "pages_failed": [1],
+            "tokens_used": {"input": 50, "output": 10},
+            "cost_usd": 0.001,
+        }
+
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake_with_failures
+
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pages_failed"] == [1]
+    assert body["cost_cny"] == pytest.approx(0.001 * 7.25)
+
+
+async def test_parse_pdf_rejects_non_pdf_content_type(client):
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.txt", b"not a pdf", "text/plain")},
+    )
+    assert resp.status_code == 422
+
+
+async def test_parse_pdf_value_error_becomes_400(app, client):
+    fake, _ = _make_fake_parse_pdf(fail_with=ValueError("broken pdf"))
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
+    )
+
+    assert resp.status_code == 400
+    assert "broken pdf" in resp.json()["detail"]

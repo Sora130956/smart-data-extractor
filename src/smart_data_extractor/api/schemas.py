@@ -141,3 +141,11 @@ class SchemaResolveResponse(BaseModel):
     cost_cny: float
 
     model_config = {"populate_by_name": True}
+
+
+class ParsePdfResponse(BaseModel):
+    text: str
+    pages_failed: list[int]
+    tokens_used: TokensUsed
+    cost_usd: float
+    cost_cny: float
