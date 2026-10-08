@@ -15,6 +15,7 @@ from smart_data_extractor.extraction.ocr import (
     build_glm_model,
     build_ocr_agent,
     calculate_glm_cost,
+    parse_image,
     parse_pdf,
     pdf_to_images,
 )
@@ -178,6 +179,7 @@ async def test_parse_pdf_concatenates_page_text(monkeypatch, test_model):
     result = await parse_pdf(b"fake-pdf-bytes", model=model)
 
     assert result["text"] == "OCR TEXT\n\nOCR TEXT"
+    assert result["pages"] == ["OCR TEXT", "OCR TEXT"]
     assert result["pages_failed"] == []
 
 
@@ -199,7 +201,7 @@ async def test_parse_pdf_skips_failed_pages(monkeypatch, test_model):
     """A page whose OCR run raises is skipped, not fatal to the whole document."""
     monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"p1", b"p2", b"p3"])
 
-    async def fake_ocr_page(agent, image_bytes):
+    async def fake_ocr_page(agent, image_bytes, media_type="image/png"):
         if image_bytes == b"p2":
             raise RuntimeError("boom")
         return f"text-for-{image_bytes.decode()}", RunUsage(input_tokens=10, output_tokens=5)
@@ -209,6 +211,7 @@ async def test_parse_pdf_skips_failed_pages(monkeypatch, test_model):
     result = await parse_pdf(b"fake-pdf-bytes", model=test_model)
 
     assert result["pages_failed"] == [1]
+    assert result["pages"] == ["text-for-p1", None, "text-for-p3"]
     assert result["text"] == "text-for-p1\n\ntext-for-p3"
     assert result["tokens_used"] == {"input": 20, "output": 10}
 
@@ -217,7 +220,7 @@ async def test_parse_pdf_all_pages_fail_returns_empty_text(monkeypatch, test_mod
     """Every page failing is tolerated: empty text, all indices recorded, zero cost."""
     monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"p1", b"p2"])
 
-    async def always_fails(agent, image_bytes):
+    async def always_fails(agent, image_bytes, media_type="image/png"):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(ocr_module, "_ocr_page", always_fails)
@@ -226,6 +229,69 @@ async def test_parse_pdf_all_pages_fail_returns_empty_text(monkeypatch, test_mod
 
     assert result["text"] == ""
     assert result["pages_failed"] == [0, 1]
+    assert result["tokens_used"] == {"input": 0, "output": 0}
+    assert result["cost_usd"] == 0.0
+
+
+# --- parse_image ---
+
+
+async def test_parse_image_ocrs_bytes_directly_with_media_type(monkeypatch, test_model):
+    """An image is OCR'd as-is: no PDF page rendering, one source = one page,
+    and the caller's media_type reaches the OCR call."""
+    # If parse_image tried to route through pdf_to_images, this would explode.
+    def must_not_render(pdf_bytes):
+        raise AssertionError("parse_image must not render PDF pages")
+
+    monkeypatch.setattr(ocr_module, "pdf_to_images", must_not_render)
+
+    captured = {}
+
+    async def fake_ocr_page(agent, image_bytes, media_type="image/png"):
+        captured["media_type"] = media_type
+        return "OCR TEXT", RunUsage(input_tokens=7, output_tokens=3)
+
+    monkeypatch.setattr(ocr_module, "_ocr_page", fake_ocr_page)
+
+    result = await parse_image(b"jpeg-bytes", media_type="image/jpeg", model=test_model)
+
+    assert captured["media_type"] == "image/jpeg"
+    assert result["pages"] == ["OCR TEXT"]
+    assert result["text"] == "OCR TEXT"
+    assert result["pages_failed"] == []
+    assert result["tokens_used"] == {"input": 7, "output": 3}
+
+
+async def test_parse_image_builds_glm_model_when_model_omitted(monkeypatch, fake_openai_env):
+    """Production default path: no model passed -> a real GLM model is built and used."""
+    sentinel_model = TestModel(custom_output_text="OCR TEXT")
+    build_calls = []
+
+    def fake_build_glm_model():
+        build_calls.append(True)
+        return sentinel_model
+
+    monkeypatch.setattr(ocr_module, "build_glm_model", fake_build_glm_model)
+
+    result = await parse_image(b"png-bytes", media_type="image/png")
+
+    assert build_calls == [True]
+    assert result["text"] == "OCR TEXT"
+
+
+async def test_parse_image_failed_ocr_returns_empty_text(monkeypatch, test_model):
+    """A failing OCR run is tolerated: empty text, failure index recorded, zero cost."""
+
+    async def always_fails(agent, image_bytes, media_type="image/png"):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ocr_module, "_ocr_page", always_fails)
+
+    result = await parse_image(b"png-bytes", media_type="image/png", model=test_model)
+
+    assert result["text"] == ""
+    assert result["pages"] == [None]
+    assert result["pages_failed"] == [0]
     assert result["tokens_used"] == {"input": 0, "output": 0}
     assert result["cost_usd"] == 0.0
 

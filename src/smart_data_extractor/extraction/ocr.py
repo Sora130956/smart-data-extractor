@@ -1,8 +1,10 @@
-"""PDF -> page images -> GLM vision OCR.
+"""PDF / image -> GLM vision OCR.
 
 One Source = one Result: a whole PDF is OCR'd page by page and the
 resulting text is concatenated into a single text blob, matching the
 existing plain-text ingestion flow (PasteTextInput -> /batch_extract).
+An image file skips the page rendering entirely — its bytes are a
+single "page".
 
 Per-page failures are tolerated: a page whose OCR run raises is skipped
 (its index recorded in ``pages_failed``) rather than failing the whole
@@ -89,10 +91,59 @@ def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
     return images
 
 
-async def _ocr_page(agent: Agent, image_bytes: bytes) -> tuple[str, RunUsage]:
+async def _ocr_page(agent: Agent, image_bytes: bytes, media_type: str = "image/png") -> tuple[str, RunUsage]:
     """Run OCR on a single page image."""
-    result = await agent.run([OCR_PROMPT, BinaryContent(data=image_bytes, media_type="image/png")])
+    result = await agent.run([OCR_PROMPT, BinaryContent(data=image_bytes, media_type=media_type)])
     return result.output, result.usage
+
+
+async def _ocr_images(
+    images: list[bytes],
+    *,
+    media_type: str,
+    model: Any,
+    model_ref: str | None,
+) -> dict:
+    """OCR a list of images (one per "page") into the shared result dict."""
+    agent = build_ocr_agent(model=model)
+
+    # Per-image OCR text aligned to the original order; None marks a failure.
+    pages: list[str | None] = [None] * len(images)
+    pages_failed: list[int] = []
+    input_tokens = 0
+    output_tokens = 0
+    cost_usd = 0.0
+
+    for index, image_bytes in enumerate(images):
+        try:
+            text, usage = await _ocr_page(agent, image_bytes, media_type)
+        except Exception:
+            logger.exception("OCR failed on page %d", index)
+            pages_failed.append(index)
+            continue
+
+        pages[index] = text
+        input_tokens += usage.input_tokens
+        output_tokens += usage.output_tokens
+        if model_ref is not None:
+            cost_usd += calculate_glm_cost(usage, model_ref=model_ref)
+
+    return {
+        "text": "\n\n".join(t for t in pages if t is not None),
+        "pages": pages,
+        "pages_failed": pages_failed,
+        "tokens_used": {"input": input_tokens, "output": output_tokens},
+        "cost_usd": cost_usd,
+    }
+
+
+def _resolve_model(model: Any, model_ref: str | None) -> tuple[Any, str | None]:
+    """Production default: build a GLM model and cost against settings.glm_model."""
+    if model is None:
+        model = build_glm_model()
+        if model_ref is None:
+            model_ref = get_settings().glm_model
+    return model, model_ref
 
 
 async def parse_pdf(
@@ -109,39 +160,28 @@ async def parse_pdf(
         tokens_used: {"input": int, "output": int}, summed over successful pages.
         cost_usd: total USD cost, summed over successful pages.
     """
-    if model is None:
-        model = build_glm_model()
-        if model_ref is None:
-            model_ref = get_settings().glm_model
-    agent = build_ocr_agent(model=model)
-    images = pdf_to_images(pdf_bytes)
+    model, model_ref = _resolve_model(model, model_ref)
+    return await _ocr_images(
+        pdf_to_images(pdf_bytes), media_type="image/png", model=model, model_ref=model_ref
+    )
 
-    texts: list[str] = []
-    pages_failed: list[int] = []
-    input_tokens = 0
-    output_tokens = 0
-    cost_usd = 0.0
 
-    for index, image_bytes in enumerate(images):
-        try:
-            text, usage = await _ocr_page(agent, image_bytes)
-        except Exception:
-            logger.exception("OCR failed on page %d", index)
-            pages_failed.append(index)
-            continue
+async def parse_image(
+    image_bytes: bytes,
+    *,
+    media_type: str = "image/png",
+    model: Any = None,
+    model_ref: str | None = None,
+) -> dict:
+    """OCR a single image file into a single text blob.
 
-        texts.append(text)
-        input_tokens += usage.input_tokens
-        output_tokens += usage.output_tokens
-        if model_ref is not None:
-            cost_usd += calculate_glm_cost(usage, model_ref=model_ref)
-
-    return {
-        "text": "\n\n".join(texts),
-        "pages_failed": pages_failed,
-        "tokens_used": {"input": input_tokens, "output": output_tokens},
-        "cost_usd": cost_usd,
-    }
+    The image bytes are used as-is (no PDF page rendering): one image =
+    one "page", so the result shape matches ``parse_pdf`` exactly.
+    """
+    model, model_ref = _resolve_model(model, model_ref)
+    return await _ocr_images(
+        [image_bytes], media_type=media_type, model=model, model_ref=model_ref
+    )
 
 
 def calculate_glm_cost(usage: RunUsage, *, model_ref: str) -> float:
