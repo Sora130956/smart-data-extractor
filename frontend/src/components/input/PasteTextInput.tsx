@@ -22,6 +22,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [pdfErrors, setPdfErrors] = useState<string[]>([]);
+  const [parsing, setParsing] = useState(false);
 
   // The browser fires dragleave on child elements too; count entries instead.
   const depth = useRef(0);
@@ -39,17 +40,22 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
       }),
     );
 
-    await Promise.all(
-      pdfFiles.map(async (file) => {
-        try {
-          const result = await parsePdf(file);
-          onAdd(file.name, result.text);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          setPdfErrors((prev) => [...prev, message]);
-        }
-      }),
-    );
+    setParsing(true);
+    try {
+      await Promise.all(
+        pdfFiles.map(async (file) => {
+          try {
+            const result = await parsePdf(file);
+            onAdd(file.name, result.text);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setPdfErrors((prev) => [...prev, message]);
+          }
+        }),
+      );
+    } finally {
+      setParsing(false);
+    }
   }
 
   function onDragEnter(e: DragEvent<HTMLDivElement>) {
@@ -127,7 +133,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
       </div>
 
       <div className="min-w-0 flex-1">
-        {staged.length > 0 ? (
+        {staged.length > 0 && (
           <div className="flex flex-col gap-1.5">
             {staged.map((item, i) => (
               <div key={item.id} className="flex items-center gap-2.5 rounded-token border border-border px-3 py-2 text-body">
@@ -149,11 +155,26 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               </div>
             ))}
           </div>
-        ) : (
+        )}
+        {parsing ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`flex items-center justify-center gap-2 rounded-card border border-dashed border-border px-4 py-4 text-center text-caption text-text-muted ${
+              staged.length > 0 ? 'mt-1.5 py-2' : 'h-full min-h-[120px]'
+            }`}
+          >
+            <span
+              className="inline-block h-4 w-4 flex-none animate-spin rounded-full border-2 border-border border-t-brand"
+              aria-hidden
+            />
+            {t('paste.parsing')}
+          </div>
+        ) : staged.length === 0 ? (
           <div className="flex h-full min-h-[120px] items-center justify-center rounded-card border border-dashed border-border px-4 py-4 text-center text-caption text-text-muted">
             {t('paste.empty')}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

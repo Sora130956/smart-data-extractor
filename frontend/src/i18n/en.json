@@ -31,6 +31,7 @@
     "hint": "Supports .txt and .pdf (OCR) · multiple files allowed",
     "dropActive": "Release to add these files",
     "empty": "No text sources yet — upload a .txt or .pdf file on the left",
+    "parsing": "Parsing PDF (OCR)…",
     "itemLabel": "Text {{index}}",
     "itemChars": "{{count}} chars",
     "remove": "Remove"

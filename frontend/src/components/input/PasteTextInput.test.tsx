@@ -118,4 +118,34 @@ describe('PasteTextInput', () => {
     await waitFor(() => expect(screen.getByText('File must be a PDF')).toBeInTheDocument());
     expect(onAdd).not.toHaveBeenCalled();
   });
+
+  it('shows a spinner while a pdf is being parsed, then removes it', async () => {
+    let resolvePdf!: () => void;
+    vi.mocked(parsePdf).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePdf = () =>
+            resolve({
+              text: 'OCR extracted text',
+              pages_failed: [],
+              tokens_used: { input: 10, output: 5 },
+              cost_usd: 0,
+              cost_cny: 0,
+            });
+        }),
+    );
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile('scan.pdf', 'ignored', 'application/pdf')] } });
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Parsing PDF');
+    expect(status.querySelector('.animate-spin')).not.toBeNull();
+
+    resolvePdf();
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
 });

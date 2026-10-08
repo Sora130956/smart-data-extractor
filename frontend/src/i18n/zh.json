@@ -31,6 +31,7 @@
     "hint": "支持 .txt 和 .pdf（自动 OCR） · 可多选",
     "dropActive": "松开即可添加文件",
     "empty": "还没有文本来源 — 在左侧上传 txt 或 pdf 文件",
+    "parsing": "正在解析 PDF（OCR），请稍候…",
     "itemLabel": "文本 {{index}}",
     "itemChars": "{{count}} 字符",
     "remove": "移除"
