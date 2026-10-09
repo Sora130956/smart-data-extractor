@@ -4,7 +4,10 @@ import i18next from 'i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { ResultDetailModal } from './ResultDetailModal';
+import { exportToExcel } from '@/utils/excelExport';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
+
+vi.mock('@/utils/excelExport', () => ({ exportToExcel: vi.fn() }));
 
 const source: ExtractionSource = {
   id: 'text-0',
@@ -172,6 +175,23 @@ describe('ResultDetailModal', () => {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
 
       clickSpy.mockRestore();
+    });
+  });
+
+  describe('Export Excel', () => {
+    it('exports only the displayed result to a file named after the source and label', async () => {
+      const user = userEvent.setup();
+      render(
+        <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Export Excel' }));
+
+      expect(exportToExcel).toHaveBeenCalledWith(
+        [expect.objectContaining({ name: 'Manual Input 1', results: [highConfidenceResult] })],
+        'Manual Input 1-Text 1.xlsx',
+        expect.any(Function),
+      );
     });
   });
 

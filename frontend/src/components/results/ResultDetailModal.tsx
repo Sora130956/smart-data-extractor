@@ -10,6 +10,7 @@ import {
   type ConfidenceLevel,
 } from '@/utils/confidence';
 import { formatCost } from '@/utils/currency';
+import { exportToExcel } from '@/utils/excelExport';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
 
@@ -82,6 +83,10 @@ export function ResultDetailModal({ source, result, label, onClose }: ResultDeta
     URL.revokeObjectURL(url);
   }
 
+  function handleExportExcel() {
+    void exportToExcel([{ ...source, results: [result] }], `${source.name}-${label}.xlsx`, t);
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
@@ -108,7 +113,7 @@ export function ResultDetailModal({ source, result, label, onClose }: ResultDeta
           <Button size="sm" onClick={handleExport}>
             {t('resultDetail.exportJson')}
           </Button>
-          <Button size="sm" disabled>
+          <Button size="sm" onClick={handleExportExcel}>
             {t('resultDetail.exportExcel')}
           </Button>
           <button

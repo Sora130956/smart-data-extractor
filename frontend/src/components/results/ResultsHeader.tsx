@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { useUiStore } from '@/store/uiStore';
+import { exportToExcel } from '@/utils/excelExport';
 import type { ExtractionSource, ResultFilter } from '@/types/extraction';
 
 export interface FilterCounts {
@@ -64,6 +65,10 @@ export function ResultsHeader({
     URL.revokeObjectURL(url);
   }
 
+  function handleExportExcel() {
+    void exportToExcel(sources, 'extraction-results.xlsx', t);
+  }
+
   const chips: Array<{ id: ResultFilter; label: string; count: number; warn?: boolean }> = [
     { id: 'all', label: t('results.filterAll'), count: counts.all },
     { id: 'high', label: t('results.filterHigh'), count: counts.high },
@@ -90,7 +95,7 @@ export function ResultsHeader({
       <Button size="sm" disabled={counts.all === 0} onClick={handleExportAll}>
         {t('results.exportJson')}
       </Button>
-      <Button size="sm" disabled>
+      <Button size="sm" disabled={counts.all === 0} onClick={handleExportExcel}>
         {t('results.exportExcel')}
       </Button>
     </div>

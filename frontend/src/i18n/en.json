@@ -111,7 +111,7 @@
     "filterHigh": "High Confidence",
     "filterReview": "Need Review",
     "exportJson": "Export All JSON",
-    "exportExcel": "Export Excel (Coming)",
+    "exportExcel": "Export Excel",
     "emptyTitle": "No extractions yet",
     "emptyBody": "Add files or paste text above, pick a preset, then run Start Extraction. Every field comes back with its own confidence score."
   },
@@ -135,12 +135,24 @@
     "collapse": "Collapse",
     "expand": "Expand"
   },
+  "excel": {
+    "sheetResults": "Results",
+    "sheetConfidence": "Field Confidence",
+    "source": "Source",
+    "item": "Item",
+    "status": "Status",
+    "statusSuccess": "Success",
+    "statusFailed": "Failed",
+    "error": "Error",
+    "avgConfidence": "Avg Confidence",
+    "costUsd": "Cost (USD)"
+  },
   "resultDetail": {
     "title": "Extraction Result — {{index}}",
     "copyJson": "Copy JSON",
     "copied": "Copied",
     "exportJson": "Export JSON",
-    "exportExcel": "Export Excel (Coming)",
+    "exportExcel": "Export Excel",
     "close": "Close",
     "retryThisItem": "Retry This Item",
     "needsReviewWarning": "Needs review — {{count}} field(s) below {{threshold}} confidence ({{fields}})",

@@ -3,7 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { ResultsHeader, EMPTY_COUNTS } from './ResultsHeader';
+import { exportToExcel } from '@/utils/excelExport';
 import type { ExtractionSource } from '@/types/extraction';
+
+vi.mock('@/utils/excelExport', () => ({ exportToExcel: vi.fn() }));
 
 const sources: ExtractionSource[] = [
   {
@@ -41,6 +44,31 @@ describe('ResultsHeader', () => {
     render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} />);
 
     expect(screen.getByRole('button', { name: 'Export All JSON' })).toBeDisabled();
+  });
+
+  it('disables Export Excel when there are no results', () => {
+    render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} />);
+
+    expect(screen.getByRole('button', { name: 'Export Excel' })).toBeDisabled();
+  });
+
+  describe('Export Excel', () => {
+    beforeEach(() => {
+      vi.mocked(exportToExcel).mockReset();
+    });
+
+    it('exports all sources to extraction-results.xlsx on click', async () => {
+      const user = userEvent.setup();
+      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0 }} sources={sources} />);
+
+      await user.click(screen.getByRole('button', { name: 'Export Excel' }));
+
+      expect(exportToExcel).toHaveBeenCalledWith(
+        sources,
+        'extraction-results.xlsx',
+        expect.any(Function),
+      );
+    });
   });
 
   describe('Export All JSON', () => {

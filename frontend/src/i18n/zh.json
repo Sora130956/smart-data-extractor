@@ -111,7 +111,7 @@
     "filterHigh": "高置信度",
     "filterReview": "需复核",
     "exportJson": "导出全部 JSON",
-    "exportExcel": "导出 Excel（即将支持）",
+    "exportExcel": "导出 Excel",
     "emptyTitle": "还没有提取结果",
     "emptyBody": "在上方添加文件或粘贴文本，选择预设后点击「开始提取」。每个字段都会带回各自的置信度。"
   },
@@ -135,12 +135,24 @@
     "collapse": "收起",
     "expand": "展开"
   },
+  "excel": {
+    "sheetResults": "提取结果",
+    "sheetConfidence": "字段置信度",
+    "source": "来源",
+    "item": "项",
+    "status": "状态",
+    "statusSuccess": "成功",
+    "statusFailed": "失败",
+    "error": "错误",
+    "avgConfidence": "平均置信度",
+    "costUsd": "成本 (USD)"
+  },
   "resultDetail": {
     "title": "提取结果 — {{index}}",
     "copyJson": "复制 JSON",
     "copied": "已复制",
     "exportJson": "导出 JSON",
-    "exportExcel": "导出 Excel（即将支持）",
+    "exportExcel": "导出 Excel",
     "close": "关闭",
     "retryThisItem": "重试此项",
     "needsReviewWarning": "需人工复核 — {{count}} 个字段置信度低于 {{threshold}}（{{fields}}）",
