@@ -140,6 +140,11 @@ class SchemaInferRequest(BaseModel):
 class SchemaResolveResponse(BaseModel):
     # Aliased: a field literally named "schema" would shadow BaseModel.schema.
     schema_: dict[str, Any] = Field(alias="schema")
+    # /schema/infer only: AI-generated human-friendly name for the schema
+    # (in the input text's language, plus its English translation). Absent
+    # (None) on /schema/resolve.
+    schema_name: str | None = None
+    schema_name_en: str | None = None
     tokens_used: TokensUsed
     cost_usd: float
     cost_cny: float

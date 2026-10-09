@@ -396,6 +396,8 @@ def _make_fake_infer(fail_with: Exception | None = None):
                     }
                 }
             },
+            "schema_name": "发票信息",
+            "schema_name_en": "Invoice Info",
             "tokens_used": {"input": 20, "output": 5},
             "cost_usd": 0.002,
         }
@@ -422,6 +424,8 @@ async def test_schema_infer_happy_path(app, client):
             }
         }
     }
+    assert body["schema_name"] == "发票信息"
+    assert body["schema_name_en"] == "Invoice Info"
     assert body["cost_usd"] == 0.002
     assert body["cost_cny"] == pytest.approx(0.002 * 7.25)
     assert calls == ["发票号：12345"]

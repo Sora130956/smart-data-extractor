@@ -28,6 +28,14 @@ input field, echoing its original index.
 INFER_INSTRUCTIONS = """\
 You design a JSON extraction schema for a piece of raw text.
 
+First, name the schema:
+- schema_name: a short, human-friendly name for this schema, in the same
+  language as the input text (e.g. Chinese invoice text -> "发票信息"), that
+  tells what kind of document the text is. Keep it under 10 characters for
+  Chinese or 4 words for other languages. Do not use a generic name like
+  "schema" or "data".
+- schema_name_en: the same name translated into English.
+
 Read the text and decide which fields a data-extraction form should have to
 capture its key structured information. For each field, produce:
 - field_name: a concise snake_case name suitable as a Python identifier
@@ -67,6 +75,8 @@ class _InferredField(BaseModel):
 
 
 class _InferredSchema(BaseModel):
+    schema_name: str
+    schema_name_en: str
     fields: list[_InferredField]
 
 
@@ -184,6 +194,7 @@ async def infer_schema(
     Returns:
         {"schema": {"fields": {name: {type, description, required,
          display_name, display_name_en}}},
+         "schema_name": str, "schema_name_en": str,
          "tokens_used": {"input": int, "output": int}, "cost_usd": float}
 
     Raises:
@@ -224,6 +235,8 @@ async def infer_schema(
 
     return {
         "schema": {"fields": schema_fields},
+        "schema_name": result.output.schema_name,
+        "schema_name_en": result.output.schema_name_en,
         "tokens_used": tokens,
         "cost_usd": cost_usd,
     }

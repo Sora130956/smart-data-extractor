@@ -150,6 +150,8 @@ async def test_infer_schema_happy_path():
     """The Agent's inferred fields become the schema, keyed by field_name."""
     model = TestModel(
         custom_output_args={
+            "schema_name": "发票信息",
+            "schema_name_en": "Invoice Info",
             "fields": [
                 {
                     "field_name": "invoice_number",
@@ -159,7 +161,7 @@ async def test_infer_schema_happy_path():
                     "type": "string",
                     "required": True,
                 }
-            ]
+            ],
         }
     )
 
@@ -176,13 +178,15 @@ async def test_infer_schema_happy_path():
             }
         }
     }
+    assert result["schema_name"] == "发票信息"
+    assert result["schema_name_en"] == "Invoice Info"
     assert result["tokens_used"]["input"] > 0
     assert result["cost_usd"] >= 0.0
 
 
 async def test_infer_schema_no_fields_raises():
     """An empty field list from the Agent is rejected."""
-    model = TestModel(custom_output_args={"fields": []})
+    model = TestModel(custom_output_args={"schema_name": "n", "schema_name_en": "N", "fields": []})
 
     with pytest.raises(ValueError, match="did not return any fields"):
         await infer_schema("some text", model=model)
@@ -192,6 +196,8 @@ async def test_infer_schema_invalid_identifier_raises():
     """A generated field_name that isn't valid snake_case fails."""
     model = TestModel(
         custom_output_args={
+            "schema_name": "发票信息",
+            "schema_name_en": "Invoice Info",
             "fields": [
                 {
                     "field_name": "InvoiceNumber",
@@ -213,6 +219,8 @@ async def test_infer_schema_duplicate_field_name_raises():
     """Two inferred fields sharing the same field_name conflict."""
     model = TestModel(
         custom_output_args={
+            "schema_name": "合同信息",
+            "schema_name_en": "Contract Info",
             "fields": [
                 {
                     "field_name": "name",
