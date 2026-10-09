@@ -9,7 +9,16 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
-      - key: OPENAI_API_KEY
+      # Main extraction model: pydantic-ai resolves "deepseek:" prefix
+      # against DEEPSEEK_API_KEY.
+      - key: MODEL
+        value: "deepseek:deepseek-chat"
+      - key: DEEPSEEK_API_KEY
         sync: false
+      # Required by Settings (config.py) but unused under the DeepSeek plan;
+      # a placeholder avoids a startup ValidationError.
+      - key: OPENAI_API_KEY
+        value: "placeholder-not-used"
+      # Optional: enables PDF/image OCR via free glm-4v-flash.
       - key: GLM_API_KEY
         sync: false

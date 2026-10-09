@@ -395,3 +395,4 @@
   - 首次部署后需在 Render 控制台手填 `OPENAI_API_KEY`（必需）与 `GLM_API_KEY`（OCR 功能可选）
   - 免费层 spin-down（15 分钟无流量后休眠，冷启动约 30-50 秒）与无持久盘的限制已知且接受，Demo/Proposal 材料需提及首次访问可能有冷启动延迟
   - Phase 8 的 README 需补充 Render 部署徽章/链接与环境变量清单说明
+- **补记（同日调整：线上主提取模型定档 DeepSeek）**：用户拍板线上沿用本地同款 `MODEL=deepseek:deepseek-chat`（成本趋近于零：约 ¥1-2/百万 token 输出，demo 级用量可忽略），完全免费方案（Gemini 免费层等）不折腾结构化输出兼容性。`render.yaml` envVars 随之调整：新增 `MODEL`（固定值）与 `DEEPSEEK_API_KEY`（`sync: false` 控制台手填，pydantic-ai 的 `deepseek:` 前缀读此 key）；`OPENAI_API_KEY` 从 `sync: false` 改为固定占位值 `placeholder-not-used`——`Settings.openai_api_key` 是无默认值的必填字段，缺失会启动即 ValidationError，但 DeepSeek 方案下该 key 不被实际读取，占位即可免手填。`GLM_API_KEY` 维持 `sync: false`（OCR 可选）
