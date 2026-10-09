@@ -67,6 +67,21 @@ def _make_fake_extract(fail_with: Exception | None = None):
     return fake_extract, calls
 
 
+async def test_create_app_serves_built_frontend_from_dist(fake_openai_env, tmp_path):
+    """Single-service deploys (e.g. Render): the built SPA is served at /."""
+    (tmp_path / "index.html").write_text("<html>spa</html>", encoding="utf-8")
+    app = create_app(dist_dir=tmp_path)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        response = await c.get("/")
+        assert response.status_code == 200
+        assert "spa" in response.text
+        # API routes still win over the static mount.
+        api_docs = await c.get("/openapi.json")
+        assert api_docs.status_code == 200
+
+
 def _make_fake_batch():
     """Fake batch_extract honoring the Phase 4 tolerant-mode contract:
     texts equal to "bad" come back as error items."""
