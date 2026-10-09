@@ -16,6 +16,7 @@ import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
 import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
+import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
@@ -272,7 +273,12 @@ function AppShell() {
     );
   }
 
-  const requestErrorMessage = resolveError ?? error?.message;
+  // Demo-stage quota guard (D-019): a 429 gets a localized friendly message
+  // instead of the raw error body.
+  const quotaCode = quotaErrorCode(error);
+  const requestErrorMessage = quotaCode
+    ? t(quotaI18nKey(quotaCode))
+    : resolveError ?? error?.message;
 
   const stats: BatchStats = useMemo(() => {
     if (sources.length === 0) {
@@ -340,7 +346,9 @@ function AppShell() {
 
         {requestErrorMessage ? (
           <div className="mx-5 mt-4 rounded-card border border-error bg-error/10 px-3.5 py-2.5 text-caption text-error">
-            {t('config.requestError', { message: requestErrorMessage })}
+            {quotaCode
+              ? requestErrorMessage
+              : t('config.requestError', { message: requestErrorMessage })}
           </div>
         ) : null}
 

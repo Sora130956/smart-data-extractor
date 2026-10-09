@@ -106,6 +106,45 @@ describe('batchExtract', () => {
     expect(err.name).toBe('ApiError');
   });
 
+  it('surfaces a structured 429 quota payload as code + friendly message', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      text: async () =>
+        JSON.stringify({
+          detail: {
+            code: 'quota_per_ip',
+            message: 'You have used all 50 free requests allowed per visitor today.',
+            reset_at: '00:00 UTC',
+          },
+        }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(batchExtract({ texts: ['x'], preset: 'contact' })).rejects.toMatchObject({
+      status: 429,
+      code: 'quota_per_ip',
+      message: 'You have used all 50 free requests allowed per visitor today.',
+    });
+  });
+
+  it('keeps a plain-text error body as the message (no code)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      text: async () => 'upstream exploded',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(batchExtract({ texts: ['x'], preset: 'contact' })).rejects.toMatchObject({
+      status: 502,
+      code: undefined,
+      message: 'upstream exploded',
+    });
+  });
+
   it('posts a schema instead of a preset when schema is provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

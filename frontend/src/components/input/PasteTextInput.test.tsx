@@ -8,6 +8,16 @@ import { PasteTextInput, type StagedText } from './PasteTextInput';
 vi.mock('@/api/client', () => ({
   parsePdf: vi.fn(),
   parseImage: vi.fn(),
+  // utils/errors imports ApiError for instanceof checks (quota mapping).
+  ApiError: class ApiError extends Error {
+    status: number;
+    code?: string;
+    constructor(message: string, status: number, code?: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  },
 }));
 
 function makeFile(name: string, content: string, type = 'text/plain'): File {

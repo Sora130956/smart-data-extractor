@@ -75,6 +75,10 @@
     "manageSchemas": "管理",
     "smartSavedNamePrefix": "智能推断"
   },
+  "quota": {
+    "perIp": "今日免费提取次数已用完（每天重置），重置时间为 00:00 UTC（北京时间早上 8 点）。",
+    "global": "本站今日免费额度已用完，明天 00:00 UTC（北京时间早上 8 点）重置后再来吧。"
+  },
   "schema": {
     "loading": "加载中…",
     "title": "提取字段",

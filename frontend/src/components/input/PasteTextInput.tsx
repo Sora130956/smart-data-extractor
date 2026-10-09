@@ -3,6 +3,7 @@ import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
+import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
 
 const ACCEPT = '.txt,.pdf,.png,.jpg,.jpeg,.bmp';
 // Extensions the backend /parse_image endpoint accepts (GLM vision formats).
@@ -67,7 +68,10 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               onAdd(file.name, result.text, fileUrl);
             }
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            const quota = quotaErrorCode(err);
+            const message = quota
+              ? t(quotaI18nKey(quota))
+              : err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
           }
         }),
@@ -78,7 +82,10 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
             const result = await parseImage(file);
             onAdd(file.name, result.text, fileUrl);
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            const quota = quotaErrorCode(err);
+            const message = quota
+              ? t(quotaI18nKey(quota))
+              : err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
           }
         }),

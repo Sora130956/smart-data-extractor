@@ -75,6 +75,10 @@
     "manageSchemas": "Manage",
     "smartSavedNamePrefix": "Smart inference"
   },
+  "quota": {
+    "perIp": "You've used all free extractions allowed per visitor for today. The quota resets at 00:00 UTC.",
+    "global": "This demo has used up its daily free quota. It resets at 00:00 UTC — please come back tomorrow."
+  },
   "schema": {
     "loading": "Loading…",
     "title": "Extraction Fields",

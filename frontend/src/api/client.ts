@@ -18,12 +18,38 @@ import {
 
 export class ApiError extends Error {
   readonly status: number;
+  /** Structured error code from the backend (e.g. 429 quota codes). */
+  readonly code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
+}
+
+/**
+ * FastAPI error bodies are {"detail": string | {code, message, reset_at}}.
+ * Surface the structured fields (so 429 quota responses can be localized,
+ * see utils/errors.ts) while keeping plain-text bodies as the message.
+ */
+async function toApiError(res: Response): Promise<ApiError> {
+  const raw = await res.text().catch(() => '');
+  let detail = raw;
+  let code: string | undefined;
+  try {
+    const parsed = JSON.parse(raw)?.detail;
+    if (typeof parsed === 'string') {
+      detail = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.message === 'string') detail = parsed.message;
+      if (typeof parsed.code === 'string') code = parsed.code;
+    }
+  } catch {
+    // Not JSON — keep the raw body as the message.
+  }
+  return new ApiError(detail || res.statusText, res.status, code);
 }
 
 export interface BatchExtractParams {
@@ -53,10 +79,7 @@ export async function batchExtract(
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return batchExtractResponseSchema.parse(await res.json());
 }
@@ -64,10 +87,7 @@ export async function batchExtract(
 export async function getPresets(): Promise<PresetListItem[]> {
   const res = await fetch('/api/presets');
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return presetListResponseSchema.parse(await res.json());
 }
@@ -75,10 +95,7 @@ export async function getPresets(): Promise<PresetListItem[]> {
 export async function getPresetSchema(preset: string): Promise<PresetSchemaResponse> {
   const res = await fetch(`/api/presets/${preset}/schema`);
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return presetSchemaResponseSchema.parse(await res.json());
 }
@@ -100,10 +117,7 @@ export async function resolveSchema(
     body: JSON.stringify({ fields }),
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return schemaResolveResponseSchema.parse(await res.json());
 }
@@ -115,10 +129,7 @@ export async function inferSchema(text: string): Promise<SchemaResolveResponse> 
     body: JSON.stringify({ text }),
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return schemaResolveResponseSchema.parse(await res.json());
 }
@@ -132,10 +143,7 @@ export async function parsePdf(file: File): Promise<ParsePdfResponse> {
     body: formData,
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return parsePdfResponseSchema.parse(await res.json());
 }
@@ -149,10 +157,7 @@ export async function parseImage(file: File): Promise<ParseImageResponse> {
     body: formData,
   });
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiError(detail || res.statusText, res.status);
-  }
+  if (!res.ok) throw await toApiError(res);
 
   return parseImageResponseSchema.parse(await res.json());
 }
