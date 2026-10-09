@@ -370,3 +370,28 @@
   4. App 提交条件扩为 `isSchemaModified || isSavedSchema || hasPresetOverride`——带覆盖的预设必须走 `/schema/resolve` 自定义 schema 路径，否则后端按 preset id 取原 schema 会忽略用户修改（这是「只当前会话生效」问题的根因之一）
 - **理由**：覆盖直接挂在预设 id 上（而非另存为自定义模板）才符合「修改这个预设并保存」的心智模型；提交路径必须识别覆盖，否则保存了也会被后端原 schema 顶掉
 - **影响**：`config.mySchemas` 词条删除；验证：先红（23 失败）后绿，vitest 174 passed（19 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功。顺手修复两处既有问题：`test/setup.ts` 的 `URL.createObjectURL` 条件桩改为无条件（Node 全局存在但对 jsdom File 抛错，导致 PasteTextInput 4 个 F7 用例恒红）；App.test `makeFile` 补第三参 type（F7 用例传 3 参导致 tsc 报错）
+
+---
+
+## D-018：Render 部署方案——单服务（FastAPI 挂载前端构建产物）+ Blueprint 声明式配置
+
+- **日期**：2026-10-09
+- **状态**：已接受
+- **来源**：Phase 7（Day 6）部署规划；用户确认走免费层快速上线
+- **背景**：
+  - 前端 `frontend/` 与后端 `src/smart_data_extractor/` 同仓库，开发环境靠 Vite dev server proxy（`/api` 前缀剥离）打通；生产若两个服务分离部署需处理 CORS 与两份 URL 配置
+  - Render 免费层按服务计费（每服务独立 spin-down/冷启动），双服务（静态站点 + API）比单服务多一份冷启动与跨域复杂度
+  - Render Python Native Runtime 的构建环境本身预装 `node`/`npm`，可以在同一个 Build Command 里完成前端构建
+- **决策**：
+  1. 单服务部署：FastAPI 用 `StaticFiles(html=True)` 挂载 `frontend/dist`，同源伺服前端产物，无需 CORS（已随 `api/__init__.py` 的 `/api` 前缀兼容修复落地，见 commit `8065802`）
+  2. 新增 `render.yaml`（Blueprint）：`runtime: python`、`buildCommand: "uv sync --no-dev && cd frontend && npm install && npm run build"`、`startCommand: "uv run uvicorn smart_data_extractor.api:app --host 0.0.0.0 --port $PORT"`、`healthCheckPath: /health`
+  3. 环境变量：`PYTHON_VERSION=3.11`（与既有 `.python-version` 一致）内嵌在 Blueprint；`OPENAI_API_KEY`/`GLM_API_KEY` 用 `sync: false` 声明占位，实际值在 Render 控制台手填（密钥不入库）
+  4. `DATABASE_URL` 不在 Blueprint 中覆盖，沿用 `config.py` 默认 SQLite 相对路径；免费层无持久盘，每次部署容器重建会清空 db 文件，`init_db()` 在 `lifespan` 里自动重新 seed 预设模板，用户历史数据存浏览器 localStorage 不受影响（已知取舍，未来若需持久化用户自定义数据再评估 Render Postgres）
+- **理由（为什么不选备选方案）**：
+  - 备选 A：前端另建 Static Site 服务 + 后端单独 Web Service → 放弃。两个服务两份冷启动、需配置 CORS 并把前端 API base URL 指向后端域名，免费层下用户体验更差（两次冷启动叠加），且当前前端调用已硬编码 `/api/xxx` 相对路径，同源部署零改动
+  - 备选 B：Dockerfile 自定义镜像而非 Native Runtime → 放弃。Native Runtime 已预装 Node 工具链，Build Command 一行覆盖 Python+前端构建，无需维护 Dockerfile 的多阶段构建与基础镜像更新
+  - 备选 C：Build Command 用 `pip install` 而非 `uv sync` → 放弃。项目锁定 `uv.lock`，`uv sync` 保证与本地开发环境依赖版本一致，Render 原生识别 uv.lock
+- **影响**：
+  - 首次部署后需在 Render 控制台手填 `OPENAI_API_KEY`（必需）与 `GLM_API_KEY`（OCR 功能可选）
+  - 免费层 spin-down（15 分钟无流量后休眠，冷启动约 30-50 秒）与无持久盘的限制已知且接受，Demo/Proposal 材料需提及首次访问可能有冷启动延迟
+  - Phase 8 的 README 需补充 Render 部署徽章/链接与环境变量清单说明

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: smart-data-extractor
+    runtime: python
+    plan: free
+    buildCommand: "uv sync --no-dev && cd frontend && npm install && npm run build"
+    startCommand: "uv run uvicorn smart_data_extractor.api:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GLM_API_KEY
+        sync: false

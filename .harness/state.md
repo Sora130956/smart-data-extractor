@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-第 5 步（生成 → validate → review）— Phase 6 已完成（AC 5/5 通过），准备进入 Phase 7（Docker + Render 部署）
+第 5 步（生成 → validate → review）— Phase 6 已完成（AC 5/5 通过），Phase 7 部署方案已定（D-018：单服务 + render.yaml），待实际部署验证
 
 ## 需求一句话（Who / What / Why）
 
@@ -126,7 +126,7 @@
 - [x] Phase 4（Day 4）：`api/`（schemas/routes/create_app：/health + /extract + /batch_extract）+ `batch_extract` 容错扩展（return_exceptions + instructions 透传）— 新增 12 测试（batch 3 + api 9），共 127 全绿；离线全绿；review 记录 `docs/review.md`（R-7~R-9）
 - [x] Phase 5（Day 5 上午）：`cli.py`（Typer：extract/batch 两命令，契约见 D-009——容错批量 + 退出码 0/1/2 分层 + stdout 数据/stderr 诊断分流）+ `[project.scripts]` 对齐为 `smart-data-extractor = "smart_data_extractor.cli:app"` — 新增 14 测试，共 141 全绿；离线全绿；突变自证通过；review 记录 `docs/review.md`（R-10~R-12，新增 D-009）
 - [x] Phase 6（Day 5 下午，AC 5/5 通过）：`fixtures/`（3 场景样本）+ `tests/test_acceptance.py`（14 测试）+ AC-3 修复（`ConfidenceBase` 归零 validator：null 字段 ⇒ 配对 confidence 0.0，preset/动态模型同享）+ `tests/conftest.py`（`fake_openai_env` 提升共享）+ `tests/test_integration.py`（真实 API 冒烟，`RUN_INTEGRATION=1` 触发，默认 skip）— 155 passed / 2 skipped，删 KEY 离线全绿（AC-5）；突变自证通过；acceptance.md 漂移已修正（字段名 / 命令名 / ConcurrencyLimiter）；review 记录 `docs/review.md`（R-13~R-14）
-- [ ] Phase 7（Day 6）：Docker + Render 部署
+- [ ] Phase 7（Day 6）：Render 部署（D-018：单服务 Native Runtime，非 Dockerfile）——`render.yaml` 已创建，待推送 GitHub 并在 Render 控制台实际部署验证
 - [ ] Phase 8（Day 7）：Demo 视频 + README + Proposal 模板
 
 ### 前端模块清单（`frontend/`，规格见 `frontend/DESIGN.md` §9）
@@ -158,7 +158,7 @@
 
 **前端 F3（当前主线）**：置信度体系（列 + 筛选）+ 结果详情弹窗。
 
-**后端 Phase 7（Day 6，可并行）：Docker + Render 部署**——① 写 `Dockerfile`（uv 或 pip 安装、非 root 用户、健康检查）；② `.dockerignore`；③ 本地 `docker build && docker run` 验证 /health；④ Render 部署（环境变量 `OPENAI_API_KEY`、`MODEL` 等）；⑤ 部署后线上冒烟（/health + 一次 /extract）。可选前置：用户拍板后跑 `RUN_INTEGRATION=1` 真实 API 冒烟（R-14，2 次调用 < $0.01，验证 R-2 instructions 送达）。
+**后端 Phase 7（Day 6，可并行）：Render 部署（D-018）**——方案已定：单服务 Native Runtime（FastAPI 挂载前端构建产物 `StaticFiles`，同源无需 CORS），`render.yaml` 已创建于项目根目录。剩余步骤：① 推送 GitHub（含 `render.yaml`）；② Render 控制台导入 Blueprint；③ 手填 `OPENAI_API_KEY`（必需）/`GLM_API_KEY`（可选）；④ 验证 Build/Start 成功、`/health` 返回正常；⑤ 线上冒烟一次 `/extract`。可选前置：用户拍板后跑 `RUN_INTEGRATION=1` 真实 API 冒烟（R-14，2 次调用 < $0.01，验证 R-2 instructions 送达）。
 
 ## 决策摘要
 
@@ -228,3 +228,8 @@
 - 决策：`ExtractionSource.presetLabel` 提交时快照；`utils/exportFilename.ts` 统一生成 `模板名-YYYYMMDD-HHmmss.ext`（非法字符替换），批量/单条、JSON/Excel 四处接入，无快照回退 source.name
 - 理由：结果跨批次累积，导出时的当前模板未必是结果来源，快照到 source 才准确
 - 详见 `.harness/decisions.md`（验证：先红 6 失败后绿，vitest 150 passed + tsc 0 错误）
+
+### D-018: Render 部署方案——单服务（FastAPI 挂载前端构建产物）+ Blueprint
+- 决策：FastAPI 用 `StaticFiles(html=True)` 挂载 `frontend/dist` 同源伺服，无需 CORS；新增 `render.yaml`（Native Runtime，`buildCommand` 串联 `uv sync --no-dev` + 前端构建，`startCommand` 绑 `$PORT`，`healthCheckPath: /health`）；密钥（`OPENAI_API_KEY`/`GLM_API_KEY`）用 `sync: false` 控制台手填
+- 理由：前端已硬编码 `/api/xxx` 相对路径，同源部署零改动；Native Runtime 预装 Node 工具链免维护 Dockerfile；`uv.lock` 锁版本保证与本地一致
+- 详见 `.harness/decisions.md`
