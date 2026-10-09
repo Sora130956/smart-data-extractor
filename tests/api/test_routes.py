@@ -82,6 +82,22 @@ async def test_create_app_serves_built_frontend_from_dist(fake_openai_env, tmp_p
         assert api_docs.status_code == 200
 
 
+async def test_api_prefix_is_stripped_for_single_service_deploys(fake_openai_env, tmp_path):
+    """Prod builds fetch('/api/...'); dev relies on Vite's proxy (see
+    vite.config.ts) to strip the "/api" prefix before it reaches this app.
+    Single-service deploys have no such proxy, so the app must do the same
+    rewrite itself, or every frontend request 404s against the static
+    mount instead of reaching the router."""
+    (tmp_path / "index.html").write_text("<html>spa</html>", encoding="utf-8")
+    app = create_app(dist_dir=tmp_path)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        resp = await c.get("/api/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+
 def _make_fake_batch():
     """Fake batch_extract honoring the Phase 4 tolerant-mode contract:
     texts equal to "bad" come back as error items."""

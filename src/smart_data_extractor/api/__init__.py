@@ -28,8 +28,12 @@ async def lifespan(app: FastAPI):
 def create_app(dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="Smart Data Extractor", version="0.1.0", lifespan=lifespan)
     app.include_router(router)
-    # Mounted after the API router so /api/* wins; html=True serves the SPA
-    # entry at "/".
+    # Also served under /api/*: in dev, Vite's proxy strips that prefix
+    # before forwarding (see vite.config.ts); single-service deploys have
+    # no such proxy, so the app must accept the prefixed paths itself.
+    app.include_router(router, prefix="/api")
+    # Mounted after the API routers so /api/* and the bare paths both win
+    # over the static mount; html=True serves the SPA entry at "/".
     dist = dist_dir if dist_dir is not None else FRONTEND_DIST
     if dist.is_dir():
         app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
