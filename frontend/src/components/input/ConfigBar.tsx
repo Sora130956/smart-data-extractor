@@ -55,21 +55,17 @@ export function ConfigBar({
             <option value={preset}>{preset}</option>
           ) : (
             <>
+              <option value={SMART_PRESET_ID}>{`${t('config.smartPreset')} ✨`}</option>
               {(presets ?? []).map((p) => (
                 <option key={p.id} value={p.id}>
-                  {isZh ? p.display_name_zh : p.display_name_en}
+                  {`${t('config.presetPrefix')}${isZh ? p.display_name_zh : p.display_name_en}`}
                 </option>
               ))}
-              <option value={SMART_PRESET_ID}>{`${t('config.smartPreset')} ✨`}</option>
-              {savedSchemas.length > 0 ? (
-                <optgroup label={t('config.mySchemas')}>
-                  {savedSchemas.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
+              {savedSchemas.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
             </>
           )}
         </select>

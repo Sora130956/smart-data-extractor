@@ -17,8 +17,7 @@
     "close": "Close",
     "clear": "Clear All",
     "empty": "No history yet — completed extraction batches are saved in this browser automatically.",
-    "sourcesCount": "{{count}} sources",
-    "customSchema": "Custom Fields"
+    "sourcesCount": "{{count}} sources"
   },
   "settings": {
     "title": "Settings",
@@ -72,7 +71,7 @@
     "starting": "Extracting…",
     "requestError": "Extraction request failed: {{message}}",
     "smartPreset": "Smart Inference",
-    "mySchemas": "My Templates",
+    "presetPrefix": "Preset: ",
     "manageSchemas": "Manage",
     "smartSavedNamePrefix": "Smart inference"
   },
@@ -81,6 +80,7 @@
     "title": "Extraction Fields",
     "modified": "Modified",
     "resetToPreset": "Reset to Preset",
+    "save": "Save",
     "fieldName": "Field Name",
     "fieldType": "Type",
     "fieldDescription": "Description",
@@ -160,6 +160,9 @@
     "nullValue": "null",
     "itemsCount": "{{count}} items",
     "fieldsValue": "{{count}} ({{nullCount}} null)",
+    "openOriginal": "Open Original",
+    "editField": "Edit {{field}}",
+    "reviewed": "Reviewed",
     "stats": {
       "inputTokens": "Input Tokens",
       "outputTokens": "Output Tokens",

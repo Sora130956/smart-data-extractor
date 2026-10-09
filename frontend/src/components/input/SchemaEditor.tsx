@@ -22,25 +22,40 @@ const cellClass =
 
 export function SchemaEditor() {
   const { t } = useTranslation();
-  const { preset, customFields, isSchemaModified, savedSchemas, setCustomFields, resetToPreset } =
-    useUiStore();
+  const {
+    preset,
+    customFields,
+    isSchemaModified,
+    savedSchemas,
+    presetOverrides,
+    setCustomFields,
+    resetToPreset,
+    updateSavedSchema,
+    savePresetOverride,
+    clearPresetOverride,
+  } = useUiStore();
   const isSavedSchema = savedSchemas.some((s) => s.id === preset);
   const isSmart = preset === SMART_PRESET_ID;
+  const isBackendPreset = !isSmart && !isSavedSchema;
+  // The user's saved edits to this backend preset, if any.
+  const override = isBackendPreset ? presetOverrides[preset] : undefined;
   const { data: presetFields, isLoading } = usePresetSchema(preset, {
-    enabled: !isSmart && !isSavedSchema,
+    enabled: isBackendPreset,
   });
 
-  // Seed the editable field set from the preset's schema. Runs again after
-  // a preset switch (setPreset clears customFields) or a language switch
-  // (queryKey includes the language), as long as the user has no edits.
-  // Skipped for "smart" (no schema until extraction runs) and for saved
-  // schemas (ConfigBar's onChange already seeded customFields for those).
+  // Seed the editable field set from the preset's schema, preferring the
+  // user's saved override. Runs again after a preset switch (setPreset clears
+  // customFields) or a language switch (queryKey includes the language), as
+  // long as the user has no edits. Skipped for "smart" (no schema until
+  // extraction runs) and for saved schemas (ConfigBar's onChange already
+  // seeded customFields for those).
   useEffect(() => {
-    if (presetFields && !isSchemaModified && !isSmart && !isSavedSchema) {
-      resetToPreset(presetFields);
+    const seed = override ?? presetFields;
+    if (seed && !isSchemaModified && isBackendPreset) {
+      resetToPreset(seed);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetFields, preset]);
+  }, [presetFields, preset, override]);
 
   function updateField(index: number, patch: Partial<SchemaField>) {
     setCustomFields(customFields.map((f, i) => (i === index ? { ...f, ...patch } : f)));
@@ -54,11 +69,23 @@ export function SchemaEditor() {
     setCustomFields([...customFields, { displayName: '', fieldName: null, type: 'string', description: '' }]);
   }
 
+  /** Reset discards the saved override too, so the preset returns to its
+   * backend baseline (not to a previously saved local edit). */
   function handleReset() {
+    clearPresetOverride(preset);
     if (presetFields) resetToPreset(presetFields);
   }
 
-  if (isLoading) {
+  function handleSave() {
+    if (isSavedSchema) {
+      updateSavedSchema(preset, customFields);
+      resetToPreset(customFields);
+    } else {
+      savePresetOverride(preset, customFields);
+    }
+  }
+
+  if (isLoading && !override) {
     return <div className="mt-3 text-caption text-text-muted">{t('schema.loading')}</div>;
   }
 
@@ -80,9 +107,21 @@ export function SchemaEditor() {
           </span>
         ) : null}
         <div className="flex-1" />
-        <Button size="sm" onClick={handleReset} disabled={!isSchemaModified}>
-          {t('schema.resetToPreset')}
-        </Button>
+        {!isSmart ? (
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={handleSave}
+            disabled={!isSchemaModified}
+          >
+            {t('schema.save')}
+          </Button>
+        ) : null}
+        {isBackendPreset ? (
+          <Button size="sm" onClick={handleReset} disabled={!isSchemaModified && !override}>
+            {t('schema.resetToPreset')}
+          </Button>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-1.5">

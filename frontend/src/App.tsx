@@ -50,6 +50,7 @@ function AppShell() {
     customFields,
     isSchemaModified,
     savedSchemas,
+    presetOverrides,
     setPreset,
     setCustomFields,
     addSavedSchema,
@@ -69,6 +70,7 @@ function AppShell() {
   const [sources, setSources] = useState<ExtractionSource[]>([]);
   const [isHistoryOpen, setHistoryOpen] = useState(false);
   const addHistoryEntry = useHistoryStore((s) => s.addEntry);
+  const updateResultField = useHistoryStore((s) => s.updateResultField);
   // Same cached query as ConfigBar: gives the preset's display name for the
   // history entry label snapshot.
   const { data: presets } = useQuery({ queryKey: ['presets'], queryFn: getPresets });
@@ -76,12 +78,27 @@ function AppShell() {
   // for labeling result chips on the preset submit path. Skipped for
   // "smart" and saved schemas, which have no backend preset schema.
   const isSavedSchema = savedSchemas.some((s) => s.id === preset);
+  // A locally-saved override of a backend preset must also submit as a
+  // custom schema — the preset id alone would let the backend ignore edits.
+  const hasPresetOverride =
+    preset !== SMART_PRESET_ID && !isSavedSchema && presetOverrides[preset] !== undefined;
   const { data: presetFields } = usePresetSchema(preset, {
     enabled: preset !== SMART_PRESET_ID && !isSavedSchema,
   });
 
-  function handleAdd(name: string, text: string) {
-    setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text }]);
+  /** Template display name at submit time: saved schema name, else the
+   * backend preset's localized name — used for exports and history labels. */
+  const templateName = (id: string): string => {
+    const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
+    return (
+      savedSchemas.find((s) => s.id === id)?.name ??
+      presets?.find((p) => p.id === id)?.[isZh ? 'display_name_zh' : 'display_name_en'] ??
+      id
+    );
+  };
+
+  function handleAdd(name: string, text: string, fileUrl?: string) {
+    setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text, fileUrl }]);
   }
 
   function handleRemove(id: string) {
@@ -91,6 +108,29 @@ function AppShell() {
   function handleRestoreHistory(entry: HistoryEntry) {
     setSources((prev) => [...withFreshIds(entry.sources), ...prev]);
     setHistoryOpen(false);
+  }
+
+  /** Review flow: apply an inline field correction to the on-screen state,
+   * the open modal, and the persisted history entry (marks it reviewed). */
+  function handleFieldUpdate(fieldKey: string, newValue: unknown) {
+    if (!selected) return;
+    const sourceId = selected.source.id;
+    const applyEdit = (result: ExtractionResult): ExtractionResult => ({
+      ...result,
+      data: { ...result.data, [fieldKey]: newValue },
+      reviewedFields: { ...result.reviewedFields, [fieldKey]: true },
+    });
+    setSources((prev) =>
+      prev.map((source) =>
+        source.id !== sourceId
+          ? source
+          : { ...source, results: source.results.map(applyEdit) },
+      ),
+    );
+    setSelected((prev) =>
+      prev && prev.source.id === sourceId ? { ...prev, result: applyEdit(prev.result) } : prev,
+    );
+    updateResultField(sourceId, fieldKey, newValue);
   }
 
   async function handleStart() {
@@ -115,13 +155,23 @@ function AppShell() {
             description: spec.description ?? '',
           }),
         );
+        // Name the saved template after the AI's own name for the schema
+        // (in the UI language, falling back to the other language); the
+        // timestamp prefix remains a fallback for older backends.
+        const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
+        const aiName = (
+          isZh ? [inferred.schema_name, inferred.schema_name_en] : [inferred.schema_name_en, inferred.schema_name]
+        ).find((n): n is string => typeof n === 'string' && n.length > 0);
         const stamp = new Date().toLocaleString(i18n.resolvedLanguage ?? 'en', {
           month: '2-digit',
           day: '2-digit',
           hour: '2-digit',
           minute: '2-digit',
         });
-        const newId = addSavedSchema(`${t('config.smartSavedNamePrefix')} ${stamp}`, fields);
+        const newName = aiName ?? `${t('config.smartSavedNamePrefix')} ${stamp}`;
+        const newId = addSavedSchema(newName, fields);
+        // Exports/history label: the template just saved under its AI name.
+        presetLabel = newName;
         // Switch the dropdown to the newly saved schema (D-F06); setPreset
         // clears customFields, so setCustomFields must run after it.
         setPreset(newId);
@@ -139,10 +189,9 @@ function AppShell() {
       } finally {
         setIsResolving(false);
       }
-      presetLabel = t('history.customSchema');
-    } else if (isSchemaModified) {
+    } else if (isSchemaModified || isSavedSchema || hasPresetOverride) {
       // Persist edits made to an already-saved schema before submitting.
-      if (isSavedSchema) updateSavedSchema(preset, customFields);
+      if (isSavedSchema && isSchemaModified) updateSavedSchema(preset, customFields);
 
       const fields: SchemaResolveFieldParams[] = customFields.map((f) => {
         const field: SchemaResolveFieldParams = {
@@ -172,7 +221,9 @@ function AppShell() {
       } finally {
         setIsResolving(false);
       }
-      presetLabel = t('history.customSchema');
+      // Exports/history label: the saved schema's own name, or the display
+      // name of the backend preset the user edited.
+      presetLabel = templateName(preset);
     } else {
       target = { preset };
       fieldLabels = presetFields
@@ -182,21 +233,22 @@ function AppShell() {
               .map((f) => [f.fieldName as string, f.displayName]),
           )
         : undefined;
-      const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
-      presetLabel =
-        presets?.find((p) => p.id === preset)?.[isZh ? 'display_name_zh' : 'display_name_en'] ??
-        preset;
+      presetLabel = templateName(preset);
     }
 
     mutate(
       {
         texts: staged.map((item) => item.text),
+        // Blob urls of the original uploads, aligned with texts by index;
+        // only pdf/image sources have one (PasteTextInput creates it there).
+        fileUrls: staged.map((item) => item.fileUrl),
         ...target,
         instructions: instructions || undefined,
         // UI language: preset field descriptions sent to the LLM follow it.
         lang: i18n.resolvedLanguage ?? undefined,
         schemaResolveCost,
         fieldLabels,
+        presetLabel,
       },
       {
         onSuccess: (newSources) => {
@@ -303,6 +355,7 @@ function AppShell() {
           result={selected.result}
           label={t('paste.itemLabel', { index: selected.resultIndex + 1 })}
           onClose={() => setSelected(null)}
+          onFieldUpdate={handleFieldUpdate}
         />
       ) : null}
 

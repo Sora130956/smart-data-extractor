@@ -44,10 +44,22 @@ function stubPresetSchemaFetch() {
 }
 
 describe('SchemaEditor', () => {
+  beforeEach(() => {
+    // The store defaults to "smart"; these tests exercise a backend preset.
+    useUiStore.setState({ preset: 'invoice' });
+  });
+
   afterEach(async () => {
     await i18n.changeLanguage('en');
     vi.unstubAllGlobals();
-    useUiStore.setState({ customFields: [], isSchemaModified: false, preset: 'invoice' });
+    localStorage.clear();
+    useUiStore.setState({
+      preset: 'invoice',
+      customFields: [],
+      isSchemaModified: false,
+      savedSchemas: [],
+      presetOverrides: {},
+    });
   });
 
   it('loads the preset schema and renders one row per field', async () => {
@@ -120,5 +132,86 @@ describe('SchemaEditor', () => {
     await waitFor(() => expect(screen.getByText('已修改')).toBeInTheDocument());
     expect(screen.getByDisplayValue('custom')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('姓名')).not.toBeInTheDocument();
+  });
+
+  it('seeds from a saved override instead of the backend preset schema', async () => {
+    stubPresetSchemaFetch();
+    useUiStore.setState({
+      presetOverrides: {
+        invoice: [
+          { displayName: 'Overridden', fieldName: 'name', type: 'string', description: 'Mine' },
+        ],
+      },
+    });
+    render(<SchemaEditor />, { wrapper });
+
+    await waitFor(() => expect(screen.getByDisplayValue('Overridden')).toBeInTheDocument());
+    expect(screen.queryByDisplayValue('Name')).not.toBeInTheDocument();
+    // Reset stays enabled: an override exists even though nothing is modified.
+    expect(screen.getByRole('button', { name: 'Reset to Preset' })).toBeEnabled();
+  });
+
+  it('saves preset edits as a persisted override', async () => {
+    stubPresetSchemaFetch();
+    render(<SchemaEditor />, { wrapper });
+
+    await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+    const edited = [
+      { displayName: 'Edited', fieldName: 'name', type: 'string' as const, description: '' },
+    ];
+    useUiStore.getState().setCustomFields(edited);
+    await waitFor(() => expect(screen.getByText('Modified')).toBeInTheDocument());
+
+    screen.getByRole('button', { name: 'Save' }).click();
+
+    await waitFor(() => expect(screen.queryByText('Modified')).not.toBeInTheDocument());
+    expect(useUiStore.getState().presetOverrides.invoice).toEqual(edited);
+    const persisted = JSON.parse(localStorage.getItem('sde.presetOverrides') ?? '{}');
+    expect(persisted.invoice).toEqual(edited);
+  });
+
+  it('clears the override and restores the backend fields on reset', async () => {
+    stubPresetSchemaFetch();
+    render(<SchemaEditor />, { wrapper });
+
+    await waitFor(() => expect(screen.getByDisplayValue('Name')).toBeInTheDocument());
+    useUiStore
+      .getState()
+      .setCustomFields([{ displayName: 'Edited', fieldName: 'name', type: 'string', description: '' }]);
+    await waitFor(() => expect(screen.getByText('Modified')).toBeInTheDocument());
+    screen.getByRole('button', { name: 'Save' }).click();
+    await waitFor(() => expect(useUiStore.getState().presetOverrides.invoice).toBeDefined());
+
+    screen.getByRole('button', { name: 'Reset to Preset' }).click();
+
+    await waitFor(() =>
+      expect(useUiStore.getState().presetOverrides.invoice).toBeUndefined(),
+    );
+    await waitFor(() => expect(screen.getByDisplayValue('Name')).toBeInTheDocument());
+    expect(localStorage.getItem('sde.presetOverrides')).toBe('{}');
+  });
+
+  it('hides Reset to Preset for saved schemas but keeps Save', async () => {
+    const fields = [
+      { displayName: 'Custom', fieldName: 'x', type: 'string' as const, description: '' },
+    ];
+    useUiStore.setState({
+      preset: 'saved-1',
+      savedSchemas: [
+        { id: 'saved-1', name: 'My Schema', fields, createdAt: '2026-01-01T00:00:00Z' },
+      ],
+      customFields: fields,
+      isSchemaModified: true,
+    });
+    render(<SchemaEditor />, { wrapper });
+
+    expect(screen.getByDisplayValue('Custom')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset to Preset' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+
+    screen.getByRole('button', { name: 'Save' }).click();
+
+    await waitFor(() => expect(screen.queryByText('Modified')).not.toBeInTheDocument());
+    expect(useUiStore.getState().savedSchemas[0].fields).toEqual(fields);
   });
 });

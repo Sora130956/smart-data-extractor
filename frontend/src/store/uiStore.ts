@@ -7,6 +7,7 @@ export type PdfSplitMode = 'whole' | 'pages';
 export const THEME_STORAGE_KEY = 'sde.theme';
 export const PDF_SPLIT_STORAGE_KEY = 'sde.pdfSplitMode';
 export const SAVED_SCHEMAS_STORAGE_KEY = 'sde.savedSchemas';
+export const PRESET_OVERRIDES_STORAGE_KEY = 'sde.presetOverrides';
 /** Fixed preset id for the "infer schema from text" flow (not a real backend preset). */
 export const SMART_PRESET_ID = 'smart';
 
@@ -36,6 +37,26 @@ function persistSavedSchemas(schemas: SavedSchema[]) {
   localStorage.setItem(SAVED_SCHEMAS_STORAGE_KEY, JSON.stringify(schemas));
 }
 
+/** User-saved edits to a backend preset, keyed by preset id. */
+export type PresetOverrides = Record<string, SchemaField[]>;
+
+export function readInitialPresetOverrides(): PresetOverrides {
+  const stored = localStorage.getItem(PRESET_OVERRIDES_STORAGE_KEY);
+  if (!stored) return {};
+  try {
+    const parsed = JSON.parse(stored);
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as PresetOverrides)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistPresetOverrides(overrides: PresetOverrides) {
+  localStorage.setItem(PRESET_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
+}
+
 function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -54,6 +75,10 @@ interface UiState {
   pdfSplitMode: PdfSplitMode;
   /** Schemas the user saved locally (e.g. from the "smart" inference flow). */
   savedSchemas: SavedSchema[];
+  /** Local edits to backend presets, keyed by preset id; they replace the
+   * backend fields when that preset is selected and are submitted as a
+   * custom schema (the backend preset id alone would ignore the edits). */
+  presetOverrides: PresetOverrides;
   toggleTheme: () => void;
   setPreset: (preset: string) => void;
   setInstructions: (instructions: string) => void;
@@ -65,17 +90,22 @@ interface UiState {
   renameSavedSchema: (id: string, name: string) => void;
   deleteSavedSchema: (id: string) => void;
   updateSavedSchema: (id: string, fields: SchemaField[]) => void;
+  savePresetOverride: (presetId: string, fields: SchemaField[]) => void;
+  clearPresetOverride: (presetId: string) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
   theme: readInitialTheme(),
-  preset: 'invoice',
+  // Smart inference is the zero-config path, so it is the default selection
+  // (and the first option in the dropdown).
+  preset: SMART_PRESET_ID,
   instructions: '',
   filter: 'all',
   customFields: [],
   isSchemaModified: false,
   pdfSplitMode: readInitialPdfSplitMode(),
   savedSchemas: readInitialSavedSchemas(),
+  presetOverrides: readInitialPresetOverrides(),
 
   toggleTheme: () =>
     set((state) => {
@@ -116,5 +146,18 @@ export const useUiStore = create<UiState>((set, get) => ({
     const savedSchemas = get().savedSchemas.map((s) => (s.id === id ? { ...s, fields } : s));
     persistSavedSchemas(savedSchemas);
     set({ savedSchemas });
+  },
+  // Persist preset edits as the preset's saved baseline; also clears the
+  // "modified" badge since the working set now matches what is saved.
+  savePresetOverride: (presetId, fields) => {
+    const presetOverrides = { ...get().presetOverrides, [presetId]: fields };
+    persistPresetOverrides(presetOverrides);
+    set({ presetOverrides, isSchemaModified: false });
+  },
+  clearPresetOverride: (presetId) => {
+    const presetOverrides = { ...get().presetOverrides };
+    delete presetOverrides[presetId];
+    persistPresetOverrides(presetOverrides);
+    set({ presetOverrides });
   },
 }));

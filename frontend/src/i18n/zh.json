@@ -17,8 +17,7 @@
     "close": "关闭",
     "clear": "清空全部",
     "empty": "还没有历史记录 — 提取成功的批次会自动保存在本浏览器中。",
-    "sourcesCount": "{{count}} 个来源",
-    "customSchema": "自定义字段"
+    "sourcesCount": "{{count}} 个来源"
   },
   "settings": {
     "title": "设置",
@@ -72,7 +71,7 @@
     "starting": "提取中…",
     "requestError": "提取请求失败：{{message}}",
     "smartPreset": "智能推断",
-    "mySchemas": "我的模板",
+    "presetPrefix": "预设：",
     "manageSchemas": "管理",
     "smartSavedNamePrefix": "智能推断"
   },
@@ -81,6 +80,7 @@
     "title": "提取字段",
     "modified": "已修改",
     "resetToPreset": "重置为预设",
+    "save": "保存",
     "fieldName": "字段名",
     "fieldType": "类型",
     "fieldDescription": "描述",
@@ -160,6 +160,9 @@
     "nullValue": "空值",
     "itemsCount": "{{count}} 项",
     "fieldsValue": "{{count}}（{{nullCount}} 为空）",
+    "openOriginal": "打开<br/>原文件",
+    "editField": "编辑{{field}}",
+    "reviewed": "已复核",
     "stats": {
       "inputTokens": "输入 Token",
       "outputTokens": "输出 Token",

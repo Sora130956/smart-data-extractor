@@ -8,11 +8,13 @@ import { THEME_STORAGE_KEY, useUiStore } from '@/store/uiStore';
 import { HISTORY_STORAGE_KEY, useHistoryStore } from '@/store/historyStore';
 
 function renderApp() {
+  // The store defaults to "smart"; these tests exercise the invoice preset.
+  useUiStore.setState({ preset: 'invoice' });
   return render(<App />);
 }
 
-function makeFile(name: string, content: string): File {
-  const file = new File([content], name, { type: 'text/plain' });
+function makeFile(name: string, content: string, type = 'text/plain'): File {
+  const file = new File([content], name, { type });
   // jsdom's File does not implement .text() yet.
   if (typeof file.text !== 'function') {
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
@@ -147,7 +149,7 @@ describe('F2 batch accumulation', () => {
     const { container } = renderApp();
 
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Invoice' })).toBeInTheDocument(),
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
     );
 
     const input = () => container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -176,6 +178,96 @@ describe('F2 batch accumulation', () => {
   });
 });
 
+describe('F5 smart inference template name', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useUiStore.setState({
+      preset: 'invoice',
+      instructions: '',
+      customFields: [],
+      isSchemaModified: false,
+      savedSchemas: [],
+    });
+    localStorage.clear();
+    useHistoryStore.setState({ entries: [] });
+  });
+
+  it('saves the inferred schema under the AI-generated name, not a timestamp', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (url === '/api/schema/infer') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            schema: {
+              fields: {
+                invoice_number: {
+                  type: 'string',
+                  description: 'The invoice number',
+                  required: true,
+                  display_name: '发票号',
+                  display_name_en: 'Invoice Number',
+                },
+              },
+            },
+            schema_name: '发票信息',
+            schema_name_en: 'Invoice Info',
+            tokens_used: { input: 20, output: 5 },
+            cost_usd: 0.002,
+            cost_cny: 0.0145,
+          }),
+        });
+      }
+      if (url === '/api/batch_extract') {
+        return Promise.resolve({ ok: true, json: async () => batchExtractPayload('Acme Corp') });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    await user.selectOptions(screen.getByRole('combobox'), 'smart');
+
+    const input = () => container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input(), { target: { files: [makeFile('invoice.txt', 'Invoice #123')] } });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+
+    // EN UI: the AI's English name becomes the saved template's dropdown label.
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Invoice Info' })).toBeInTheDocument(),
+    );
+
+    // End-to-end: the batch JSON export is named after the AI template name.
+    URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+    URL.revokeObjectURL = vi.fn();
+    const downloads: string[] = [];
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      });
+    await user.click(screen.getByRole('button', { name: 'Export All JSON' }));
+    expect(downloads[0]).toMatch(/^Invoice Info-\d{8}-\d{6}\.json$/);
+    clickSpy.mockRestore();
+
+    const stored = JSON.parse(
+      localStorage.getItem('sde.savedSchemas') ?? '[]',
+    ) as Array<{ name: string }>;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].name).toBe('Invoice Info');
+  });
+});
+
 describe('F6 history integration', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -190,7 +282,7 @@ describe('F6 history integration', () => {
     const { container } = renderApp();
 
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Invoice' })).toBeInTheDocument(),
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
     );
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -233,7 +325,7 @@ describe('F3 result detail modal', () => {
     const { container } = renderApp();
 
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Invoice' })).toBeInTheDocument(),
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
     );
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -255,5 +347,199 @@ describe('F3 result detail modal', () => {
     await user.click(closeButtons[0]);
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('F7 original file url', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useUiStore.setState({ preset: 'invoice', instructions: '', customFields: [], isSchemaModified: false });
+    localStorage.clear();
+    useHistoryStore.setState({ entries: [] });
+  });
+
+  it('keeps the uploaded pdf blob url on the extracted source', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (typeof url === 'string' && url.startsWith('/api/presets/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ fields: [] }) });
+      }
+      if (url === '/api/parse_pdf') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            text: 'OCR extracted text',
+            pages: ['OCR extracted text'],
+            pages_failed: [],
+            tokens_used: { input: 10, output: 5 },
+            cost_usd: 0,
+            cost_cny: 0,
+          }),
+        });
+      }
+      if (url === '/api/batch_extract') {
+        return Promise.resolve({ ok: true, json: async () => batchExtractPayload('Acme Corp') });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('scan.pdf', 'ignored', 'application/pdf')] },
+    });
+
+    await waitFor(() => expect(screen.getByText('scan.pdf')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument());
+
+    // The staged pdf's blob url survives into the extracted (and persisted) source.
+    const stored = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? '[]') as Array<{
+      sources: Array<{ sourceFileUrl?: string }>;
+    }>;
+    expect(stored[0].sources[0].sourceFileUrl).toBe('blob:mock-url');
+  });
+});
+
+describe('F8 field review editing', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useUiStore.setState({ preset: 'invoice', instructions: '', customFields: [], isSchemaModified: false });
+    localStorage.clear();
+    useHistoryStore.setState({ entries: [] });
+  });
+
+  it('edits a field from the detail modal, marks it reviewed, and persists the correction', async () => {
+    stubExtractionFetch();
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('invoice.txt', 'Invoice #123 from Acme Corp')] },
+    });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'View' }));
+
+    // Inline edit: correct the vendor, save with Enter.
+    await user.click(screen.getByRole('button', { name: 'Edit vendor' }));
+    const editInput = screen.getByDisplayValue('Acme Corp');
+    await user.clear(editInput);
+    await user.type(editInput, 'Beta Ltd{Enter}');
+
+    // The modal shows the corrected value plus the Reviewed badge.
+    expect(screen.getAllByText('Beta Ltd').length).toBeGreaterThan(0);
+    expect(screen.getByText('Reviewed')).toBeInTheDocument();
+
+    // The correction is persisted into the history entry with the reviewed mark.
+    const stored = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? '[]') as Array<{
+      sources: Array<{
+        results: Array<{ data: Record<string, unknown>; reviewedFields?: Record<string, boolean> }>;
+      }>;
+    }>;
+    expect(stored[0].sources[0].results[0].data.vendor).toBe('Beta Ltd');
+    expect(stored[0].sources[0].results[0].reviewedFields?.vendor).toBe(true);
+
+    // The result list behind the modal reflects the correction too (rendered
+    // as a "vendor: Beta Ltd" chip; the source's text preview still mentions
+    // "Acme Corp" from the original upload, so scope the check to the chip).
+    await user.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText(/vendor:\s*Beta Ltd/)).toBeInTheDocument();
+    expect(screen.queryByText(/vendor:\s*Acme Corp/)).not.toBeInTheDocument();
+  });
+});
+
+describe('preset override submit path', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useUiStore.setState({
+      preset: 'invoice',
+      instructions: '',
+      customFields: [],
+      isSchemaModified: false,
+      savedSchemas: [],
+      presetOverrides: {},
+    });
+    localStorage.clear();
+    useHistoryStore.setState({ entries: [] });
+  });
+
+  it('submits a preset with a saved override via /schema/resolve, not the preset id', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (url === '/api/schema/resolve') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            schema: {
+              fields: {
+                company: { type: 'string', description: 'The company', required: true },
+              },
+            },
+            tokens_used: { input: 10, output: 5 },
+            cost_usd: 0.0001,
+            cost_cny: 0.0007,
+          }),
+        });
+      }
+      if (url === '/api/batch_extract') {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Promise.resolve({ ok: true, json: async () => batchExtractPayload('Acme Corp') });
+      }
+      if (typeof url === 'string' && url.startsWith('/api/presets/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ fields: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    useUiStore.setState({
+      presetOverrides: {
+        invoice: [
+          { displayName: 'Company', fieldName: 'company', type: 'string', description: 'The company' },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('invoice.txt', 'Invoice #123 from Acme Corp')] },
+    });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    // The saved override replaces the backend preset schema on submit.
+    expect(bodies[0].schema).toBeDefined();
+    expect(bodies[0].preset).toBeUndefined();
   });
 });

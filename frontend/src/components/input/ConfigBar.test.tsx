@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import '@/i18n';
+import i18n from '@/i18n';
 import { ConfigBar } from './ConfigBar';
 import { useUiStore } from '@/store/uiStore';
 
@@ -30,7 +30,8 @@ function stubPresetsFetch() {
 }
 
 describe('ConfigBar', () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await i18n.changeLanguage('en');
     vi.unstubAllGlobals();
     useUiStore.setState({
       preset: 'invoice',
@@ -38,18 +39,44 @@ describe('ConfigBar', () => {
       customFields: [],
       isSchemaModified: false,
       savedSchemas: [],
+      presetOverrides: {},
     });
   });
 
-  it('renders one option per preset from the API', async () => {
+  it('defaults to Smart Inference and lists it as the first option', async () => {
     stubPresetsFetch();
     render(<ConfigBar />, { wrapper });
 
     await waitFor(() =>
-      expect(screen.getByRole('option', { name: 'Invoice' })).toBeInTheDocument(),
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
     );
-    expect(screen.getByRole('option', { name: 'Contact' })).toBeInTheDocument();
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('smart');
+    expect(select.options[0].value).toBe('smart');
+    expect(select.options[0].textContent).toBe('Smart Inference ✨');
+    expect(select.options[1].value).toBe('contact');
+  });
+
+  it('renders one option per preset from the API, prefixed with "Preset: "', async () => {
+    stubPresetsFetch();
+    render(<ConfigBar />, { wrapper });
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('option', { name: 'Preset: Contact' })).toBeInTheDocument();
     expect(screen.getByRole('combobox')).toBeEnabled();
+  });
+
+  it('localizes the preset prefix when the UI language is Chinese', async () => {
+    stubPresetsFetch();
+    await i18n.changeLanguage('zh');
+    render(<ConfigBar />, { wrapper });
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: '预设：发票' })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('option', { name: '预设：联系人' })).toBeInTheDocument();
   });
 
   it('disables the preset select while presets are loading', () => {
@@ -77,7 +104,7 @@ describe('ConfigBar', () => {
     );
   });
 
-  it('renders saved schemas under a "My Templates" optgroup', async () => {
+  it('renders saved schemas as plain options, with no "My Templates" optgroup', async () => {
     stubPresetsFetch();
     useUiStore.setState({
       savedSchemas: [
@@ -89,15 +116,7 @@ describe('ConfigBar', () => {
     await waitFor(() =>
       expect(screen.getByRole('option', { name: 'My Saved Schema' })).toBeInTheDocument(),
     );
-    expect(screen.getByRole('group', { name: 'My Templates' })).toBeInTheDocument();
-  });
-
-  it('does not render the optgroup when there are no saved schemas', async () => {
-    stubPresetsFetch();
-    render(<ConfigBar />, { wrapper });
-
-    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
-    expect(screen.queryByRole('group', { name: 'My Templates' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
   });
 
   it('loads the saved schema fields into customFields when selected', async () => {
