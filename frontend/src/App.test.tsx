@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
+import i18n from '@/i18n';
 import App from './App';
 import { LANGUAGE_STORAGE_KEY } from '@/i18n';
 import { THEME_STORAGE_KEY, useUiStore } from '@/store/uiStore';
@@ -179,8 +180,10 @@ describe('F2 batch accumulation', () => {
 });
 
 describe('F5 smart inference template name', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals();
+    // i18n is a module singleton; the zh-flow test must not leak its language.
+    await i18n.changeLanguage('en');
     useUiStore.setState({
       preset: 'invoice',
       instructions: '',
@@ -205,7 +208,8 @@ describe('F5 smart inference template name', () => {
               fields: {
                 invoice_number: {
                   type: 'string',
-                  description: 'The invoice number',
+                  description: '发票的代码编号',
+                  description_en: 'The invoice number',
                   required: true,
                   display_name: '发票号',
                   display_name_en: 'Invoice Number',
@@ -247,6 +251,16 @@ describe('F5 smart inference template name', () => {
       expect(screen.getByRole('option', { name: 'Invoice Info' })).toBeInTheDocument(),
     );
 
+    // EN UI: the inferred field label in the schema editor follows the UI
+    // language (display_name_en), not the input text's language.
+    expect(
+      (screen.getAllByRole('textbox', { name: 'Field Name' })[0] as HTMLInputElement).value,
+    ).toBe('Invoice Number');
+    // Same for the field description (description_en).
+    expect(
+      (screen.getAllByRole('textbox', { name: 'Description' })[0] as HTMLInputElement).value,
+    ).toBe('The invoice number');
+
     // End-to-end: the batch JSON export is named after the AI template name.
     URL.createObjectURL = vi.fn(() => 'blob:mock-url');
     URL.revokeObjectURL = vi.fn();
@@ -262,9 +276,86 @@ describe('F5 smart inference template name', () => {
 
     const stored = JSON.parse(
       localStorage.getItem('sde.savedSchemas') ?? '[]',
-    ) as Array<{ name: string }>;
+    ) as Array<{ name: string; nameEn: string }>;
     expect(stored).toHaveLength(1);
-    expect(stored[0].name).toBe('Invoice Info');
+    // Both language names persist so the dropdown can follow later switches.
+    expect(stored[0].name).toBe('发票信息');
+    expect(stored[0].nameEn).toBe('Invoice Info');
+  });
+
+  it('labels inferred fields and the template name in Chinese under the zh UI', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (url === '/api/schema/infer') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            schema: {
+              fields: {
+                invoice_number: {
+                  type: 'string',
+                  description: '发票的代码编号',
+                  description_en: 'The invoice number',
+                  required: true,
+                  display_name: '发票号',
+                  display_name_en: 'Invoice Number',
+                },
+              },
+            },
+            schema_name: '发票信息',
+            schema_name_en: 'Invoice Info',
+            tokens_used: { input: 20, output: 5 },
+            cost_usd: 0.002,
+            cost_cny: 0.0145,
+          }),
+        });
+      }
+      if (url === '/api/batch_extract') {
+        return Promise.resolve({ ok: true, json: async () => batchExtractPayload('Acme Corp') });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    // i18n is a module singleton; switch language via the header toggle.
+    await user.click(screen.getByRole('button', { name: '中文' }));
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: '预设：发票' })).toBeInTheDocument(),
+    );
+
+    await user.selectOptions(screen.getByRole('combobox'), 'smart');
+
+    const input = () => container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input(), { target: { files: [makeFile('invoice.txt', 'Invoice #123')] } });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: '开始提取 🚀' }));
+
+    // ZH UI: the template dropdown shows the AI's Chinese name.
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: '发票信息' })).toBeInTheDocument(),
+    );
+
+    // ZH UI: inferred field label comes from display_name.
+    expect(
+      (screen.getAllByRole('textbox', { name: '字段名' })[0] as HTMLInputElement).value,
+    ).toBe('发票号');
+    // ZH UI: the description keeps the text-language column.
+    expect(
+      (screen.getAllByRole('textbox', { name: '描述' })[0] as HTMLInputElement).value,
+    ).toBe('发票的代码编号');
+
+    const stored = JSON.parse(
+      localStorage.getItem('sde.savedSchemas') ?? '[]',
+    ) as Array<{ name: string; nameEn: string }>;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].name).toBe('发票信息');
+    expect(stored[0].nameEn).toBe('Invoice Info');
   });
 });
 

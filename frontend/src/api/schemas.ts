@@ -52,9 +52,13 @@ export const presetListResponseSchema = z.array(presetListItemSchema);
 export const schemaFieldSpecSchema = z.object({
   type: z.string(),
   description: z.string().nullable(),
+  // /schema/infer only: English translation of the description.
+  description_en: z.string().nullable().optional(),
   required: z.boolean(),
-  // Echoed by /schema/resolve so the UI can label chips per resolved field.
+  // Echoed by /schema/resolve and /schema/infer so the UI can label chips in
+  // the current language (text-language name plus its English translation).
   display_name: z.string().nullable().optional(),
+  display_name_en: z.string().nullable().optional(),
 });
 
 export const schemaResolveResponseSchema = z.object({

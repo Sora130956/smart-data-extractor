@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { SchemaEditor } from '@/components/input/SchemaEditor';
 import { ManageSchemasPanel } from '@/components/input/ManageSchemasPanel';
 import { getPresets } from '@/api/client';
-import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
+import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
 
 const selectClass =
   'rounded-token border border-border bg-surface px-2.5 py-1.5 text-body text-text';
@@ -63,7 +63,7 @@ export function ConfigBar({
               ))}
               {savedSchemas.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name}
+                  {savedSchemaLabel(s, isZh)}
                 </option>
               ))}
             </>

@@ -5,13 +5,14 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
-import { useUiStore } from '@/store/uiStore';
+import { savedSchemaLabel, useUiStore } from '@/store/uiStore';
 
 export function ManageSchemasPanel({ onClose }: { onClose: () => void }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const savedSchemas = useUiStore((s) => s.savedSchemas);
   const renameSavedSchema = useUiStore((s) => s.renameSavedSchema);
   const deleteSavedSchema = useUiStore((s) => s.deleteSavedSchema);
+  const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -89,7 +90,7 @@ export function ManageSchemasPanel({ onClose }: { onClose: () => void }) {
                 ) : deletingId === schema.id ? (
                   <div className="flex items-center gap-2">
                     <span className="flex-1 text-caption text-text">
-                      {t('manageSchemas.confirmDelete', { name: schema.name })}
+                      {t('manageSchemas.confirmDelete', { name: savedSchemaLabel(schema, isZh) })}
                     </span>
                     <Button size="sm" onClick={() => setDeletingId(null)}>
                       {t('manageSchemas.cancel')}
@@ -101,12 +102,12 @@ export function ManageSchemasPanel({ onClose }: { onClose: () => void }) {
                 ) : (
                   <div className="flex items-center gap-2">
                     <div className="flex flex-1 flex-col">
-                      <span className="text-body font-semibold">{schema.name}</span>
+                      <span className="text-body font-semibold">{savedSchemaLabel(schema, isZh)}</span>
                       <span className="text-caption text-text-muted">
                         {t('manageSchemas.fieldsCount', { count: schema.fields.length })}
                       </span>
                     </div>
-                    <Button size="sm" onClick={() => startRename(schema.id, schema.name)}>
+                    <Button size="sm" onClick={() => startRename(schema.id, savedSchemaLabel(schema, isZh))}>
                       {t('manageSchemas.rename')}
                     </Button>
                     <Button size="sm" onClick={() => setDeletingId(schema.id)}>

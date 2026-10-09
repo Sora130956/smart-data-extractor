@@ -157,7 +157,8 @@ async def test_infer_schema_happy_path():
                     "field_name": "invoice_number",
                     "display_name": "发票号",
                     "display_name_en": "Invoice Number",
-                    "description": "The invoice number",
+                    "description": "发票的代码编号",
+                    "description_en": "The invoice number",
                     "type": "string",
                     "required": True,
                 }
@@ -171,7 +172,8 @@ async def test_infer_schema_happy_path():
         "fields": {
             "invoice_number": {
                 "type": "string",
-                "description": "The invoice number",
+                "description": "发票的代码编号",
+                "description_en": "The invoice number",
                 "required": True,
                 "display_name": "发票号",
                 "display_name_en": "Invoice Number",

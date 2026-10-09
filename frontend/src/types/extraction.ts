@@ -76,7 +76,10 @@ export type ResultFilter = 'all' | 'high' | 'review';
  * or (in the future) some other source. Persisted to localStorage. */
 export interface SavedSchema {
   id: string;
+  /** Chinese / text-language name (the AI's schema_name for smart inference). */
   name: string;
+  /** English name (the AI's schema_name_en); absent in legacy entries. */
+  nameEn?: string;
   fields: SchemaField[];
   createdAt: string;
 }

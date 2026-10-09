@@ -6,6 +6,7 @@ import {
   readInitialPdfSplitMode,
   readInitialPresetOverrides,
   readInitialSavedSchemas,
+  savedSchemaLabel,
   SAVED_SCHEMAS_STORAGE_KEY,
   useUiStore,
 } from './uiStore';
@@ -67,29 +68,38 @@ describe('savedSchemas', () => {
     expect(readInitialSavedSchemas()).toEqual([]);
   });
 
-  it('addSavedSchema appends an entry, updates state, and persists it', () => {
-    const id = useUiStore.getState().addSavedSchema('My Schema', fields);
+  it('addSavedSchema appends an entry with both language names, updates state, and persists it', () => {
+    const id = useUiStore.getState().addSavedSchema('我的模板', 'My Schema', fields);
 
     const state = useUiStore.getState().savedSchemas;
     expect(state).toHaveLength(1);
-    expect(state[0]).toMatchObject({ id, name: 'My Schema', fields });
+    expect(state[0]).toMatchObject({ id, name: '我的模板', nameEn: 'My Schema', fields });
     expect(typeof state[0].createdAt).toBe('string');
 
     const persisted = JSON.parse(localStorage.getItem(SAVED_SCHEMAS_STORAGE_KEY) ?? '[]');
     expect(persisted).toEqual(state);
   });
 
-  it('renameSavedSchema updates the name and persists it', () => {
-    const id = useUiStore.getState().addSavedSchema('Old Name', fields);
+  it('renameSavedSchema overrides the name in both languages and persists it', () => {
+    const id = useUiStore.getState().addSavedSchema('Old Name', 'Old Name EN', fields);
     useUiStore.getState().renameSavedSchema(id, 'New Name');
 
     expect(useUiStore.getState().savedSchemas[0].name).toBe('New Name');
+    expect(useUiStore.getState().savedSchemas[0].nameEn).toBe('New Name');
     const persisted = JSON.parse(localStorage.getItem(SAVED_SCHEMAS_STORAGE_KEY) ?? '[]');
     expect(persisted[0].name).toBe('New Name');
+    expect(persisted[0].nameEn).toBe('New Name');
+  });
+
+  it('savedSchemaLabel picks the name by UI language with fallback', () => {
+    expect(savedSchemaLabel({ id: 'a', name: '发票', nameEn: 'Invoice', fields: [], createdAt: 'x' }, true)).toBe('发票');
+    expect(savedSchemaLabel({ id: 'a', name: '发票', nameEn: 'Invoice', fields: [], createdAt: 'x' }, false)).toBe('Invoice');
+    // nameEn missing (legacy entries): fall back to the stored name.
+    expect(savedSchemaLabel({ id: 'a', name: '发票', fields: [], createdAt: 'x' }, false)).toBe('发票');
   });
 
   it('deleteSavedSchema removes the entry and persists it', () => {
-    const id = useUiStore.getState().addSavedSchema('To Delete', fields);
+    const id = useUiStore.getState().addSavedSchema('To Delete', 'To Delete', fields);
     useUiStore.getState().deleteSavedSchema(id);
 
     expect(useUiStore.getState().savedSchemas).toEqual([]);
@@ -98,7 +108,7 @@ describe('savedSchemas', () => {
   });
 
   it('updateSavedSchema replaces the fields and persists them', () => {
-    const id = useUiStore.getState().addSavedSchema('My Schema', fields);
+    const id = useUiStore.getState().addSavedSchema('My Schema', 'My Schema', fields);
     const newFields: SchemaField[] = [
       { displayName: 'Age', fieldName: 'age', type: 'number', description: 'The age' },
     ];

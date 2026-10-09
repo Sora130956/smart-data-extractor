@@ -14,7 +14,7 @@ import { getPresets, inferSchema, resolveSchema, type SchemaResolveFieldParams }
 import { useBatchExtract } from '@/hooks/useBatchExtract';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
-import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
+import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
@@ -90,11 +90,9 @@ function AppShell() {
    * backend preset's localized name — used for exports and history labels. */
   const templateName = (id: string): string => {
     const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
-    return (
-      savedSchemas.find((s) => s.id === id)?.name ??
-      presets?.find((p) => p.id === id)?.[isZh ? 'display_name_zh' : 'display_name_en'] ??
-      id
-    );
+    const saved = savedSchemas.find((s) => s.id === id);
+    if (saved) return savedSchemaLabel(saved, isZh);
+    return presets?.find((p) => p.id === id)?.[isZh ? 'display_name_zh' : 'display_name_en'] ?? id;
   };
 
   function handleAdd(name: string, text: string, fileUrl?: string) {
@@ -147,31 +145,44 @@ function AppShell() {
       setIsResolving(true);
       try {
         const inferred = await inferSchema(staged[0].text);
+        // Field labels follow the UI language, not the input text's language.
+        const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
+        const pickLabel = (
+          spec: { display_name?: string | null; display_name_en?: string | null },
+          fallback: string,
+        ) =>
+          (isZh ? spec.display_name || spec.display_name_en : spec.display_name_en || spec.display_name) ??
+          fallback;
+        // Same language rule as usePresetSchema: pick the description column
+        // by UI language, falling back to the other one.
+        const pickDescription = (spec: { description?: string | null; description_en?: string | null }) =>
+          (isZh ? spec.description || spec.description_en : spec.description_en || spec.description) ?? '';
         const fields: SchemaField[] = Object.entries(inferred.schema.fields).map(
           ([fieldName, spec]) => ({
-            displayName: spec.display_name ?? fieldName,
+            displayName: pickLabel(spec, fieldName),
+            displayNameEn: spec.display_name_en ?? spec.display_name ?? null,
             fieldName,
             type: spec.type as SchemaField['type'],
-            description: spec.description ?? '',
+            description: pickDescription(spec),
           }),
         );
-        // Name the saved template after the AI's own name for the schema
-        // (in the UI language, falling back to the other language); the
-        // timestamp prefix remains a fallback for older backends.
-        const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
-        const aiName = (
-          isZh ? [inferred.schema_name, inferred.schema_name_en] : [inferred.schema_name_en, inferred.schema_name]
-        ).find((n): n is string => typeof n === 'string' && n.length > 0);
+        // Name the saved template after the AI's own bilingual names so the
+        // dropdown can follow later language switches; the timestamp prefix
+        // remains a fallback for older backends.
+        const nonEmpty = (n: string | null | undefined): n is string =>
+          typeof n === 'string' && n.length > 0;
+        const zhName = [inferred.schema_name, inferred.schema_name_en].find(nonEmpty);
+        const enName = [inferred.schema_name_en, inferred.schema_name].find(nonEmpty);
         const stamp = new Date().toLocaleString(i18n.resolvedLanguage ?? 'en', {
           month: '2-digit',
           day: '2-digit',
           hour: '2-digit',
           minute: '2-digit',
         });
-        const newName = aiName ?? `${t('config.smartSavedNamePrefix')} ${stamp}`;
-        const newId = addSavedSchema(newName, fields);
-        // Exports/history label: the template just saved under its AI name.
-        presetLabel = newName;
+        const fallbackName = `${t('config.smartSavedNamePrefix')} ${stamp}`;
+        const newId = addSavedSchema(zhName ?? fallbackName, enName ?? fallbackName, fields);
+        // Exports/history label: the template's name in the UI language.
+        presetLabel = (isZh ? zhName : enName) ?? fallbackName;
         // Switch the dropdown to the newly saved schema (D-F06); setPreset
         // clears customFields, so setCustomFields must run after it.
         setPreset(newId);
@@ -179,9 +190,10 @@ function AppShell() {
         target = { schema: inferred.schema };
         schemaResolveCost = { costUsd: inferred.cost_usd, costCny: inferred.cost_cny };
         fieldLabels = Object.fromEntries(
-          Object.entries(inferred.schema.fields)
-            .filter(([, spec]) => spec.display_name)
-            .map(([name, spec]) => [name, spec.display_name as string]),
+          Object.entries(inferred.schema.fields).map(([name, spec]) => [
+            name,
+            pickLabel(spec, name),
+          ]),
         );
       } catch (err) {
         setResolveError(err instanceof Error ? err.message : String(err));

@@ -45,6 +45,7 @@ capture its key structured information. For each field, produce:
 - display_name_en: a concise English display label (title-case phrase).
 - description: a short description of what the field captures, in the same
   language as display_name.
+- description_en: the same description translated into English.
 - type: one of "string", "number", "boolean", "date".
 - required: whether the field is essential to this kind of document.
 
@@ -70,6 +71,7 @@ class _InferredField(BaseModel):
     display_name: str
     display_name_en: str
     description: str | None
+    description_en: str | None = None
     type: str
     required: bool
 
@@ -192,8 +194,8 @@ async def infer_schema(
         model_ref: Optional genai-prices ref override for cost tracking.
 
     Returns:
-        {"schema": {"fields": {name: {type, description, required,
-         display_name, display_name_en}}},
+        {"schema": {"fields": {name: {type, description, description_en,
+         required, display_name, display_name_en}}},
          "schema_name": str, "schema_name_en": str,
          "tokens_used": {"input": int, "output": int}, "cost_usd": float}
 
@@ -228,6 +230,7 @@ async def infer_schema(
         schema_fields[item.field_name] = {
             "type": item.type,
             "description": item.description,
+            "description_en": item.description_en,
             "required": item.required,
             "display_name": item.display_name,
             "display_name_en": item.display_name_en,

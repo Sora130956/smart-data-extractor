@@ -57,6 +57,12 @@ function persistPresetOverrides(overrides: PresetOverrides) {
   localStorage.setItem(PRESET_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
 }
 
+/** Saved-template label in the current UI language: the matching language's
+ * name, falling back to the other one for legacy single-name entries. */
+export function savedSchemaLabel(schema: SavedSchema, isZh: boolean): string {
+  return (isZh ? schema.name : schema.nameEn) ?? schema.name;
+}
+
 function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -86,7 +92,7 @@ interface UiState {
   setCustomFields: (fields: SchemaField[]) => void;
   resetToPreset: (fields: SchemaField[]) => void;
   setPdfSplitMode: (mode: PdfSplitMode) => void;
-  addSavedSchema: (name: string, fields: SchemaField[]) => string;
+  addSavedSchema: (name: string, nameEn: string, fields: SchemaField[]) => string;
   renameSavedSchema: (id: string, name: string) => void;
   deleteSavedSchema: (id: string) => void;
   updateSavedSchema: (id: string, fields: SchemaField[]) => void;
@@ -124,16 +130,17 @@ export const useUiStore = create<UiState>((set, get) => ({
     localStorage.setItem(PDF_SPLIT_STORAGE_KEY, mode);
     set({ pdfSplitMode: mode });
   },
-  addSavedSchema: (name, fields) => {
+  addSavedSchema: (name, nameEn, fields) => {
     const id = crypto.randomUUID();
-    const entry: SavedSchema = { id, name, fields, createdAt: new Date().toISOString() };
+    const entry: SavedSchema = { id, name, nameEn, fields, createdAt: new Date().toISOString() };
     const savedSchemas = [...get().savedSchemas, entry];
     persistSavedSchemas(savedSchemas);
     set({ savedSchemas });
     return id;
   },
+  // A user-typed name is language-agnostic: it overrides both stored names.
   renameSavedSchema: (id, name) => {
-    const savedSchemas = get().savedSchemas.map((s) => (s.id === id ? { ...s, name } : s));
+    const savedSchemas = get().savedSchemas.map((s) => (s.id === id ? { ...s, name, nameEn: name } : s));
     persistSavedSchemas(savedSchemas);
     set({ savedSchemas });
   },
