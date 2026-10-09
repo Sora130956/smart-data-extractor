@@ -396,3 +396,32 @@
   - 免费层 spin-down（15 分钟无流量后休眠，冷启动约 30-50 秒）与无持久盘的限制已知且接受，Demo/Proposal 材料需提及首次访问可能有冷启动延迟
   - Phase 8 的 README 需补充 Render 部署徽章/链接与环境变量清单说明
 - **补记（同日调整：线上主提取模型定档 DeepSeek）**：用户拍板线上沿用本地同款 `MODEL=deepseek:deepseek-chat`（成本趋近于零：约 ¥1-2/百万 token 输出，demo 级用量可忽略），完全免费方案（Gemini 免费层等）不折腾结构化输出兼容性。`render.yaml` envVars 随之调整：新增 `MODEL`（固定值）与 `DEEPSEEK_API_KEY`（`sync: false` 控制台手填，pydantic-ai 的 `deepseek:` 前缀读此 key）；`OPENAI_API_KEY` 从 `sync: false` 改为固定占位值 `placeholder-not-used`——`Settings.openai_api_key` 是无默认值的必填字段，缺失会启动即 ValidationError，但 DeepSeek 方案下该 key 不被实际读取，占位即可免手填。`GLM_API_KEY` 维持 `sync: false`（OCR 可选）
+
+---
+
+## D-019：demo 阶段每日用量护栏（单 IP 50 次/天 + 全站 1000 次/天，内存计数）+ /stats 流量可见性
+
+- **日期**：2026-10-09
+- **状态**：已接受（**demo 阶段专用，正式宣发前必须替换**）
+- **来源**：用户计划把 demo 发布到社交媒体宣传，要求防止 API key 被扫穿、能看到自己网站流量、429 提示对用户友好；限额数字用户拍板（单 IP 50/全站 1000）
+- **背景**：
+  - 服务无用户体系，唯一无摩擦的访客标识是 IP（Render 代理后的 `X-Forwarded-For` 首段）
+  - DeepSeek 成本虽低（单次提取约几厘），但无总量上限时脚本可持续烧 key
+  - XFF 可伪造、换 IP 可绕过 → 单 IP 限额挡不住分布式滥用，需要全站总额兜底
+  - 用户想看流量但不想引第三方统计（umami/GA 等留作宣发后的升级项）
+- **决策**：
+  1. `api/quota.py` 的 `DailyQuota`：进程内存计数，双层限额（单 IP 50/天、全站 1000/天，`DAILY_QUOTA_PER_IP`/`DAILY_QUOTA_GLOBAL` 可覆盖，<=0 关闭该层），UTC 日期翻转自动清零，clock 可注入
+  2. 挂载点：`/extract`、`/schema/resolve`、`/schema/infer`、`/parse_pdf`、`/parse_image` 走 `enforce_daily_quota` 依赖（每请求 1 单位）；`/batch_extract` 在 handler 里按 `len(texts)` 扣（n 次调 LLM = n 单位），超限在任何 LLM 工作前拒绝
+  3. 429 响应 detail 为结构化载荷 `{code: quota_per_ip|quota_global, message, reset_at}`；前端 `client.ts` 解析出 `ApiError.code`，`utils/errors.ts` 映射为 i18n key，提取 banner 与 PDF/图片解析错误两处均显示中英双语友好提示
+  4. `GET /stats?token=...`：当日 `global_used`/`unique_ips`/`per_endpoint` 计数；未配置 `ADMIN_STATS_TOKEN` 时 404 隐藏（公开 401 等于自曝端点），配错 token 401，比较用 `hmac.compare_digest`
+  5. **代码注释（quota.py 模块 docstring 中英双语）与 commit message 显式标注 DEMO-STAGE**，宣发前替换为按用户配额/持久化限流
+- **理由（为什么不选备选方案）**：
+  - 备选 A：慢速限流（每分钟 N 次，slowapi）→ 放弃。目标是封每日预算上限，不是匀速；且 slowapi 引入依赖解决不了"每天最多花多少钱"
+  - 备选 B：SQLite 持久化计数 → 放弃。Render 免费层每次部署重建磁盘，持久化收益趋近于零；内存计数重启清零的代价只是"攻击者多薅一轮"，可接受
+  - 备选 C：前端匿名 ID（localStorage UUID）→ 放弃。清缓存即绕过，绕过成本与换 IP 相同，但多一套前端协议
+  - 备选 D：umami/GA 统计流量 → 留作宣发后升级项。/stats 零依赖零成本先解决"看得见"，后续要 PV/UV/地域分布再引第三方
+- **影响**：
+  - 单进程内存计数：多 worker 部署会各自计数（当前 Render 免费层单 worker，不受影响）
+  - 同一出口 IP（公司/校园 NAT）共享单 IP 限额，正常试用 50 次/天够用
+  - 计数在部署/重启后清零，/stats 数字是"本次部署以来"的当日用量
+  - 验证：后端 226 passed / 2 skipped（新增 14 测试，含突变自证——禁用 per-IP 检查后 4 测试变红）；前端 184 passed（串行全量）+ tsc 0 错误。`excelExport.test.ts` 在并发满载下偶发超时（单独跑通过，与本决策无关，机器负载问题待观察）

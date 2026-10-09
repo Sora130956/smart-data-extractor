@@ -147,6 +147,7 @@
   - F6.3（导出文件名=模板名+时间戳，D-016）：`ExtractionSource.presetLabel` 提交时快照（`useBatchExtract`→`adaptBatchExtractResponse` 第 5 参）+ 纯函数 `utils/exportFilename.ts`（`buildExportFilename`：模板名-YYYYMMDD-HHmmss.ext，Windows 非法字符替换），批量 ResultsHeader / 单条 ResultDetailModal 的 JSON+Excel 四处统一接入（批量取最新一批 label，旧历史无快照回退 source.name）。修复补记：presetLabel 取值经 `templateName(id)`（保存模板名→预设本地化名→id）统一三处，智能推断路径直接用刚保存的 AI 模板名（首版误用 `history.customSchema`「自定义字段」标签，已删词条）。验证：先红后绿，vitest 150 passed（19 files）+ tsc 0 错误
   - F9（模板下拉与预设编辑保存，D-017）：① 下拉去掉「我的模板」optgroup，预设加本地化前缀「预设：/Preset: 」（`config.presetPrefix`），自定义模板平铺；② uiStore 新增 `presetOverrides`（localStorage `sde.presetOverrides`），SchemaEditor「保存」按钮把预设修改存为该预设的本地覆盖（种子改为 `override ?? presetFields`），自定义模板的保存=updateSavedSchema；③「重置为预设」仅后端预设显示（有覆盖未修改时也可点，重置=清覆盖回后端基线）；④ App 提交条件扩为 `isSchemaModified || isSavedSchema || hasPresetOverride`，带覆盖预设走 /schema/resolve 自定义路径（否则后端原 schema 顶掉用户修改）。顺手修复：setup.ts `URL.createObjectURL` 条件桩改无条件（PasteTextInput 4 个 F7 用例恒红）、App.test makeFile 补 type 第三参（tsc 报错）。验证：先红（23 失败）后绿，vitest 174 passed（19 files）+ tsc 0 错误 + build 成功
   - F9.1（智能推断设为默认且排第一）：uiStore 初始 `preset: SMART_PRESET_ID`（原 'invoice'），ConfigBar 选项顺序改为 智能推断 → 预设（带前缀）→ 自定义模板；测试相应加 beforeEach/renderApp 显式选 invoice 保持既有用例语义，ConfigBar 新增首用例断言默认值 smart 且为第一项。验证：vitest 175 passed（19 files）+ tsc 0 错误 + build 成功
+- [x] B-quota（2026-10-09，D-019，demo 阶段配额护栏 + 流量可见性）：`api/quota.py`（`DailyQuota`：单 IP 50/天 + 全站 1000/天双层内存计数，UTC 翻转清零，XFF 首段取 IP）挂到 5 个计费端点（`enforce_daily_quota` 依赖）+ `/batch_extract` 按 `len(texts)` 扣；429 返回结构化 `{code, message, reset_at}`，前端 `client.ts` 解析 `ApiError.code` + `utils/errors.ts` 映射 i18n（提取 banner 与 PDF/图片解析错误两处双语友好提示）；新增 `GET /stats?token=`（未配 `ADMIN_STATS_TOKEN` 时 404 隐藏）。**DEMO-STAGE 专用：宣发前必须替换为按用户配额**（quota.py docstring 与 commit message 均已标注）。验证：后端 226 passed / 2 skipped（新增 14 测试，突变自证通过）；前端 184 passed（串行全量，并发满载下 excelExport 偶发超时与本次无关）+ tsc 0 错误
 
 ## 可视化约定（docs/view/）
 
@@ -233,3 +234,8 @@
 - 决策：FastAPI 用 `StaticFiles(html=True)` 挂载 `frontend/dist` 同源伺服，无需 CORS；新增 `render.yaml`（Native Runtime，`buildCommand` 串联 `uv sync --no-dev` + 前端构建，`startCommand` 绑 `$PORT`，`healthCheckPath: /health`）；密钥（`OPENAI_API_KEY`/`GLM_API_KEY`）用 `sync: false` 控制台手填
 - 理由：前端已硬编码 `/api/xxx` 相对路径，同源部署零改动；Native Runtime 预装 Node 工具链免维护 Dockerfile；`uv.lock` 锁版本保证与本地一致
 - 详见 `.harness/decisions.md`
+
+### D-019: demo 阶段每日用量护栏（单 IP 50/天 + 全站 1000/天，内存计数）+ /stats 流量可见性
+- 决策：`DailyQuota` 内存双层计数挂全部计费端点（batch 按条数扣），429 结构化载荷 + 前端双语友好提示；`GET /stats?token=`（`ADMIN_STATS_TOKEN` 未配则 404 隐藏）提供当日用量/独立 IP/按端点计数。**demo 阶段专用，正式宣发前替换为按用户配额/持久化限流**（代码注释与 commit 均已标注）
+- 理由：无用户体系下 IP 是唯一无摩擦标识但可伪造，全站总额才是预算兜底；SQLite 持久化在 Render 免费层（部署即清盘）无收益；umami/GA 留作宣发后升级项
+- 详见 `.harness/decisions.md`（验证：后端 226 passed / 2 skipped 含突变自证；前端 184 passed + tsc 0 错误）
