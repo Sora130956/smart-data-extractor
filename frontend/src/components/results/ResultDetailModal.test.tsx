@@ -15,7 +15,11 @@ const source: ExtractionSource = {
   name: 'Manual Input 1',
   uploadedAt: '2024-03-14T00:00:00.000Z',
   meta: 'Invoice INV-2024-001 dated 2024-03-14 for Acme Corp…',
-  fieldLabels: { invoice_number: 'Invoice Number', vendor: 'Vendor', notes: 'Notes' },
+  presetLabel: 'Invoice',
+  fieldLabels: {
+    invoice_number: 'Invoice Number', vendor: 'Vendor', notes: 'Notes',
+    total: 'Total', paid: 'Paid', line_items: 'Line Items',
+  },
   results: [],
   stats: {
     succeeded: 1, failed: 0, totalCostUsd: 0.0002, totalCostCny: 0.00145, avgConfidence: 0.9,
@@ -39,6 +43,19 @@ const lowConfidenceResult: ExtractionResult = {
   data: { invoice_number: 'INV-2024-001', vendor: 'Acme Corp', notes: null },
   confidence: { invoice_number: 0.5, vendor: 0.9, notes: 0.9 },
   avgConfidence: 0.6,
+};
+
+const editableResult: ExtractionResult = {
+  ...highConfidenceResult,
+  data: {
+    invoice_number: 'INV-2024-001',
+    vendor: 'Acme Corp',
+    notes: null,
+    total: 100,
+    paid: true,
+    line_items: [{ name: 'Widget', qty: 2 }],
+  },
+  confidence: { invoice_number: 0.95, vendor: 0.9, notes: 0.9, total: 0.88, paid: 0.99 },
 };
 
 describe('ResultDetailModal', () => {
@@ -161,9 +178,14 @@ describe('ResultDetailModal', () => {
       URL.revokeObjectURL = vi.fn();
     });
 
-    it('triggers a JSON file download named after the source and label', async () => {
+    it('triggers a JSON file download named after the template and a timestamp', async () => {
       const user = userEvent.setup();
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      const downloads: string[] = [];
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          downloads.push(this.download);
+        });
       render(
         <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
       );
@@ -172,14 +194,39 @@ describe('ResultDetailModal', () => {
 
       expect(URL.createObjectURL).toHaveBeenCalled();
       expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(downloads[0]).toMatch(/^Invoice-\d{8}-\d{6}\.json$/);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+
+      clickSpy.mockRestore();
+    });
+
+    it('falls back to the source name when no template label was snapshotted', async () => {
+      const user = userEvent.setup();
+      const downloads: string[] = [];
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          downloads.push(this.download);
+        });
+      render(
+        <ResultDetailModal
+          source={{ ...source, presetLabel: undefined }}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Export JSON' }));
+
+      expect(downloads[0]).toMatch(/^Manual Input 1-\d{8}-\d{6}\.json$/);
 
       clickSpy.mockRestore();
     });
   });
 
   describe('Export Excel', () => {
-    it('exports only the displayed result to a file named after the source and label', async () => {
+    it('exports only the displayed result to a file named after the template and a timestamp', async () => {
       const user = userEvent.setup();
       render(
         <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
@@ -189,7 +236,7 @@ describe('ResultDetailModal', () => {
 
       expect(exportToExcel).toHaveBeenCalledWith(
         [expect.objectContaining({ name: 'Manual Input 1', results: [highConfidenceResult] })],
-        'Manual Input 1-Text 1.xlsx',
+        expect.stringMatching(/^Invoice-\d{8}-\d{6}\.xlsx$/),
         expect.any(Function),
       );
     });
@@ -203,5 +250,159 @@ describe('ResultDetailModal', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  describe('open original file', () => {
+    it('shows a link pointing at the source file url in a new tab', () => {
+      render(
+        <ResultDetailModal
+          source={{ ...source, sourceFileUrl: 'blob:mock-url' }}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'Open Original' });
+      expect(link).toHaveAttribute('href', 'blob:mock-url');
+      expect(link).toHaveAttribute('target', '_blank');
+    });
+
+    it('omits the link when the source has no file url', () => {
+      render(
+        <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
+      );
+
+      expect(screen.queryByRole('link', { name: 'Open Original' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('field editing', () => {
+    it('offers edit buttons for scalar fields but not for array fields', () => {
+      render(
+        <ResultDetailModal
+          source={source}
+          result={editableResult}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={() => {}}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: 'Edit Vendor' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit Total' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit Paid' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Edit Line Items' })).not.toBeInTheDocument();
+    });
+
+    it('hides edit buttons when no update callback is provided', () => {
+      render(
+        <ResultDetailModal source={source} result={editableResult} label="Text 1" onClose={() => {}} />,
+      );
+
+      expect(screen.queryByRole('button', { name: 'Edit Vendor' })).not.toBeInTheDocument();
+    });
+
+    it('edits a string field and reports the new value on Enter', async () => {
+      const user = userEvent.setup();
+      const onFieldUpdate = vi.fn();
+      render(
+        <ResultDetailModal
+          source={source}
+          result={editableResult}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={onFieldUpdate}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit Vendor' }));
+      const input = screen.getByDisplayValue('Acme Corp');
+      await user.clear(input);
+      await user.type(input, 'Beta Ltd{Enter}');
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('vendor', 'Beta Ltd');
+    });
+
+    it('keeps numbers numeric when saving an edited number field', async () => {
+      const user = userEvent.setup();
+      const onFieldUpdate = vi.fn();
+      render(
+        <ResultDetailModal
+          source={source}
+          result={editableResult}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={onFieldUpdate}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit Total' }));
+      const input = screen.getByDisplayValue('100');
+      await user.clear(input);
+      await user.type(input, '200.5{Enter}');
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('total', 200.5);
+    });
+
+    it('commits a boolean field through a checkbox toggle', async () => {
+      const user = userEvent.setup();
+      const onFieldUpdate = vi.fn();
+      render(
+        <ResultDetailModal
+          source={source}
+          result={editableResult}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={onFieldUpdate}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit Paid' }));
+      const checkbox = screen.getByRole('checkbox', { checked: true });
+      await user.click(checkbox);
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('paid', false);
+    });
+
+    it('cancels editing with Escape without reporting and keeps the dialog open', async () => {
+      const user = userEvent.setup();
+      const onFieldUpdate = vi.fn();
+      const onClose = vi.fn();
+      render(
+        <ResultDetailModal
+          source={source}
+          result={editableResult}
+          label="Text 1"
+          onClose={onClose}
+          onFieldUpdate={onFieldUpdate}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Edit Vendor' }));
+      await user.type(screen.getByDisplayValue('Acme Corp'), 'X{Escape}');
+
+      expect(onFieldUpdate).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByText('Acme Corp')).toBeInTheDocument();
+    });
+  });
+
+  describe('reviewed badge', () => {
+    it('replaces the confidence score with a Reviewed badge on reviewed fields', () => {
+      render(
+        <ResultDetailModal
+          source={source}
+          result={{ ...editableResult, reviewedFields: { invoice_number: true } }}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(screen.getByText('Reviewed')).toBeInTheDocument();
+      expect(screen.queryByText('0.95')).not.toBeInTheDocument();
+      // Unreviewed fields (vendor, notes) keep their numeric badges.
+      expect(screen.getAllByText('0.90')).toHaveLength(2);
+    });
   });
 });

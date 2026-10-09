@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/utils/confidence';
 import { formatCost } from '@/utils/currency';
 import { exportToExcel } from '@/utils/excelExport';
+import { buildExportFilename } from '@/utils/exportFilename';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
 
@@ -35,6 +36,11 @@ function formatFieldValue(value: unknown, t: TFunction) {
   return String(value);
 }
 
+/** Only scalar fields are user-editable; arrays/objects stay read-only. */
+function isEditableValue(value: unknown): boolean {
+  return value == null || typeof value !== 'object';
+}
+
 export interface ResultDetailModalProps {
   source: ExtractionSource;
   result: ExtractionResult;
@@ -42,11 +48,16 @@ export interface ResultDetailModalProps {
    * guaranteed to be meaningful (currently always "1" from the adapter). */
   label: string;
   onClose: () => void;
+  /** Reports an inline field edit (review flow). Marks the field reviewed. */
+  onFieldUpdate?: (fieldKey: string, newValue: unknown) => void;
 }
 
-export function ResultDetailModal({ source, result, label, onClose }: ResultDetailModalProps) {
+export function ResultDetailModal({ source, result, label, onClose, onFieldUpdate }: ResultDetailModalProps) {
   const { t, i18n } = useTranslation();
   const [copied, setCopied] = useState(false);
+  // Inline editing: key of the field being edited + its working value.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -63,6 +74,23 @@ export function ResultDetailModal({ source, result, label, onClose }: ResultDeta
     .map(([key]) => source.fieldLabels?.[key] ?? key);
   const cost = formatCost(result.costUsd, result.costCny, i18n.resolvedLanguage ?? 'en');
 
+  function startEdit(key: string, value: unknown) {
+    setEditing(key);
+    setDraft(value == null ? '' : String(value));
+  }
+
+  /** Saves the draft: empty means null; numbers stay numeric. */
+  function commitEdit(key: string, rawValue: unknown) {
+    if (!onFieldUpdate) return;
+    let next: unknown = draft;
+    if (draft === '') next = null;
+    else if (typeof rawValue === 'number' && draft.trim() !== '' && !Number.isNaN(Number(draft))) {
+      next = Number(draft);
+    }
+    onFieldUpdate(key, next);
+    setEditing(null);
+  }
+
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
@@ -78,13 +106,17 @@ export function ResultDetailModal({ source, result, label, onClose }: ResultDeta
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${source.name}-${label}.json`;
+    a.download = buildExportFilename(source.presetLabel ?? source.name, 'json');
     a.click();
     URL.revokeObjectURL(url);
   }
 
   function handleExportExcel() {
-    void exportToExcel([{ ...source, results: [result] }], `${source.name}-${label}.xlsx`, t);
+    void exportToExcel(
+      [{ ...source, results: [result] }],
+      buildExportFilename(source.presetLabel ?? source.name, 'xlsx'),
+      t,
+    );
   }
 
   return (
@@ -107,6 +139,18 @@ export function ResultDetailModal({ source, result, label, onClose }: ResultDeta
             </div>
           </div>
           <div className="flex-1" />
+          {source.sourceFileUrl ? (
+            <a
+              href={source.sourceFileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-token border border-border bg-surface px-2.5 py-1 text-caption font-medium text-text transition-colors hover:bg-surface-muted"
+            >
+              <span>
+                <Trans i18nKey="resultDetail.openOriginal" components={{ br: <br /> }} />
+              </span>
+            </a>
+          ) : null}
           <Button size="sm" onClick={handleCopy}>
             {copied ? t('resultDetail.copied') : t('resultDetail.copyJson')}
           </Button>
@@ -143,21 +187,71 @@ export function ResultDetailModal({ source, result, label, onClose }: ResultDeta
           {entries.map(([key, value]) => {
             const confidence = result.confidence[key];
             const level = confidence === undefined ? null : confidenceLevel(confidence);
+            const fieldLabel = source.fieldLabels?.[key] ?? key;
+            const reviewed = result.reviewedFields?.[key] === true;
             return (
               <div
                 key={key}
                 className="flex items-start gap-3 border-b border-border px-3.5 py-2.5 last:border-b-0"
               >
                 <span className="w-[140px] flex-none text-caption text-text-muted">
-                  {source.fieldLabels?.[key] ?? key}
+                  {fieldLabel}
                 </span>
-                <span className="flex-1 break-words text-caption">{formatFieldValue(value, t)}</span>
+                {editing === key ? (
+                  typeof value === 'boolean' ? (
+                    <input
+                      type="checkbox"
+                      checked={value}
+                      onChange={() => {
+                        onFieldUpdate?.(key, !value);
+                        setEditing(null);
+                      }}
+                      className="mt-0.5"
+                    />
+                  ) : (
+                    <input
+                      value={draft}
+                      autoFocus
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={() => commitEdit(key, value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          commitEdit(key, value);
+                        } else if (e.key === 'Escape') {
+                          // Escape cancels the edit, not the whole dialog.
+                          e.stopPropagation();
+                          setEditing(null);
+                        }
+                      }}
+                      className="flex-1 rounded-token border border-brand bg-surface px-2 py-1 text-caption outline-none"
+                    />
+                  )
+                ) : (
+                  <>
+                    <span className="flex-1 break-words text-caption">{formatFieldValue(value, t)}</span>
+                    {onFieldUpdate && isEditableValue(value) ? (
+                      <button
+                        type="button"
+                        aria-label={t('resultDetail.editField', { field: fieldLabel })}
+                        onClick={() => startEdit(key, value)}
+                        className="flex-none rounded-token px-1 text-caption text-text-muted hover:text-brand"
+                      >
+                        ✏️
+                      </button>
+                    ) : null}
+                  </>
+                )}
                 <span
                   className={`tnum w-[58px] flex-none rounded-full py-0.5 text-center text-caption ${
-                    level ? BADGE[level] : 'text-text-muted'
+                    reviewed ? 'bg-success/15 text-success' : level ? BADGE[level] : 'text-text-muted'
                   }`}
                 >
-                  {confidence === undefined ? '—' : formatConfidence(confidence)}
+                  {reviewed
+                    ? t('resultDetail.reviewed')
+                    : confidence === undefined
+                      ? '—'
+                      : formatConfidence(confidence)}
                 </span>
               </div>
             );

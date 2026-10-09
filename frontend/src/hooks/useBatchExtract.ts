@@ -17,13 +17,17 @@ export interface BatchExtractInput {
   schemaResolveCost?: { costUsd: number; costCny: number };
   /** field_name -> display label snapshot for chip rendering. */
   fieldLabels?: Record<string, string>;
+  /** Display name of the template that produced this batch (export filenames). */
+  presetLabel?: string;
+  /** Per-text Blob URL for the original uploaded file, if any (session-scoped). */
+  fileUrls?: Array<string | undefined>;
 }
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels }) => {
+    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls }) => {
       const response = await batchExtract({ texts, preset, schema, instructions, lang });
-      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels);
+      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls);
     },
   });
 }

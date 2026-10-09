@@ -17,11 +17,12 @@ export interface StagedText {
   id: string;
   name: string;
   text: string;
+  fileUrl?: string;
 }
 
 interface PasteTextInputProps {
   staged: StagedText[];
-  onAdd: (name: string, text: string) => void;
+  onAdd: (name: string, text: string, fileUrl?: string) => void;
   onRemove: (id: string) => void;
 }
 
@@ -55,14 +56,15 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
       await Promise.all([
         ...pdfFiles.map(async (file) => {
           try {
+            const fileUrl = URL.createObjectURL(file);
             const result = await parsePdf(file);
             if (pdfSplitMode === 'pages') {
               // Failed pages come back as null; index+1 is the original page number.
               result.pages.forEach((page, i) => {
-                if (page !== null) onAdd(`${file.name} · P${i + 1}`, page);
+                if (page !== null) onAdd(`${file.name} · P${i + 1}`, page, fileUrl);
               });
             } else {
-              onAdd(file.name, result.text);
+              onAdd(file.name, result.text, fileUrl);
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -72,8 +74,9 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
         // Images have no pages to split: one image = one source, always whole.
         ...imageFiles.map(async (file) => {
           try {
+            const fileUrl = URL.createObjectURL(file);
             const result = await parseImage(file);
-            onAdd(file.name, result.text);
+            onAdd(file.name, result.text, fileUrl);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
@@ -161,7 +164,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
 
       <div className="min-w-0 flex-1">
         {staged.length > 0 && (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex max-h-[320px] flex-col gap-1.5 overflow-y-auto pr-1">
             {staged.map((item, i) => (
               <div key={item.id} className="flex items-center gap-2.5 rounded-token border border-border px-3 py-2 text-body">
                 <span className="tnum w-[52px] flex-none text-caption text-text-muted">

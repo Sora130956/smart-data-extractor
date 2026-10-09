@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { useUiStore } from '@/store/uiStore';
 import { exportToExcel } from '@/utils/excelExport';
+import { buildExportFilename } from '@/utils/exportFilename';
 import type { ExtractionSource, ResultFilter } from '@/types/extraction';
 
 export interface FilterCounts {
@@ -60,13 +61,19 @@ export function ResultsHeader({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'extraction-results.json';
+    a.download = buildExportFilename(exportLabel(), 'json');
     a.click();
     URL.revokeObjectURL(url);
   }
 
   function handleExportExcel() {
-    void exportToExcel(sources, 'extraction-results.xlsx', t);
+    void exportToExcel(sources, buildExportFilename(exportLabel(), 'xlsx'), t);
+  }
+
+  /** Newest batch first: its template label names the export. Older sources
+   * without a snapshot (restored history) fall back to the source name. */
+  function exportLabel(): string {
+    return sources[0]?.presetLabel ?? sources[0]?.name ?? 'extraction-results';
   }
 
   const chips: Array<{ id: ResultFilter; label: string; count: number; warn?: boolean }> = [

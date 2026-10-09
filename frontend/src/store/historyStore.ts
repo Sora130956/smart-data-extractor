@@ -38,6 +38,7 @@ interface HistoryState {
   addEntry: (sources: ExtractionSource[], presetLabel: string) => void;
   removeEntry: (id: string) => void;
   clear: () => void;
+  updateResultField: (sourceId: string, fieldKey: string, newValue: unknown) => void;
 }
 
 export const useHistoryStore = create<HistoryState>((set) => ({
@@ -67,4 +68,24 @@ export const useHistoryStore = create<HistoryState>((set) => ({
     persist([]);
     set({ entries: [] });
   },
+
+  updateResultField: (sourceId, fieldKey, newValue) =>
+    set((state) => {
+      const entries = state.entries.map((entry) => ({
+        ...entry,
+        sources: entry.sources.map((source) => {
+          if (source.id !== sourceId) return source;
+          return {
+            ...source,
+            results: source.results.map((result) => ({
+              ...result,
+              data: { ...result.data, [fieldKey]: newValue },
+              reviewedFields: { ...result.reviewedFields, [fieldKey]: true },
+            })),
+          };
+        }),
+      }));
+      persist(entries);
+      return { entries };
+    }),
 }));

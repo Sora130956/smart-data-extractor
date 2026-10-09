@@ -57,6 +57,8 @@ export function adaptBatchExtractResponse(
   texts: string[],
   schemaResolveCost?: { costUsd: number; costCny: number },
   fieldLabels?: Record<string, string>,
+  presetLabel?: string,
+  fileUrls?: Array<string | undefined>,
 ): ExtractionSource[] {
   // Ids must stay unique across batches: the UI accumulates results from
   // successive extractions, so `text-${i}` alone would collide as a React key.
@@ -76,7 +78,9 @@ export function adaptBatchExtractResponse(
       ordinal: i + 1,
       uploadedAt: new Date().toISOString(),
       meta: preview,
+      ...(presetLabel ? { presetLabel } : {}),
       ...(fieldLabels ? { fieldLabels } : {}),
+      ...(fileUrls?.[i] ? { sourceFileUrl: fileUrls[i] } : {}),
       results: [result],
       stats: {
         succeeded: result.status === 'success' ? 1 : 0,

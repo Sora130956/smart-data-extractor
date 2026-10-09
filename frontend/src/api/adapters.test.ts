@@ -39,6 +39,33 @@ describe('adaptBatchExtractResponse', () => {
     expect(source.stats.avgConfidence).toBeCloseTo(0.86);
   });
 
+  it('stamps the submitted template label onto every source for later export naming', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: '1' },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+        {
+          data: { b: '2' },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 2, output: 2 },
+      succeeded: 2,
+      failed: 0,
+    };
+
+    const sources = adaptBatchExtractResponse(response, ['t1', 't2'], undefined, undefined, '发票信息');
+
+    expect(sources.map((s) => s.presetLabel)).toEqual(['发票信息', '发票信息']);
+  });
+
   it('maps a failed item to a failed result with null data and no confidence', () => {
     const response: BatchExtractResponse = {
       results: [
@@ -208,6 +235,41 @@ describe('adaptBatchExtractResponse', () => {
 
     expect(sources[0].fieldLabels).toEqual(fieldLabels);
     expect(sources[1].fieldLabels).toEqual(fieldLabels);
+  });
+
+  it('attaches the per-text file url to the matching source', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1, a_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+        {
+          data: { b: 2, b_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 2, output: 2 },
+      succeeded: 2,
+      failed: 0,
+    };
+
+    const sources = adaptBatchExtractResponse(
+      response,
+      ['first', 'second'],
+      undefined,
+      undefined,
+      undefined,
+      ['blob:one', undefined],
+    );
+
+    expect(sources[0].sourceFileUrl).toBe('blob:one');
+    expect(sources[1].sourceFileUrl).toBeUndefined();
   });
 
   it('omits fieldLabels when none were submitted', () => {

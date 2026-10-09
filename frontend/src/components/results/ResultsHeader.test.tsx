@@ -14,6 +14,7 @@ const sources: ExtractionSource[] = [
     type: 'text',
     name: 'Manual Input 1',
     uploadedAt: '2024-03-14T00:00:00.000Z',
+    presetLabel: 'Invoice',
     results: [
       {
         sourceId: 'text-0',
@@ -57,7 +58,7 @@ describe('ResultsHeader', () => {
       vi.mocked(exportToExcel).mockReset();
     });
 
-    it('exports all sources to extraction-results.xlsx on click', async () => {
+    it('exports all sources to a file named after the template and a timestamp', async () => {
       const user = userEvent.setup();
       render(<ResultsHeader counts={{ all: 1, high: 1, review: 0 }} sources={sources} />);
 
@@ -65,7 +66,7 @@ describe('ResultsHeader', () => {
 
       expect(exportToExcel).toHaveBeenCalledWith(
         sources,
-        'extraction-results.xlsx',
+        expect.stringMatching(/^Invoice-\d{8}-\d{6}\.xlsx$/),
         expect.any(Function),
       );
     });
@@ -77,9 +78,14 @@ describe('ResultsHeader', () => {
       URL.revokeObjectURL = vi.fn();
     });
 
-    it('triggers a JSON file download containing the sources', async () => {
+    it('triggers a JSON file download named after the template and a timestamp', async () => {
       const user = userEvent.setup();
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      const downloads: string[] = [];
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          downloads.push(this.download);
+        });
 
       render(<ResultsHeader counts={{ all: 1, high: 1, review: 0 }} sources={sources} />);
 
@@ -87,6 +93,7 @@ describe('ResultsHeader', () => {
 
       expect(URL.createObjectURL).toHaveBeenCalled();
       expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(downloads[0]).toMatch(/^Invoice-\d{8}-\d{6}\.json$/);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
 
       clickSpy.mockRestore();

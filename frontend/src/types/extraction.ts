@@ -19,6 +19,8 @@ export interface ExtractionResult {
   /** Display currency, converted server-side from costUsd. */
   costCny: number;
   error?: string;
+  /** field_name -> true once the user has manually reviewed/edited it. */
+  reviewedFields?: Record<string, boolean>;
 }
 
 export interface ExtractionSource {
@@ -31,9 +33,14 @@ export interface ExtractionSource {
   uploadedAt: string;
   /** "15 pages" | "OCR processed" */
   meta?: string;
+  /** Display name of the template (preset or saved schema) that produced
+   * this source, snapshotted at submit time — used for export filenames. */
+  presetLabel?: string;
   /** field_name -> localized display label, snapshotted at submit time so
    * chips stay labeled with the schema that produced them. */
   fieldLabels?: Record<string, string>;
+  /** Blob URL for the original uploaded file (pdf/image), session-scoped. */
+  sourceFileUrl?: string;
   results: ExtractionResult[];
   stats: {
     succeeded: number;

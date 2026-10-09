@@ -61,6 +61,10 @@ export const schemaResolveResponseSchema = z.object({
   schema: z.object({
     fields: z.record(z.string(), schemaFieldSpecSchema),
   }),
+  // /schema/infer only: AI-generated name for the inferred schema, in the
+  // input text's language plus English. Used to name the saved template.
+  schema_name: z.string().nullable().optional(),
+  schema_name_en: z.string().nullable().optional(),
   tokens_used: tokensUsedSchema,
   cost_usd: z.number(),
   cost_cny: z.number(),
