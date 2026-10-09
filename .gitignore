@@ -72,3 +72,4 @@ node_modules/
 
 # SQLite 数据库文件
 *.db
+/tests/test_data/
