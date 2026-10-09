@@ -330,3 +330,43 @@
   - `t` 以参数注入 util（type-only 引 react-i18next），表头/状态文案跟随 UI 语言；测试用 i18next 单例直取
   - 验证：TDD 先红后绿（util 层 7 用例：字段并集/标签回退/序列化/失败行/置信度表/workbook 集成；组件层 3 用例：mock exportToExcel 断言调用契约）。全量 vitest 144 passed（18 files）、`tsc -b --noEmit` 0 错误、`vite build` 成功且 exceljs 独立 chunk（`exceljs.min-*.js`）
 
+
+## D-015：智能推断模板命名——AI 生成 schema_name 双语列
+
+- **日期**：2026-10-09
+- **状态**：已接受
+- **来源**：用户反馈——上传发票走「智能推断 ✨」后，下拉「我的模板」里保存的模板名是「智能推断 10/09 10:45」（前缀+时间戳），看不出这是什么模板
+- **决策**：
+  1. `/schema/infer` 的 LLM 输出模型 `_InferredSchema` 新增必填 `schema_name`（与输入文本同语言的短名，如中文发票文本→「发票信息」）与 `schema_name_en`（英文名），INFER_INSTRUCTIONS 同步约束（短名、禁止 schema/data 等泛化名），随响应顶层返回
+  2. `SchemaResolveResponse` 新增可选 `schema_name`/`schema_name_en`（`/schema/resolve` 不返回，默认 None，契约向后兼容）
+  3. 前端 `App.tsx` 保存模板时按 UI 语言优先取 AI 名（zh→schema_name 优先，en→schema_name_en 优先，互为回退），AI 名缺失时回退旧「前缀+时间戳」逻辑
+- **理由**：命名信息本就在同一次 LLM 调用的上下文里，随字段推断一并生成零额外成本；双语列沿用 D-010 的语言回退惯例；时间戳回退保证旧后端/极端情况不裸崩
+- **影响**：TestModel 的 `custom_output_args` 需补全新增必填字段（3 个既有测试更新）；验证：后端 210 passed / 2 skipped（先红 KeyError 后绿）、前端 vitest 145 passed（18 files）+ `tsc -b --noEmit` 0 错误（先红「找不到 Invoice Info 选项」后绿，含 localStorage 持久化名断言）
+
+## D-016：导出文件名——模板名快照 + 紧凑时间戳
+
+- **日期**：2026-10-09
+- **状态**：已接受
+- **来源**：用户反馈——单条导出文件名为「Manual Input 1-文本 1」，无法辨识是哪套模板跑出来的结果
+- **决策**：
+  1. `ExtractionSource` 新增可选 `presetLabel`，提交时随 `fieldLabels` 一起由 App 快照（与历史记录 presetLabel 同思路），经 `BatchExtractInput.presetLabel` → `adaptBatchExtractResponse` 第 5 参落到每个 source 上
+  2. 新增纯函数 `utils/exportFilename.ts`：`buildExportFilename(label, ext, now?)` → `模板名-YYYYMMDD-HHmmss.ext`，替换 Windows 非法字符（`\/:*?"<>|`→`_`），空名回退 `export`
+  3. 四处导出统一走该函数：批量 `ResultsHeader`（取最新一批 source 的 presetLabel，缺失回退 source.name→'extraction-results'）与单条 `ResultDetailModal`（source.presetLabel，缺失回退 source.name），JSON/Excel 同规则
+- **理由**：导出时下拉当前模板可能与结果来源不符（结果跨批次累积），快照到 source 才准确；时间戳取导出时刻本地时间，紧凑格式按文件名排序即按时间排序
+- **影响**：旧历史恢复的 source 无 presetLabel，回退 source.name（行为≈旧命名减去条目标签）；验证：先红（6 失败：导入缺失 + 旧文件名断言）后绿，vitest 150 passed（19 files）+ `tsc -b --noEmit` 0 错误
+- **补记（同日修复）**：首版实现里智能推断/改 schema 两分支的 presetLabel 误用了历史通用标签 `t('history.customSchema')`（「自定义字段」），导出名成了「自定义字段-时间戳」。修复：新增 `templateName(id)` 助手（保存模板名 → 后端预设本地化名 → id 回退）统一三处取名；智能推断路径直接复用刚保存的 AI 模板名。`history.customSchema` 词条随修复删除（历史面板标签同步受益，显示真实模板名）。复现用例：App.test.tsx 智能推断 → 点「Export All JSON」断言下载名（先红 `Custom Fields-…` 后绿 `Invoice Info-…`），vitest 150 passed + tsc 0 错误
+
+---
+
+## D-017：模板下拉去 optgroup + 预设编辑本地覆盖（presetOverrides）
+
+- **日期**：2026-10-09
+- **状态**：已接受
+- **来源**：用户反馈——① 下拉里「我的模板」optgroup 区分预设/自定义迷惑，改用「预设：XXX」前缀区分；② 修改预设模板后不保存（只当前会话生效），需要「保存」按钮；③「重置为预设」不应出现在自定义模板上
+- **决策**：
+  1. ConfigBar：去掉「我的模板」optgroup，预设项加本地化前缀（`config.presetPrefix`，zh「预设：」/ en "Preset: "），自定义模板平铺其后
+  2. uiStore 新增 `presetOverrides: Record<presetId, SchemaField[]>`（localStorage `sde.presetOverrides`）+ `savePresetOverride`/`clearPresetOverride`；SchemaEditor 种子改为 `override ?? presetFields`，「保存」把当前字段存为该预设的覆盖并清 modified 标记
+  3. SchemaEditor 按钮矩阵：「保存」对预设与自定义模板都显示（自定义模板=updateSavedSchema）；「重置为预设」仅后端预设显示，且「有覆盖未修改」时也保持可点（重置=清覆盖+回后端基线）
+  4. App 提交条件扩为 `isSchemaModified || isSavedSchema || hasPresetOverride`——带覆盖的预设必须走 `/schema/resolve` 自定义 schema 路径，否则后端按 preset id 取原 schema 会忽略用户修改（这是「只当前会话生效」问题的根因之一）
+- **理由**：覆盖直接挂在预设 id 上（而非另存为自定义模板）才符合「修改这个预设并保存」的心智模型；提交路径必须识别覆盖，否则保存了也会被后端原 schema 顶掉
+- **影响**：`config.mySchemas` 词条删除；验证：先红（23 失败）后绿，vitest 174 passed（19 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功。顺手修复两处既有问题：`test/setup.ts` 的 `URL.createObjectURL` 条件桩改为无条件（Node 全局存在但对 jsdom File 抛错，导致 PasteTextInput 4 个 F7 用例恒红）；App.test `makeFile` 补第三参 type（F7 用例传 3 参导致 tsc 报错）

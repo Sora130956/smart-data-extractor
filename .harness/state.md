@@ -143,6 +143,10 @@
   - F5.2（图片上传 + OCR，独立 `/parse_image` 端点，D-013）：后端 `extraction/ocr.py` 抽出 `_ocr_images`/`_resolve_model` 复用给新 `parse_image(image_bytes, *, media_type="image/png", ...)`（一图一来源，不拆分）；`api/routes.py` 新增 `POST /parse_image`（`UploadFile` + DI 缝 `get_parse_image_fn`，content-type 白名单 png/jpeg/jpg/bmp，非法 422，复用 `ParsePdfResponse` 响应模型）。前端 `client.parseImage`（复用 `parsePdfResponseSchema`）+ `PasteTextInput` 新增 `imageFiles` 分支（扩展名 png/jpg/jpeg/bmp，始终整图 `onAdd(file.name, text)`，不受 `pdfSplitMode` 影响）+ i18n 文案更新（提及图片 OCR）。验证：后端 203 passed / 2 skipped；前端 121 passed（17 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
 - [ ] F6：导出 JSON + History + 空/错态打磨
   - F6.2（导出 Excel，D-014）：`utils/excelExport.ts`（`buildExportModel` 纯函数 → `buildWorkbook` 动态 import ExcelJS → `exportToExcel` Blob 下载）+ ResultsHeader/ResultDetailModal 两处按钮接线（批量 `extraction-results.xlsx` 禁用态对齐 JSON 导出；单条 `${source.name}-${label}.xlsx`）+ i18n 移除「（即将支持）」新增 `excel.*` 词条。两 sheet（提取结果 / 字段置信度，行 1:1），字段列 = 全结果并集首见序 + fieldLabels 首见标签回退裸 key，number/boolean 保留原生类型。TDD 先红后绿：新增 10 用例（util 7 + 组件 3）。验证：vitest 144 passed（18 files）、`tsc -b --noEmit` 0 错误、`vite build` 成功且 exceljs 929 kB 独立懒加载 chunk（主 bundle 377 kB 不变）
+  - F5.3（智能推断模板 AI 命名，D-015）：`/schema/infer` 输出模型新增 `schema_name`/`schema_name_en`（双语短名，随响应返回；`SchemaResolveResponse` 可选列向后兼容），前端 `App.tsx` 保存模板改用 AI 名（按 UI 语言优先、互为回退），缺失时回退「智能推断+时间戳」。验证：后端 210 passed / 2 skipped、前端 145 passed + tsc 0 错误，均先红后绿
+  - F6.3（导出文件名=模板名+时间戳，D-016）：`ExtractionSource.presetLabel` 提交时快照（`useBatchExtract`→`adaptBatchExtractResponse` 第 5 参）+ 纯函数 `utils/exportFilename.ts`（`buildExportFilename`：模板名-YYYYMMDD-HHmmss.ext，Windows 非法字符替换），批量 ResultsHeader / 单条 ResultDetailModal 的 JSON+Excel 四处统一接入（批量取最新一批 label，旧历史无快照回退 source.name）。修复补记：presetLabel 取值经 `templateName(id)`（保存模板名→预设本地化名→id）统一三处，智能推断路径直接用刚保存的 AI 模板名（首版误用 `history.customSchema`「自定义字段」标签，已删词条）。验证：先红后绿，vitest 150 passed（19 files）+ tsc 0 错误
+  - F9（模板下拉与预设编辑保存，D-017）：① 下拉去掉「我的模板」optgroup，预设加本地化前缀「预设：/Preset: 」（`config.presetPrefix`），自定义模板平铺；② uiStore 新增 `presetOverrides`（localStorage `sde.presetOverrides`），SchemaEditor「保存」按钮把预设修改存为该预设的本地覆盖（种子改为 `override ?? presetFields`），自定义模板的保存=updateSavedSchema；③「重置为预设」仅后端预设显示（有覆盖未修改时也可点，重置=清覆盖回后端基线）；④ App 提交条件扩为 `isSchemaModified || isSavedSchema || hasPresetOverride`，带覆盖预设走 /schema/resolve 自定义路径（否则后端原 schema 顶掉用户修改）。顺手修复：setup.ts `URL.createObjectURL` 条件桩改无条件（PasteTextInput 4 个 F7 用例恒红）、App.test makeFile 补 type 第三参（tsc 报错）。验证：先红（23 失败）后绿，vitest 174 passed（19 files）+ tsc 0 错误 + build 成功
+  - F9.1（智能推断设为默认且排第一）：uiStore 初始 `preset: SMART_PRESET_ID`（原 'invoice'），ConfigBar 选项顺序改为 智能推断 → 预设（带前缀）→ 自定义模板；测试相应加 beforeEach/renderApp 显式选 invoice 保持既有用例语义，ConfigBar 新增首用例断言默认值 smart 且为第一项。验证：vitest 175 passed（19 files）+ tsc 0 错误 + build 成功
 
 ## 可视化约定（docs/view/）
 
@@ -213,4 +217,14 @@
 ### D-014: Excel 导出——前端 ExcelJS 动态导入 + 两 sheet
 - 决策：纯前端生成 .xlsx（结果数据只在前端累积 state）；`buildExportModel` 纯函数层 + 动态 import ExcelJS（懒加载 chunk）+ 两 sheet（结果/字段置信度行 1:1）；单条导出复用同一入口
 - 理由：后端 openpyxl 需全量回传无意义；SheetJS npm 版停更；两 sheet 保持数据纯度利于下游处理
-- 详见：`.harness/decisions.md`（验证：vitest 144 passed、tsc 0 错误、build 成功 exceljs 独立 chunk）
+- 详见 `.harness/decisions.md`（验证：vitest 144 passed、tsc 0 错误、build 成功 exceljs 独立 chunk）
+
+### D-015: 智能推断模板命名——AI 生成 schema_name 双语列
+- 决策：`/schema/infer` 让 LLM 随字段一并生成 `schema_name`（输入文本语言短名）+ `schema_name_en`；前端保存模板按 UI 语言取 AI 名（互为回退），缺失回退「前缀+时间戳」
+- 理由：命名上下文在同一次 LLM 调用里，零额外成本；双语回退沿用 D-010 惯例
+- 详见 `.harness/decisions.md`（验证：后端 210 passed / 2 skipped、前端 145 passed + tsc 0 错误，先红后绿）
+
+### D-016: 导出文件名——模板名快照 + 紧凑时间戳
+- 决策：`ExtractionSource.presetLabel` 提交时快照；`utils/exportFilename.ts` 统一生成 `模板名-YYYYMMDD-HHmmss.ext`（非法字符替换），批量/单条、JSON/Excel 四处接入，无快照回退 source.name
+- 理由：结果跨批次累积，导出时的当前模板未必是结果来源，快照到 source 才准确
+- 详见 `.harness/decisions.md`（验证：先红 6 失败后绿，vitest 150 passed + tsc 0 错误）
