@@ -68,7 +68,7 @@
     "presetsLoading": "加载预设…",
     "presetsError": "预设加载失败",
     "instructions": "描述你要提取什么内容…（可选）",
-    "start": "开始提取",
+    "start": "开始提取 🚀",
     "starting": "提取中…",
     "requestError": "提取请求失败：{{message}}",
     "smartPreset": "智能推断",

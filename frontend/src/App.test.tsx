@@ -154,12 +154,12 @@ describe('F2 batch accumulation', () => {
 
     fireEvent.change(input(), { target: { files: [makeFile('first.txt', 'First staged text')] } });
     await waitFor(() => expect(screen.getByText('first.txt')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Start Extraction' }));
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
     await waitFor(() => expect(screen.getByText(/First staged text/)).toBeInTheDocument());
 
     fireEvent.change(input(), { target: { files: [makeFile('second.txt', 'Second staged text')] } });
     await waitFor(() => expect(screen.getByText('second.txt')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Start Extraction' }));
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
     await waitFor(() => expect(screen.getByText(/Second staged text/)).toBeInTheDocument());
 
     // Old batch must survive the second extraction.
@@ -198,7 +198,7 @@ describe('F6 history integration', () => {
     fireEvent.change(input, { target: { files: [file] } });
     await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: 'Start Extraction' }));
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument());
 
     // The completed batch was recorded into localStorage-backed history.
@@ -242,7 +242,7 @@ describe('F3 result detail modal', () => {
 
     await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: 'Start Extraction' }));
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument());
 

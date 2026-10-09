@@ -85,7 +85,7 @@ export function ConfigBar({
 
         <input
           type="text"
-          className={`${selectClass} w-full sm:w-[280px]`}
+          className={`${selectClass} w-full sm:w-[420px]`}
           placeholder={t('config.instructions')}
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
