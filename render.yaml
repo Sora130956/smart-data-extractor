@@ -22,3 +22,13 @@ services:
       # Optional: enables PDF/image OCR via free glm-4v-flash.
       - key: GLM_API_KEY
         sync: false
+      # DEMO-STAGE quota guard (D-019): caps the daily LLM bill. Replace
+      # with per-user quotas before public promotion.
+      - key: DAILY_QUOTA_PER_IP
+        value: "50"
+      - key: DAILY_QUOTA_GLOBAL
+        value: "1000"
+      # Optional: set in the dashboard to enable GET /stats?token=...
+      # (today's traffic report); unset hides the endpoint.
+      - key: ADMIN_STATS_TOKEN
+        sync: false

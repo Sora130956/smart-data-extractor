@@ -7,6 +7,7 @@ from smart_data_extractor.extraction.agent import (
     get_preset_agent,
     shared_concurrency_limiter,
 )
+from smart_data_extractor.api.routes import get_quota
 
 
 @pytest.fixture
@@ -20,10 +21,12 @@ def fake_openai_env(monkeypatch):
     get_settings.cache_clear()
     get_preset_agent.cache_clear()
     shared_concurrency_limiter.cache_clear()
+    get_quota.cache_clear()
     yield
     get_preset_agent.cache_clear()
     shared_concurrency_limiter.cache_clear()
     get_settings.cache_clear()
+    get_quota.cache_clear()
 
 
 @pytest.fixture

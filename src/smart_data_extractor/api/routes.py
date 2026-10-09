@@ -5,10 +5,13 @@ inject fakes via ``app.dependency_overrides`` (no network, no mocking of
 the object under test).
 """
 
+import hmac
+from functools import lru_cache
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 
+from smart_data_extractor.api.quota import DailyQuota
 from smart_data_extractor.api.schemas import (
     BatchExtractRequest,
     BatchExtractResponse,
@@ -70,6 +73,32 @@ def get_parse_image_fn() -> Callable[..., Any]:
     return parse_image
 
 
+@lru_cache
+def get_quota() -> DailyQuota:
+    """DI seam: process-wide daily quota built from settings.
+
+    DEMO-STAGE guard (D-019): lazy (no settings access at import time)
+    and cached so every guarded endpoint shares one counter set. Tests
+    inject fresh instances via dependency_overrides.
+    """
+    settings = get_settings()
+    return DailyQuota(
+        per_ip_limit=settings.daily_quota_per_ip,
+        global_limit=settings.daily_quota_global,
+    )
+
+
+async def enforce_daily_quota(
+    request: Request, quota: DailyQuota = Depends(get_quota)
+) -> None:
+    """Guard for single-item endpoints: spend one unit per request.
+
+    DEMO-STAGE (D-019): /batch_extract spends len(texts) units inside its
+    handler instead — see the batch route.
+    """
+    quota.spend(request)
+
+
 # Image formats GLM vision officially supports (Zhipu docs: png/jpg/jpeg/bmp).
 SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/bmp"}
 
@@ -77,6 +106,25 @@ SUPPORTED_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/bm
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/stats")
+async def stats(
+    token: str | None = None,
+    quota: DailyQuota = Depends(get_quota),
+) -> dict:
+    """Today's traffic report for the owner (usage behind the quota guard).
+
+    DEMO-STAGE (D-019): hidden unless ADMIN_STATS_TOKEN is set (a public
+    401 would advertise the endpoint); counters are in-memory so they
+    reset on every deploy. Open ``/stats?token=...`` in a browser.
+    """
+    expected = get_settings().admin_stats_token
+    if not expected:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if token is None or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing stats token")
+    return quota.snapshot()
 
 
 @router.get("/presets", response_model=list[PresetListItem])
@@ -93,7 +141,11 @@ async def preset_schema(name: str) -> PresetSchemaResponse:
     return PresetSchemaResponse(fields=fields)
 
 
-@router.post("/extract", response_model=ExtractResponse)
+@router.post(
+    "/extract",
+    response_model=ExtractResponse,
+    dependencies=[Depends(enforce_daily_quota)],
+)
 async def extract(
     req: ExtractRequest,
     fn: Callable[..., Any] = Depends(get_extract_fn),
@@ -108,7 +160,11 @@ async def extract(
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 
 
-@router.post("/schema/resolve", response_model=SchemaResolveResponse)
+@router.post(
+    "/schema/resolve",
+    response_model=SchemaResolveResponse,
+    dependencies=[Depends(enforce_daily_quota)],
+)
 async def schema_resolve(
     req: SchemaResolveRequest,
     fn: Callable[..., Any] = Depends(get_schema_resolve_fn),
@@ -120,7 +176,11 @@ async def schema_resolve(
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 
 
-@router.post("/schema/infer", response_model=SchemaResolveResponse)
+@router.post(
+    "/schema/infer",
+    response_model=SchemaResolveResponse,
+    dependencies=[Depends(enforce_daily_quota)],
+)
 async def schema_infer(
     req: SchemaInferRequest,
     fn: Callable[..., Any] = Depends(get_schema_infer_fn),
@@ -135,8 +195,13 @@ async def schema_infer(
 @router.post("/batch_extract", response_model=BatchExtractResponse)
 async def batch(
     req: BatchExtractRequest,
+    request: Request,
     fn: Callable[..., Any] = Depends(get_batch_fn),
+    quota: DailyQuota = Depends(get_quota),
 ) -> BatchExtractResponse:
+    # DEMO-STAGE quota (D-019): a batch spends one unit per text, not one
+    # per request — n LLM calls cost n units. Rejected before any LLM work.
+    quota.spend(request, max(1, len(req.texts)))
     try:
         # The API contract is per-item tolerance (D-007): one bad text must
         # not fail the whole batch.
@@ -164,7 +229,11 @@ async def batch(
     )
 
 
-@router.post("/parse_pdf", response_model=ParsePdfResponse)
+@router.post(
+    "/parse_pdf",
+    response_model=ParsePdfResponse,
+    dependencies=[Depends(enforce_daily_quota)],
+)
 async def parse_pdf_route(
     file: UploadFile,
     fn: Callable[..., Any] = Depends(get_parse_pdf_fn),
@@ -179,7 +248,11 @@ async def parse_pdf_route(
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 
 
-@router.post("/parse_image", response_model=ParsePdfResponse)
+@router.post(
+    "/parse_image",
+    response_model=ParsePdfResponse,
+    dependencies=[Depends(enforce_daily_quota)],
+)
 async def parse_image_route(
     file: UploadFile,
     fn: Callable[..., Any] = Depends(get_parse_image_fn),

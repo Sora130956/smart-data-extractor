@@ -94,6 +94,9 @@ All endpoints are also reachable under the `/api` prefix (used by the frontend).
 | `GLM_API_KEY` | optional | Enables PDF/image OCR via free `glm-4v-flash` |
 | `MAX_CONCURRENCY` | no | Global concurrency cap (default 5) |
 | `DATABASE_URL` | no | SQLAlchemy URL (default local SQLite) |
+| `DAILY_QUOTA_PER_IP` | no | DEMO-STAGE guard: requests per visitor IP per UTC day (default 50, 0 disables) |
+| `DAILY_QUOTA_GLOBAL` | no | DEMO-STAGE guard: total requests per UTC day (default 1000, 0 disables) |
+| `ADMIN_STATS_TOKEN` | no | When set, enables `GET /stats?token=...` (today's traffic: usage, unique IPs, per-endpoint counts). Counters are in-memory and reset on deploy — replace with per-user quotas before public promotion (see `.harness/decisions.md` D-019) |
 
 ## Testing
 

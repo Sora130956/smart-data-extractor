@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     glm_api_key: str | None = None
     glm_model: str = "glm-4v-flash"
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
+    # DEMO-STAGE quota guard (D-019): caps the daily LLM bill before any
+    # public promotion. A limit <= 0 disables that layer. Replace with
+    # per-user quotas when the tool goes public.
+    daily_quota_per_ip: int = 50
+    daily_quota_global: int = 1000
+    # Set to enable GET /stats (today's traffic report); unset hides it.
+    admin_stats_token: str | None = None
     
     model_config = SettingsConfigDict(
         env_file=".env",
