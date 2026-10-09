@@ -142,6 +142,7 @@
   - F5.1（PDF 上传 + OCR + loading + 按页拆分，D-011/D-012）：PasteTextInput 接 `parse_pdf`（txt/pdf 双通道），`parsing` spinner（role="status"）；`parse_pdf` 返回 `pages: list[str|None]`；Header「⚙ 设置」按钮 → SettingsModal（「文档解析」segmented 开关 whole/pages，`sde.pdfSplitMode` 持久化默认 whole；「模型」分组占位）；pages 模式每页独立来源 `文件名 · P{原页码}`、跳过 null 失败页。验证：后端 196 passed / 2 skipped；前端 116 passed（17 files）+ tsc 0 错误
   - F5.2（图片上传 + OCR，独立 `/parse_image` 端点，D-013）：后端 `extraction/ocr.py` 抽出 `_ocr_images`/`_resolve_model` 复用给新 `parse_image(image_bytes, *, media_type="image/png", ...)`（一图一来源，不拆分）；`api/routes.py` 新增 `POST /parse_image`（`UploadFile` + DI 缝 `get_parse_image_fn`，content-type 白名单 png/jpeg/jpg/bmp，非法 422，复用 `ParsePdfResponse` 响应模型）。前端 `client.parseImage`（复用 `parsePdfResponseSchema`）+ `PasteTextInput` 新增 `imageFiles` 分支（扩展名 png/jpg/jpeg/bmp，始终整图 `onAdd(file.name, text)`，不受 `pdfSplitMode` 影响）+ i18n 文案更新（提及图片 OCR）。验证：后端 203 passed / 2 skipped；前端 121 passed（17 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
 - [ ] F6：导出 JSON + History + 空/错态打磨
+  - F6.2（导出 Excel，D-014）：`utils/excelExport.ts`（`buildExportModel` 纯函数 → `buildWorkbook` 动态 import ExcelJS → `exportToExcel` Blob 下载）+ ResultsHeader/ResultDetailModal 两处按钮接线（批量 `extraction-results.xlsx` 禁用态对齐 JSON 导出；单条 `${source.name}-${label}.xlsx`）+ i18n 移除「（即将支持）」新增 `excel.*` 词条。两 sheet（提取结果 / 字段置信度，行 1:1），字段列 = 全结果并集首见序 + fieldLabels 首见标签回退裸 key，number/boolean 保留原生类型。TDD 先红后绿：新增 10 用例（util 7 + 组件 3）。验证：vitest 144 passed（18 files）、`tsc -b --noEmit` 0 错误、`vite build` 成功且 exceljs 929 kB 独立懒加载 chunk（主 bundle 377 kB 不变）
 
 ## 可视化约定（docs/view/）
 
@@ -208,3 +209,8 @@
 - 决策：`parse_pdf` 返回 `pages: list[str|None]`（页数等长、失败页 None）；前端 Header「设置」→ SettingsModal 内 segmented 开关（`sde.pdfSplitMode` 持久化，默认 whole，含「模型」分组占位）；pages 模式每页独立来源 `文件名 · P{原页码}`
 - 理由：一份 PDF 可能含多条记录，整份拼接只能抽出一条；`batch_extract` 天然支持多来源，前端拆分零后端往返
 - 详见：`.harness/decisions.md`（验证：后端 196 passed / 2 skipped；前端 116 passed + tsc 0 错误）
+
+### D-014: Excel 导出——前端 ExcelJS 动态导入 + 两 sheet
+- 决策：纯前端生成 .xlsx（结果数据只在前端累积 state）；`buildExportModel` 纯函数层 + 动态 import ExcelJS（懒加载 chunk）+ 两 sheet（结果/字段置信度行 1:1）；单条导出复用同一入口
+- 理由：后端 openpyxl 需全量回传无意义；SheetJS npm 版停更；两 sheet 保持数据纯度利于下游处理
+- 详见：`.harness/decisions.md`（验证：vitest 144 passed、tsc 0 错误、build 成功 exceljs 独立 chunk）

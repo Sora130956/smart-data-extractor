@@ -308,3 +308,25 @@
   - `ParsePdfResponse` 复用到两个端点语义上略怪（命名含 Pdf），但避免重复 DTO；若后续图片/PDF 契约出现分歧需拆分
   - 验证：后端新增测试（`test_ocr.py` 3 个 + `test_routes.py` 4 个），全量 203 passed / 2 skipped；前端新增测试（`client.test.ts` 2 个 + `PasteTextInput.test.tsx` 2 个），全量 121 passed（17 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
 
+## D-014：Excel 导出——前端 ExcelJS 动态导入 + 纯数据模型层 + 两 sheet（结果/字段置信度）
+
+- **日期**：2026-10-09
+- **状态**：已接受
+- **来源**：用户需求——结果区两处「导出 Excel（即将支持）」禁用按钮（ResultsHeader 批量 / ResultDetailModal 单条）实装
+- **背景**：
+  - 提取结果是纯前端累积状态（跨批次前插合并 + localStorage 历史），后端 `/batch_extract` 无状态存储；生成 Excel 若走后端需把全部结果 POST 回去再下载文件，多一次往返 + payload + 新依赖，无收益
+  - 设计两问经用户拍板：①生成位置选「前端 ExcelJS」（备选 SheetJS npm 版停更于 2022、后端 openpyxl 无意义往返）；②sheet 布局选「两 sheet：结果 + 字段置信度」（备选单 sheet 值/置信度交错列数翻倍、置信度括号附值破坏单元格纯数据性）
+- **决策**：
+  1. `frontend/src/utils/excelExport.ts` 分三层：`buildExportModel(sources, t)` 纯函数（无 DOM、无 exceljs 依赖，产出 `{results, confidence}` 两 sheet 的列/行矩阵）→ `buildWorkbook(model)` 动态 `import('exceljs')` 构建 workbook（表头加粗 + 冻结首行 + 固定列宽）→ `exportToExcel(sources, filename, t)` 写 buffer + Blob 下载（复用 JSON 导出的 a.click 模式）
+  2. Sheet「结果」列：来源 | 项 | 状态（按 UI 语言 成功/失败）| 错误 | 字段并集（跨全部结果按首次出现排序，表头用 fieldLabels 首见标签回退裸 key）| 平均置信度 | 成本 (USD)；Sheet「字段置信度」列：来源 | 项 | 字段置信度数值（缺失→空）| 平均置信度；两 sheet 行 1:1 对齐便于交叉核对
+  3. 单元格序列化对齐 ResultDetailModal 的 formatFieldValue，但原语保留原生类型（number/boolean 不转字符串，Excel 可直接计算），null→空单元格，纯数组 join(', ')，含对象数组/对象→JSON.stringify
+  4. 单条导出复用同一入口：DetailModal 构造 `{...source, results: [result]}` 传入；文件名批量 `extraction-results.xlsx`、单条 `${source.name}-${label}.xlsx`（对齐既有 JSON 导出命名）；按钮态对齐 JSON 导出（批量无结果禁用 / 单条恒可用）；i18n 移除「（即将支持）」并新增 `excel.*` 表头词条（EN/zh）
+- **理由（为什么不选备选方案）**：
+  - 备选 A：后端 openpyxl 生成 → 放弃。结果数据只在前端，服务端生成需全量回传；后端零改动是本次方案的核心优势
+  - 备选 B：SheetJS（npm `xlsx` 0.18.5）→ 放弃。npm 版两年未更新，ExcelJS 维护活跃且类型完备
+  - 备选 C：CSV → 放弃。非真 .xlsx，BOM/转义/多 sheet 均不支持，用户明确要 Excel
+- **影响**：
+  - exceljs 929 kB（gzip 256 kB）经动态导入独立成懒加载 chunk，主 bundle（377 kB）不受影响，点击导出时才加载
+  - `t` 以参数注入 util（type-only 引 react-i18next），表头/状态文案跟随 UI 语言；测试用 i18next 单例直取
+  - 验证：TDD 先红后绿（util 层 7 用例：字段并集/标签回退/序列化/失败行/置信度表/workbook 集成；组件层 3 用例：mock exportToExcel 断言调用契约）。全量 vitest 144 passed（18 files）、`tsc -b --noEmit` 0 错误、`vite build` 成功且 exceljs 独立 chunk（`exceljs.min-*.js`）
+
