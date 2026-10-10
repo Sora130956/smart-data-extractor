@@ -48,6 +48,10 @@ export interface ExtractionSource {
    * time (issue #2) so later schema edits never re-flag old batches. Absent
    * when no field had a configured threshold. */
   reviewThresholds?: Record<string, number>;
+  /** Keys of fields the user explicitly marked "may be empty", snapshotted at
+   * submit time (issue #2 allow-empty). Absent when nothing was marked — the
+   * default keeps flagging empty values for review, as before the feature. */
+  allowEmptyFields?: string[];
   /** Blob URL for the original uploaded file (pdf/image), session-scoped. */
   sourceFileUrl?: string;
   results: ExtractionResult[];
@@ -76,6 +80,11 @@ export interface SchemaField {
    * null/undefined = use the global default (CONFIDENCE_LOW). Frontend-only:
    * never sent to the backend, it does not change the LLM schema. */
   minConfidence?: number | null;
+  /** Issue #2 allow-empty: true = a null/empty extraction value for this
+   * field does not flag the batch for review. Undefined/false (the default)
+   * keeps flagging it, matching the behaviour before the feature (the
+   * backend zeroes a null field's confidence). Frontend-only. */
+  allowEmpty?: boolean;
   /** Preset fields only: baseline for the needsResolve diff. */
   originalDisplayName?: string;
   originalDescription?: string;

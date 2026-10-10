@@ -97,6 +97,36 @@ describe('adaptBatchExtractResponse', () => {
     expect(empty).not.toHaveProperty('reviewThresholds');
   });
 
+  it('snapshots the allow-empty field list onto every source (issue #2)', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: '1' },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 1, output: 1 },
+      succeeded: 1,
+      failed: 0,
+    };
+
+    const [withAllowed] = adaptBatchExtractResponse(
+      response, ['t1'], undefined, undefined, undefined, undefined, undefined, ['notes'],
+    );
+    expect(withAllowed.allowEmptyFields).toEqual(['notes']);
+
+    // Nothing marked -> the key stays absent, not an empty array.
+    const [without] = adaptBatchExtractResponse(response, ['t1']);
+    expect(without).not.toHaveProperty('allowEmptyFields');
+    const [empty] = adaptBatchExtractResponse(
+      response, ['t1'], undefined, undefined, undefined, undefined, undefined, [],
+    );
+    expect(empty).not.toHaveProperty('allowEmptyFields');
+  });
+
   it('maps a failed item to a failed result with null data and no confidence', () => {
     const response: BatchExtractResponse = {
       results: [

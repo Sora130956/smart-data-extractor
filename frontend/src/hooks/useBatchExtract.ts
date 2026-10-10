@@ -24,13 +24,16 @@ export interface BatchExtractInput {
   /** field_name -> user-configured minimum confidence, snapshotted onto each
    * source so review flags survive later schema edits (issue #2). */
   reviewThresholds?: Record<string, number>;
+  /** Keys of fields the user explicitly marked "may be empty", snapshotted
+   * onto each source (issue #2 allow-empty). */
+  allowEmptyFields?: string[];
 }
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds }) => {
+    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields }) => {
       const response = await batchExtract({ texts, preset, schema, instructions, lang });
-      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds);
+      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields);
     },
   });
 }

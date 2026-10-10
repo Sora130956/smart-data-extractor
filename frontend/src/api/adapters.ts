@@ -60,6 +60,7 @@ export function adaptBatchExtractResponse(
   presetLabel?: string,
   fileUrls?: Array<string | undefined>,
   reviewThresholds?: Record<string, number>,
+  allowEmptyFields?: string[],
 ): ExtractionSource[] {
   // Ids must stay unique across batches: the UI accumulates results from
   // successive extractions, so `text-${i}` alone would collide as a React key.
@@ -73,6 +74,7 @@ export function adaptBatchExtractResponse(
     const isFirst = i === 0;
     const hasThresholds =
       reviewThresholds != null && Object.keys(reviewThresholds).length > 0;
+    const hasAllowEmpty = allowEmptyFields != null && allowEmptyFields.length > 0;
 
     return {
       id: sourceId,
@@ -84,6 +86,7 @@ export function adaptBatchExtractResponse(
       ...(presetLabel ? { presetLabel } : {}),
       ...(fieldLabels ? { fieldLabels } : {}),
       ...(hasThresholds ? { reviewThresholds } : {}),
+      ...(hasAllowEmpty ? { allowEmptyFields } : {}),
       ...(fileUrls?.[i] ? { sourceFileUrl: fileUrls[i] } : {}),
       results: [result],
       stats: {

@@ -4,8 +4,10 @@ import {
   CONFIDENCE_LOW,
   belowThresholdFields,
   confidenceLevel,
+  emptyViolatingFields,
   fieldThreshold,
   formatConfidence,
+  isEmptyValue,
   needsReview,
 } from './confidence';
 
@@ -67,6 +69,39 @@ describe('needsReview', () => {
       }),
     ).toBe(true); // total has no entry -> still judged against 0.70
   });
+
+  it('flags an empty field that is not allowed to be empty (issue #2)', () => {
+    // The backend zeroes a null field's confidence, but the flag now comes
+    // from the allow-empty rule, not from the threshold comparison.
+    expect(
+      needsReview({
+        avgConfidence: 0.9,
+        confidence: { vendor: 0, total: 0.95 },
+        data: { vendor: null, total: 1200 },
+      }),
+    ).toBe(true);
+  });
+
+  it('passes an empty field marked allow-empty, and only for empty values', () => {
+    expect(
+      needsReview({
+        avgConfidence: 0.9,
+        confidence: { notes: 0, total: 0.95 },
+        data: { notes: null, total: 1200 },
+        allowEmpty: ['notes'],
+      }),
+    ).toBe(false);
+    // The exemption never covers a non-empty value: that still has to
+    // clear the confidence threshold like any other field.
+    expect(
+      needsReview({
+        avgConfidence: 0.9,
+        confidence: { notes: 0.5, total: 0.95 },
+        data: { notes: 'late', total: 1200 },
+        allowEmpty: ['notes'],
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('fieldThreshold', () => {
@@ -100,6 +135,57 @@ describe('belowThresholdFields', () => {
     expect(
       belowThresholdFields({ confidence: { a: 0.99 }, thresholds: { a: 0.5 } }),
     ).toEqual([]);
+  });
+
+  it('excludes empty fields from the threshold list when data is available (issue #2)', () => {
+    // An empty field is judged by the allow-empty rule instead — its
+    // zeroed confidence is not a quality signal.
+    expect(
+      belowThresholdFields({
+        confidence: { vendor: 0, total: 0.69 },
+        data: { vendor: null, total: 1200 },
+      }),
+    ).toEqual([{ field: 'total', threshold: CONFIDENCE_LOW }]);
+  });
+
+  it('keeps the legacy behaviour when no data is passed', () => {
+    expect(belowThresholdFields({ confidence: { vendor: 0 } })).toEqual([
+      { field: 'vendor', threshold: CONFIDENCE_LOW },
+    ]);
+  });
+});
+
+describe('isEmptyValue', () => {
+  it('treats null, missing, and empty strings as empty — never 0/false', () => {
+    expect(isEmptyValue(null)).toBe(true);
+    expect(isEmptyValue(undefined)).toBe(true);
+    expect(isEmptyValue('')).toBe(true);
+    expect(isEmptyValue(0)).toBe(false);
+    expect(isEmptyValue(false)).toBe(false);
+    expect(isEmptyValue('Acme')).toBe(false);
+  });
+});
+
+describe('emptyViolatingFields (issue #2 allow-empty)', () => {
+  it('lists empty fields that are not exempt, keeping the exemption list out', () => {
+    expect(
+      emptyViolatingFields({
+        data: { vendor: null, notes: '', total: 0, paid: false, missing: undefined },
+        allowEmpty: ['notes'],
+      }),
+    ).toEqual(['vendor', 'missing']);
+  });
+
+  it('without exemptions every empty field is a violation', () => {
+    expect(emptyViolatingFields({ data: { vendor: null, notes: '' } })).toEqual([
+      'vendor',
+      'notes',
+    ]);
+  });
+
+  it('returns nothing when data is null (failed extraction)', () => {
+    expect(emptyViolatingFields({ data: null })).toEqual([]);
+    expect(emptyViolatingFields({})).toEqual([]);
   });
 });
 

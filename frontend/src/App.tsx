@@ -17,7 +17,7 @@ import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
 import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
 import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
-import { applyFieldEdit, buildReviewThresholds } from '@/utils/review';
+import { applyFieldEdit, buildAllowEmptyFields, buildReviewThresholds } from '@/utils/review';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
@@ -140,6 +140,9 @@ function AppShell() {
     // Issue #2: field_name -> minimum confidence, snapshotted at submit so
     // review flags never re-evaluate against a later schema edit.
     let reviewThresholds: Record<string, number> | undefined;
+    // Issue #2 allow-empty: keys of fields allowed to come back empty,
+    // snapshotted with the same lifetime as the thresholds.
+    let allowEmptyFields: string[] | undefined;
     // History label snapshot: the preset's display name in the UI language at
     // submit time (custom/smart schema batches get a fixed label instead).
     let presetLabel: string;
@@ -233,6 +236,7 @@ function AppShell() {
         // Issue #2: the backend owns the keys after resolve, so re-key the
         // configured thresholds through the resolved schema.
         reviewThresholds = buildReviewThresholds(customFields, resolved.schema.fields);
+        allowEmptyFields = buildAllowEmptyFields(customFields, resolved.schema.fields);
       } catch (err) {
         setResolveError(err instanceof Error ? err.message : String(err));
         return;
@@ -256,6 +260,7 @@ function AppShell() {
       // which case the custom path above runs instead), so this is normally
       // empty — kept for safety if that routing ever changes.
       reviewThresholds = buildReviewThresholds(customFields);
+      allowEmptyFields = buildAllowEmptyFields(customFields);
       presetLabel = templateName(preset);
     }
 
@@ -273,6 +278,7 @@ function AppShell() {
         fieldLabels,
         presetLabel,
         reviewThresholds,
+        allowEmptyFields,
       },
       {
         onSuccess: (newSources) => {
@@ -324,6 +330,8 @@ function AppShell() {
           avgConfidence: result.avgConfidence,
           confidence: result.confidence,
           thresholds: source.reviewThresholds,
+          data: result.data,
+          allowEmpty: source.allowEmptyFields,
         });
         if (result.status === 'success' && !needs) high += 1;
         if (result.status === 'failed' || needs) review += 1;
@@ -342,6 +350,8 @@ function AppShell() {
             avgConfidence: r.avgConfidence,
             confidence: r.confidence,
             thresholds: s.reviewThresholds,
+            data: r.data,
+            allowEmpty: s.allowEmptyFields,
           });
           if (filter === 'high') return r.status === 'success' && !needs;
           return r.status === 'failed' || needs;

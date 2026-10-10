@@ -2,7 +2,8 @@
 // preserve the originally extracted value, not just overwrite it. Shared by
 // App's on-screen state and the history store's persisted mirror so both
 // stay in sync (same snapshot semantics).
-// Also hosts the issue #2 submit-time threshold snapshot builder.
+// Also hosts the issue #2 submit-time snapshots: per-field review thresholds
+// and the allow-empty field list.
 
 import type { ExtractionResult, SchemaField } from '@/types/extraction';
 
@@ -28,36 +29,59 @@ export function applyFieldEdit(
   };
 }
 
-/** Build the issue #2 review-threshold snapshot for a submission: real field
- * name -> configured minimum confidence, keeping only fields that have one.
- *
+/** Shared re-keying for the issue #2 submit-time snapshots: collect the
+ * fields passing `keep`, then map them onto the keys the backend owns.
  * Keys come from the field's own `fieldName` when known. After a
- * /schema/resolve the backend owns the keys, so pass the resolved schema's
- * fields to re-key by `field_name` first and echoed `display_name` second
- * (freshly named fields have no stable key yet). */
+ * /schema/resolve the backend owns the keys, so `resolved` re-keys by
+ * `field_name` first and echoed `display_name` second (freshly named
+ * fields have no stable key yet). */
+function keyedFields(
+  fields: SchemaField[],
+  keep: (field: SchemaField) => boolean,
+  resolved?: Record<string, { display_name?: string | null }>,
+): Array<[string, SchemaField]> {
+  const byName = new Map<string, SchemaField>();
+  const byDisplay = new Map<string, SchemaField>();
+  for (const field of fields) {
+    if (!keep(field)) continue;
+    if (field.fieldName) byName.set(field.fieldName, field);
+    byDisplay.set(field.displayName, field);
+  }
+  if (byName.size === 0 && byDisplay.size === 0) return [];
+
+  if (resolved) {
+    const out: Array<[string, SchemaField]> = [];
+    for (const [key, spec] of Object.entries(resolved)) {
+      const field =
+        byName.get(key) ??
+        (spec.display_name != null ? byDisplay.get(spec.display_name) : undefined);
+      if (field) out.push([key, field]);
+    }
+    return out;
+  }
+  return [...byName.entries()];
+}
+
+/** Build the issue #2 review-threshold snapshot for a submission: real field
+ * name -> configured minimum confidence, keeping only fields that have one. */
 export function buildReviewThresholds(
   fields: SchemaField[],
   resolved?: Record<string, { display_name?: string | null }>,
 ): Record<string, number> {
-  const byName = new Map<string, number>();
-  const byDisplay = new Map<string, number>();
-  for (const field of fields) {
-    if (field.minConfidence == null) continue;
-    if (field.fieldName) byName.set(field.fieldName, field.minConfidence);
-    byDisplay.set(field.displayName, field.minConfidence);
-  }
-  if (byName.size === 0 && byDisplay.size === 0) return {};
-
   const thresholds: Record<string, number> = {};
-  if (resolved) {
-    for (const [key, spec] of Object.entries(resolved)) {
-      const value =
-        byName.get(key) ??
-        (spec.display_name != null ? byDisplay.get(spec.display_name) : undefined);
-      if (value !== undefined) thresholds[key] = value;
-    }
-  } else {
-    for (const [key, value] of byName) thresholds[key] = value;
+  for (const [key, field] of keyedFields(fields, (f) => f.minConfidence != null, resolved)) {
+    thresholds[key] = field.minConfidence as number;
   }
   return thresholds;
+}
+
+/** Build the issue #2 allow-empty snapshot for a submission: the keys of the
+ * fields the user explicitly marked "may be empty". Unmarked fields default
+ * to NOT allowed, which keeps flagging empty values exactly as before the
+ * feature existed. */
+export function buildAllowEmptyFields(
+  fields: SchemaField[],
+  resolved?: Record<string, { display_name?: string | null }>,
+): string[] {
+  return keyedFields(fields, (f) => f.allowEmpty === true, resolved).map(([key]) => key);
 }

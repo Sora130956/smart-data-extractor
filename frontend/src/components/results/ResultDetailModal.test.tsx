@@ -20,6 +20,9 @@ const source: ExtractionSource = {
     invoice_number: 'Invoice Number', vendor: 'Vendor', notes: 'Notes',
     total: 'Total', paid: 'Paid', line_items: 'Line Items',
   },
+  // Notes is the classic optional field: a null value must not flag the
+  // batch for review (issue #2 allow-empty).
+  allowEmptyFields: ['notes'],
   results: [],
   stats: {
     succeeded: 1, failed: 0, totalCostUsd: 0.0002, totalCostCny: 0.00145, avgConfidence: 0.9,
@@ -116,6 +119,48 @@ describe('ResultDetailModal', () => {
       <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
     );
     expect(screen.queryByText(/Needs review/)).not.toBeInTheDocument();
+  });
+
+  it('never flags an allowed-empty field whose value is null (issue #2 allow-empty)', () => {
+    // notes is null but exempted on the source; everything else clears.
+    render(
+      <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
+    );
+    expect(screen.queryByText(/Needs review/)).not.toBeInTheDocument();
+  });
+
+  it('flags an empty field that is not allowed to be empty, naming it (issue #2 allow-empty)', () => {
+    // Realistic backend shape: a null field's confidence is zeroed.
+    const vendorNullResult: ExtractionResult = {
+      ...highConfidenceResult,
+      data: { invoice_number: 'INV-2024-001', vendor: null, notes: null },
+      confidence: { invoice_number: 0.95, vendor: 0, notes: 0 },
+      avgConfidence: 0.32,
+    };
+    render(
+      <ResultDetailModal source={source} result={vendorNullResult} label="Text 1" onClose={() => {}} />,
+    );
+
+    // The empty violation gets its own warning segment; the threshold
+    // segment stays hidden because no non-empty field is below 0.70.
+    expect(screen.getByText(/must not be empty/)).toBeInTheDocument();
+    expect(screen.getByText(/Vendor\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/below their min confidence/)).not.toBeInTheDocument();
+  });
+
+  it('still judges an allowed-empty field by its threshold when it has a value', () => {
+    const notesLowResult: ExtractionResult = {
+      ...highConfidenceResult,
+      data: { invoice_number: 'INV-2024-001', vendor: 'Acme Corp', notes: 'Late delivery' },
+      confidence: { invoice_number: 0.95, vendor: 0.9, notes: 0.5 },
+      avgConfidence: 0.78,
+    };
+    render(
+      <ResultDetailModal source={source} result={notesLowResult} label="Text 1" onClose={() => {}} />,
+    );
+
+    // The exemption only covers empty values.
+    expect(screen.getByText(/Notes \(0\.70\)/)).toBeInTheDocument();
   });
 
   it('calls onClose when pressing Escape', async () => {

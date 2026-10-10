@@ -289,4 +289,45 @@ describe('SchemaEditor', () => {
       expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
     });
   });
+
+  describe('allow empty column (issue #2)', () => {
+    it('renders one two-option select per field, defaulting to Not allowed', async () => {
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      const selects = screen.getAllByLabelText('Allow Empty');
+      expect(selects).toHaveLength(2);
+      for (const select of selects) {
+        expect(select).toHaveValue('');
+        expect(select).toHaveDisplayValue('Not allowed');
+      }
+    });
+
+    it('stores true when Allowed is picked and marks the schema modified', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Allow Empty')).toHaveLength(2));
+      await user.selectOptions(screen.getAllByLabelText('Allow Empty')[0], 'true');
+
+      expect(useUiStore.getState().customFields[0].allowEmpty).toBe(true);
+      expect(useUiStore.getState().customFields[1].allowEmpty).toBeUndefined();
+      expect(screen.getByText('Modified')).toBeInTheDocument();
+    });
+
+    it('stores false when switching back to Not allowed', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Allow Empty')).toHaveLength(2));
+      const select = screen.getAllByLabelText('Allow Empty')[0];
+      await user.selectOptions(select, 'true');
+      await user.selectOptions(select, '');
+
+      expect(useUiStore.getState().customFields[0].allowEmpty).toBe(false);
+    });
+  });
 });

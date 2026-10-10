@@ -158,6 +158,7 @@ export function SchemaEditor() {
           <span className="w-[140px] flex-none">{t('schema.fieldName')}</span>
           <span className="w-[110px] flex-none">{t('schema.fieldType')}</span>
           <span className="w-[108px] flex-none">{t('schema.minConfidence')}</span>
+          <span className="w-[92px] flex-none">{t('schema.allowEmpty')}</span>
           <span className="flex-1">{t('schema.fieldDescription')}</span>
           <span className="w-[20px] flex-none" />
         </div>
@@ -203,6 +204,19 @@ export function SchemaEditor() {
                   {formatConfidence(field.minConfidence)}
                 </option>
               ) : null}
+            </select>
+            {/* Issue #2 allow-empty: a two-option select. "Not allowed" (the
+             * default) keeps flagging empty values for review, exactly as
+             * before the feature; "Allowed" exempts empty values from both
+             * the threshold check and the empty rule. */}
+            <select
+              aria-label={t('schema.allowEmpty')}
+              className={`${cellClass} w-[92px] flex-none`}
+              value={field.allowEmpty === true ? 'true' : ''}
+              onChange={(e) => updateField(i, { allowEmpty: e.target.value === 'true' })}
+            >
+              <option value="">{t('schema.allowEmptyNo')}</option>
+              <option value="true">{t('schema.allowEmptyYes')}</option>
             </select>
             <input
               aria-label={t('schema.fieldDescription')}

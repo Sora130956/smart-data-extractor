@@ -20,25 +20,55 @@ export function confidenceLevel(value: number): ConfidenceLevel {
   return 'low';
 }
 
+/** An extraction value that counts as "empty": null, missing, or an empty
+ * string. Numbers and booleans (0 / false) are real values, never empty. */
+export function isEmptyValue(value: unknown): boolean {
+  return value == null || value === '';
+}
+
+/** Issue #2 allow-empty — empty fields flagged for review. An empty field
+ * carries no quality signal (the backend zeroes its confidence), so it is
+ * judged by this rule alone, never by a confidence threshold. */
+export function emptyViolatingFields(input: {
+  data?: Record<string, unknown> | null;
+  allowEmpty?: string[];
+}): string[] {
+  if (input.data == null) return [];
+  const allow = new Set(input.allowEmpty ?? []);
+  return Object.entries(input.data)
+    .filter(([field, value]) => isEmptyValue(value) && !allow.has(field))
+    .map(([field]) => field);
+}
+
 /** Fields under their own minimum confidence, with the threshold each was
- * judged against — drives the needs-review warning list. */
+ * judged against — drives the needs-review warning list. When `data` is
+ * available, empty fields are excluded: they are judged by the allow-empty
+ * rule instead, so a zeroed confidence never masquerades as a quality miss. */
 export function belowThresholdFields(input: {
   confidence: Record<string, number>;
   thresholds?: ReviewThresholds;
+  data?: Record<string, unknown> | null;
 }): Array<{ field: string; threshold: number }> {
   return Object.entries(input.confidence)
-    .filter(([field, value]) => value < fieldThreshold(field, input.thresholds))
+    .filter(([field, value]) => {
+      if (input.data != null && isEmptyValue(input.data[field])) return false;
+      return value < fieldThreshold(field, input.thresholds);
+    })
     .map(([field]) => ({ field, threshold: fieldThreshold(field, input.thresholds) }));
 }
 
-/** §8.4 + issue #2 — Need Review = aggregate below LOW, or any single field
- * below its configured minimum confidence (default LOW). */
+/** §8.4 + issue #2 — Need Review = aggregate below LOW, any single field
+ * below its configured minimum confidence (default LOW), or any field that
+ * came back empty while its schema does not allow it. */
 export function needsReview(input: {
   avgConfidence: number;
   confidence: Record<string, number>;
   thresholds?: ReviewThresholds;
+  data?: Record<string, unknown> | null;
+  allowEmpty?: string[];
 }): boolean {
   if (input.avgConfidence < CONFIDENCE_LOW) return true;
+  if (emptyViolatingFields(input).length > 0) return true;
   return belowThresholdFields(input).length > 0;
 }
 

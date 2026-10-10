@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyFieldEdit, buildReviewThresholds } from './review';
+import { applyFieldEdit, buildAllowEmptyFields, buildReviewThresholds } from './review';
 import type { ExtractionResult, SchemaField } from '@/types/extraction';
 
 function makeResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult {
@@ -16,6 +16,14 @@ function makeResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult
     ...overrides,
   };
 }
+
+const field = (overrides: Partial<SchemaField>): SchemaField => ({
+  displayName: 'x',
+  fieldName: null,
+  type: 'string',
+  description: '',
+  ...overrides,
+});
 
 describe('applyFieldEdit (review flow keeps the original value)', () => {
   it('snapshots the pre-edit value into originalData on the first edit', () => {
@@ -71,14 +79,6 @@ describe('applyFieldEdit (review flow keeps the original value)', () => {
 });
 
 describe('buildReviewThresholds (issue #2 submit-time snapshot)', () => {
-  const field = (overrides: Partial<SchemaField>): SchemaField => ({
-    displayName: 'x',
-    fieldName: null,
-    type: 'string',
-    description: '',
-    ...overrides,
-  });
-
   it('maps fields with a known fieldName and an explicit threshold', () => {
     const thresholds = buildReviewThresholds([
       field({ fieldName: 'vendor', displayName: 'Vendor', minConfidence: 0.9 }),
@@ -121,5 +121,47 @@ describe('buildReviewThresholds (issue #2 submit-time snapshot)', () => {
     );
 
     expect(thresholds).toEqual({ total: 0.8 });
+  });
+});
+
+describe('buildAllowEmptyFields (issue #2 allow-empty snapshot)', () => {
+  it('snapshots only the fields explicitly marked allow-empty', () => {
+    expect(
+      buildAllowEmptyFields([
+        field({ fieldName: 'notes', displayName: 'Notes', allowEmpty: true }),
+        field({ fieldName: 'vendor', displayName: 'Vendor' }),
+      ]),
+    ).toEqual(['notes']);
+  });
+
+  it('returns an empty list when nothing is marked (default: not allowed)', () => {
+    expect(buildAllowEmptyFields([field({ fieldName: 'vendor', allowEmpty: false })])).toEqual([]);
+  });
+
+  it('re-keys allowed fields through the resolved schema (display_name match)', () => {
+    expect(
+      buildAllowEmptyFields(
+        [
+          field({ fieldName: 'vendor', displayName: 'Vendor', allowEmpty: true }),
+          field({ fieldName: null, displayName: 'Remarks', allowEmpty: true }),
+        ],
+        {
+          vendor: { display_name: 'Vendor' },
+          remark_1: { display_name: 'Remarks' },
+        },
+      ),
+    ).toEqual(['vendor', 'remark_1']);
+  });
+
+  it('prefers the explicit field_name match over a display-name match', () => {
+    expect(
+      buildAllowEmptyFields(
+        [
+          field({ fieldName: 'total', displayName: 'Amount', allowEmpty: true }),
+          field({ fieldName: null, displayName: 'Grand Total', allowEmpty: true }),
+        ],
+        { total: { display_name: 'Grand Total' } },
+      ),
+    ).toEqual(['total']);
   });
 });
