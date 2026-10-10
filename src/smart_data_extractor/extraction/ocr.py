@@ -11,6 +11,7 @@ Per-page failures are tolerated: a page whose OCR run raises is skipped
 document.
 """
 
+import base64
 import logging
 from typing import Any
 
@@ -103,8 +104,14 @@ async def _ocr_images(
     media_type: str,
     model: Any,
     model_ref: str | None,
+    include_images: bool = False,
 ) -> dict:
-    """OCR a list of images (one per "page") into the shared result dict."""
+    """OCR a list of images (one per "page") into the shared result dict.
+
+    include_images (issue #4, D-027): also return each page's PNG bytes
+    base64-encoded, aligned with `pages` — the review pane previews PDF
+    pages as images so locate boxes can be overlaid on them.
+    """
     agent = build_ocr_agent(model=model)
 
     # Per-image OCR text aligned to the original order; None marks a failure.
@@ -132,6 +139,9 @@ async def _ocr_images(
         "text": "\n\n".join(t for t in pages if t is not None),
         "pages": pages,
         "pages_failed": pages_failed,
+        "pages_images": (
+            [base64.b64encode(img).decode("ascii") for img in images] if include_images else None
+        ),
         "tokens_used": {"input": input_tokens, "output": output_tokens},
         "cost_usd": cost_usd,
     }
@@ -156,13 +166,19 @@ async def parse_pdf(
 
     Returns a dict with:
         text: concatenated text of successfully OCR'd pages, joined by "\\n\\n".
+        pages_images: per-page rendered PNGs (base64) for the review-pane
+            preview (issue #4, D-027); aligned with `pages`.
         pages_failed: 0-based indices of pages whose OCR run raised.
         tokens_used: {"input": int, "output": int}, summed over successful pages.
         cost_usd: total USD cost, summed over successful pages.
     """
     model, model_ref = _resolve_model(model, model_ref)
     return await _ocr_images(
-        pdf_to_images(pdf_bytes), media_type="image/png", model=model, model_ref=model_ref
+        pdf_to_images(pdf_bytes),
+        media_type="image/png",
+        model=model,
+        model_ref=model_ref,
+        include_images=True,
     )
 
 

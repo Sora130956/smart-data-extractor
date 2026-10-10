@@ -9,7 +9,7 @@ import hmac
 from functools import lru_cache
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 
 from smart_data_extractor.api.quota import DailyQuota
 from smart_data_extractor.api.schemas import (
@@ -17,6 +17,7 @@ from smart_data_extractor.api.schemas import (
     BatchExtractResponse,
     ExtractRequest,
     ExtractResponse,
+    LocateFieldsResponse,
     ParsePdfResponse,
     PresetListItem,
     PresetSchemaResponse,
@@ -29,10 +30,12 @@ from smart_data_extractor.extraction import (
     batch_extract,
     extract_data,
     infer_schema,
+    locate_fields,
     parse_image,
     parse_pdf,
     resolve_schema,
 )
+from smart_data_extractor.extraction.locate import MAX_VALUES
 from smart_data_extractor.presets import get_preset_fields, list_presets
 
 router = APIRouter()
@@ -71,6 +74,11 @@ def get_parse_pdf_fn() -> Callable[..., Any]:
 def get_parse_image_fn() -> Callable[..., Any]:
     """DI seam: the image OCR parsing function (production default)."""
     return parse_image
+
+
+def get_locate_fields_fn() -> Callable[..., Any]:
+    """DI seam: the value-grounding function (production default)."""
+    return locate_fields
 
 
 @lru_cache
@@ -266,6 +274,42 @@ async def parse_image_route(
     image_bytes = await file.read()
     try:
         result = await fn(image_bytes, media_type=media_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "cost_cny": _to_cny(result["cost_usd"])}
+
+
+@router.post(
+    "/locate_fields",
+    response_model=LocateFieldsResponse,
+    dependencies=[Depends(enforce_daily_quota)],
+)
+async def locate_fields_route(
+    file: UploadFile,
+    values: list[str] = Form(...),
+    fn: Callable[..., Any] = Depends(get_locate_fields_fn),
+) -> dict:
+    """Issue #4 (D-027): ground already-extracted field values in the
+    original file so the review pane can overlay highlight boxes on the
+    image preview. Images are located in place; PDFs are scanned page by
+    page (boxes carry their page index)."""
+    media_type = (file.content_type or "").lower()
+    if media_type not in SUPPORTED_IMAGE_MEDIA_TYPES and media_type != "application/pdf":
+        raise HTTPException(
+            status_code=422,
+            detail="File must be an image (png, jpg, jpeg, bmp) or a PDF",
+        )
+    cleaned = [v.strip() for v in values if v and v.strip()]
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="At least one non-empty value is required")
+    if len(cleaned) > MAX_VALUES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"At most {MAX_VALUES} values can be located per request",
+        )
+    file_bytes = await file.read()
+    try:
+        result = await fn(file_bytes, media_type, cleaned)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}

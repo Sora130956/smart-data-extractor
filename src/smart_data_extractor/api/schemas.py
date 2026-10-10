@@ -157,6 +157,32 @@ class ParsePdfResponse(BaseModel):
     """Per-page OCR text aligned to the original page order; None marks a failed page."""
     pages: list[str | None]
     pages_failed: list[int]
+    # Issue #4 (D-027): per-page rendered PNGs (base64), aligned with `pages`
+    # — the review pane previews PDF pages as images so locate boxes can be
+    # overlaid (an iframe embed cannot host overlays). None/absent when the
+    # parser does not produce page images (e.g. /parse_image: the frontend
+    # already holds the original image bytes).
+    pages_images: list[str] | None = None
+    tokens_used: TokensUsed
+    cost_usd: float
+    cost_cny: float
+
+
+class LocateBox(BaseModel):
+    """One grounded value: its bounding box [x1, y1, x2, y2] normalized to
+    0-100 (percentages of the image), plus the 0-based page it was found on
+    (None for single-image sources)."""
+
+    page: int | None = None
+    box: list[float] = Field(min_length=4, max_length=4)
+
+
+class LocateFieldsResponse(BaseModel):
+    """Order-aligned with the request's `values`: a box per value, None when
+    the value could not be located."""
+
+    boxes: list[LocateBox | None]
+    pages_scanned: int
     tokens_used: TokensUsed
     cost_usd: float
     cost_cny: float
