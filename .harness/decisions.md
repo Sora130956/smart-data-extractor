@@ -543,3 +543,51 @@
   - 默认判定收紧：未配置字段的复核门槛 0.70→0.85，旧批次重提取后复核数会变多（预期效果）；Modal 警告里未配置字段的阈值显示从 (0.70) 变 (0.85)
   - 均值判定不变（<0.70），与图例第三行一致；字段级阈值判定与均值判定从此是两条线（字段线默认 0.85、聚合线 0.70），各司其职
   - 验证：TDD 先红（3 文件 12 失败）后绿（66 passed，含 `DEFAULT_MIN_CONFIDENCE === CONFIDENCE_HIGH` 固化断言与 0.84 边界用例）；全量 vitest 235 passed（21 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
+
+## D-025：三态复核状态 + 已复核筛选菜单（GitHub Issue #3）
+
+- **日期**：2026-10-10
+- **状态**：已接受
+- **来源**：GitHub Issue #3「增加已复核菜单」——需复核项目的每个问题字段（每个字段都需高于用户配置的最低置信度）全部人工复核后，该项目进入「已复核」菜单。上一会话已写好核心 helper 与接线，但会话中断**未提交未记录**，本会话收尾（补测试、修 counts 类型错误、拆分独立提交 70515c2 + 2352148）
+- **背景**：
+  - Issue #2 交付后复核是二态：项目一旦触发复核就永远留在「需复核」里，无法区分"还没看"和"看过确认无误"
+  - 用户截图反馈：筛选栏需要第四个「已复核」菜单
+  - 上一会话遗留缺口：`ResultsHeader.test.tsx` 两处 counts 缺 `reviewed` 字段（tsc 红）、App 层零集成测试、Modal 警告条仍用旧 `needsReview` 布尔判定（已复核项目的弹窗仍喊"需复核"，且 i18n 已备好 `allReviewed`/`needsReviewAvgWarning` 两键无人消费）
+- **决策**：
+  1. **三态而非二态**：`review.ts` 新增 `ReviewState = 'none' | 'pending' | 'reviewed'`，`reviewState(result, source)` 为单一真源——none=健康成功（高置信度桶）、pending=需复核且问题字段未全部确认（failed 恒 pending）、reviewed=问题字段全部人工确认。判定顺序即语义：failed 先判保出不进 none；仅均值触发（<0.70）时 flagged 为空，**永不能迁移到 reviewed**（没有可复核的对象）
+  2. **问题字段定义**：`problemFields(result, source)` = belowThreshold（各字段低于其配置阈值）∪ empty（不允许为空的空值字段）——空值字段只在 empty 出现（归零的 0.0 不是质量信号）
+  3. **UI**：`ResultFilter` 加 `'reviewed'`，ResultsHeader 第四 chip「已复核」（success tone 绿色），App counts/visibleSources 全走 reviewState（none→high、reviewed→reviewed、pending→review）
+  4. **Modal 警告条迁移**（commit 2352148）：state==='reviewed' 显示 `allReviewed` 成功条（✅ border-success），替代已复核项目的残留警告；state==='pending' 且 flagged 为空时用 `needsReviewAvgWarning`（"整体平均置信度低于 0.70"）归因，消灭"0 个字段低于其最低置信度（）"的空转文案
+- **理由**：
+  - 三态助手收敛四处消费（筛选计数/筛选谓词/Modal 警告条/reviewedFields 徽章语义），任何一处单独实现都会漂移
+  - 仅均值触发不能进 reviewed 是有意语义：没有字段可点"确认"，只能调低触发条件（改阈值重提取）——文案归因（avg warning）把这个边界讲清楚
+- **影响**：
+  - 既有测试两处适配：F8 弹窗断言 `getByText('Reviewed')` 收窄到 dialog 内（chip 与徽章同名文本）；ResultsHeader counts 对象补 `reviewed` 字段
+  - 突变自证：reviewState 返回值改 'pending' → 4 测试红（3 单测 + 1 App 集成）再还原
+  - 验证：拆分提交快照树全量 250 passed（21 files）+ tsc 0 错误；迁移后全量 271 passed（22 files）+ tsc 0 错误 + build 成功
+  - 提交策略：#3 拆两个 commit（核心菜单 70515c2 / Modal 警告条迁移 2352148），中间隔着 #4 的 8568342（Modal 文件与 #4 改动同文件无法拆分，警告条迁移排在其后）
+
+## D-026：复核侧栏原文件对照 + 文本级高亮（GitHub Issue #4）
+
+- **日期**：2026-10-10
+- **状态**：已接受（用户在 V1/V2/V3 三档方案中拍板 **V1 前端侧栏+文本高亮**）
+- **来源**：GitHub Issue #4「低置信度字段复核体验优化」——诉求 1：原文件直接放卡片右边展示对照（不开新链接）；诉求 2：用不同颜色的高亮框直接框出需复核数据的位置
+- **背景**：
+  - 提取链路 PDF/图片 → PyMuPDF 渲染 → GLM-4V OCR（`output_type=str`）→ 纯文本，**全程无任何坐标/位置信息**——"彩色框框出位置"只能做文本级；图片/PDF 用 blob URL 内嵌预览兜底
+  - V2（后端返回坐标）需 GLM-4V 换 output_type 或加二次 bbox 模型，跨后端大改；V3（PDF.js 渲染叠加）工程量最大。V1 纯前端即满足两个诉求的主体
+- **决策**：
+  1. **弹窗双栏**：dialog 加宽 `max-w-[1080px]`，左栏字段表/统计/raw JSON（`overflow-y-auto`），右侧 `<aside>` 挂 `SourcePreviewPane`（400px，`hidden lg:block` 窄屏隐藏）；头部「打开原文件」链接移入面板头
+  2. **面板双 tab**：`file`（image→`<img>` / 其他→`<iframe>` 内嵌 blob URL）/ `text`（按高亮区间切段渲染 `<mark data-field>`）；上传默认 file 视图，纯文本默认 text 视图，双无显示空态 `preview.noSource`
+  3. **归一化文本匹配** `utils/textHighlight.ts`：大小写折叠 + 空白 run 压缩为单空格 + **对称丢逗号**（复核最关键的金额恰是千分位 `1,234.50` vs LLM 返回 `1234.5`），per-char `starts/ends` 回映射**原文**区间；`findFieldRange` 跳过 null/布尔/数组/对象与归一化后 <2 字符的 needle，取首现；`findFieldRanges` 按 data 序放置、与已放置区间重叠则丢弃（防高亮堆叠）
+  4. **高亮四态色**：active（定位中）`bg-warning/45 + animate-pulse` / reviewed `bg-success/25` / 需复核 `bg-warning/25 + ring-warning/70` / 默认通过 `bg-brand/15`——与警告条/徽章共用 token 语义
+  5. **点击定位**：字段行 🔍 按钮（aria-label `locateField`）→ `setFocus({field, nonce})`，**nonce 机制**让重复点击同字段可重触发；面板切 text tab + `scrollIntoView({block:'center'})` + 闪烁 1.8s
+  6. **数据链路**：`ExtractionSource.sourceText` 提交时全文快照（区别于 60 字 `meta`，OCR/粘贴/txt 全有）；`StagedText.fileType` → `useBatchExtract.fileTypes` → adapters 第 9 参映射 `source.type`；**historyStore 持久化剥离 `sourceFileUrl`**（session-scoped blob 刷新即死，留着只会渲染破图），`sourceText` 让恢复的历史批次仍有文本高亮
+- **理由**：
+  - 无坐标管线下的最小可信定位：文本高亮 + 内嵌原文件并排，已覆盖"对照 + 框出位置"两个诉求；后端坐标方案成本高且 GLM bbox 输出不稳定
+  - 剥离 blob URL 是正确性修复而非妥协：死链接比无链接更糟；全文快照成本低（随批次走，localStorage 上限 20 条可控）
+- **影响**：
+  - i18n 新增 `locateField` / `preview.{file,text,noSource}`（+ 随本 issue 落地的 `needsReviewAvgWarning`/`allReviewed` 两键由 D-025 迁移消费）
+  - `PasteTextInput.onAdd` 签名加第 4 参 `fileType`（4 处既有测试断言补参）
+  - App F7 用例改写：断言 sourceText 持久化 + blob URL 被剥离（原断言"blob 存活"作废——旧行为本就是 bug）
+  - 突变自证：findFieldRange 回映射改 `nStart` → 千分位用例红（回映射存在的意义正是归一化偏移）再还原
+  - 验证：TDD 先红后绿（textHighlight 10 用例 + review pane 7 用例 + adapters 2 用例）；全量 vitest 271 passed（22 files）+ tsc 0 错误 + build 成功（exceljs chunk >500kB 提示为既有）
