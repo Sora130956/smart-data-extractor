@@ -149,6 +149,7 @@
   - F9.1（智能推断设为默认且排第一）：uiStore 初始 `preset: SMART_PRESET_ID`（原 'invoice'），ConfigBar 选项顺序改为 智能推断 → 预设（带前缀）→ 自定义模板；测试相应加 beforeEach/renderApp 显式选 invoice 保持既有用例语义，ConfigBar 新增首用例断言默认值 smart 且为第一项。验证：vitest 175 passed（19 files）+ tsc 0 错误 + build 成功
 - [x] B-quota（2026-10-09，D-019，demo 阶段配额护栏 + 流量可见性）：`api/quota.py`（`DailyQuota`：单 IP 50/天 + 全站 1000/天双层内存计数，UTC 翻转清零，XFF 首段取 IP）挂到 5 个计费端点（`enforce_daily_quota` 依赖）+ `/batch_extract` 按 `len(texts)` 扣；429 返回结构化 `{code, message, reset_at}`，前端 `client.ts` 解析 `ApiError.code` + `utils/errors.ts` 映射 i18n（提取 banner 与 PDF/图片解析错误两处双语友好提示）；新增 `GET /stats?token=`（未配 `ADMIN_STATS_TOKEN` 时 404 隐藏）。**DEMO-STAGE 专用：宣发前必须替换为按用户配额**（quota.py docstring 与 commit message 均已标注）。验证：后端 226 passed / 2 skipped（新增 14 测试，突变自证通过）；前端 184 passed（串行全量，并发满载下 excelExport 偶发超时与本次无关）+ tsc 0 错误
 - [x] Issue-1（2026-10-10，D-020，复核字段保留原始提取值）：GitHub Issue #1——复核覆盖 `data[fieldKey]` 后原始值无处可寻，导出无法对比 LLM 答案与人工修正。修复：`ExtractionResult.originalData?`（仅首次编辑快照，re-edit 保留首快照）+ 共享纯函数 `utils/review.ts#applyFieldEdit`（App 屏上/modal 与 historyStore 持久化镜像两处复用，快照语义一致）；JSON 导出零改动自动携带；Excel results sheet 对任意行复核过的字段插「{字段}（原始）/(Original)」伴随列（i18n `excel.originalColumn`，仅该行已复核才填值，无复核保持原布局）；详情弹窗已复核字段显示「原始值 X / Original value X」（`resultDetail.originalValue`）。UI 打磨（用户反馈）：字段名列 140px 内 `self-center text-center` 居中，值区改 `flex-wrap items-baseline` 让当前值与原始值同行 baseline 排列（放不下自动换行），消除行高参差。纯前端改动，后端无涉。TDD 先红（5 失败）后绿：新增 `review.test.ts` 6 用例 + historyStore/excelExport/Modal/App 扩展；前端 197 passed（21 files，串行）+ tsc 0 错误 + build 成功（exceljs chunk 不变）；突变自证（快照改写 newValue → 7 测试红再还原）；浏览器端到端实测（发票预设 → 编辑供应商 → 弹窗「Acme Corporation Ltd / 原始值 Acme Corp / 已复核」、localStorage 与导出 JSON 均含 originalData、导出 Excel 无报错）
+- [x] Issue-2（2026-10-10，D-021，字段级最低置信度阈值触发复核）：GitHub Issue #2——每字段可配置最低置信度，任一字段低于其阈值触发人工复核（用户拍板：配置入口随字段编辑）。实现：`SchemaField.minConfidence?`（前端专属不发给后端，SchemaEditor 新增「最低置信度」number 列，空→null、clamp [0,1]，随 savedSchemas/presetOverrides 持久化）→ 提交时 `buildReviewThresholds` 快照到 `ExtractionSource.reviewThresholds`（D-016 惯例，后续 schema 编辑不重判旧批次；custom 路径经 resolve 回显 re-key、field_name 优先 display_name）→ 判定收敛 `confidence.ts`（`fieldThreshold` 字段级→0.70 回退、`needsReview`/`belowThresholdFields` 接受 `thresholds`）→ App 筛选计数与 ResultDetailModal 警告条全走 source 快照，警告文案列出各字段及其阈值（`Invoice Number (0.99)`）。纯前端改动。TDD 分层先红后绿：confidence +3 / review +4 / SchemaEditor +4 / adapters +3 / ResultDetailModal +1；全量 vitest 215 passed（21 files）+ tsc 0 错误 + build 成功；突变自证（回退改 0.9 → 3 红再还原）
 
 ## 可视化约定（docs/view/）
 
@@ -240,3 +241,8 @@
 - 决策：`DailyQuota` 内存双层计数挂全部计费端点（batch 按条数扣），429 结构化载荷 + 前端双语友好提示；`GET /stats?token=`（`ADMIN_STATS_TOKEN` 未配则 404 隐藏）提供当日用量/独立 IP/按端点计数。**demo 阶段专用，正式宣发前替换为按用户配额/持久化限流**（代码注释与 commit 均已标注）
 - 理由：无用户体系下 IP 是唯一无摩擦标识但可伪造，全站总额才是预算兜底；SQLite 持久化在 Render 免费层（部署即清盘）无收益；umami/GA 留作宣发后升级项
 - 详见 `.harness/decisions.md`（验证：后端 226 passed / 2 skipped 含突变自证；前端 184 passed + tsc 0 错误）
+
+### D-021: 字段级最低置信度阈值（minConfidence 随字段编辑 + 提交时快照）
+- 决策：阈值挂 `SchemaField.minConfidence`（SchemaEditor 列内编辑，随模板/预设覆盖持久化）；提交时 `buildReviewThresholds` 快照到 `ExtractionSource.reviewThresholds`（D-016 惯例）；`fieldThreshold` 字段级→0.70 回退，`needsReview` 任一字段低于其阈值即触发；筛选计数与详情警告全走 source 快照并列出各字段阈值
+- 理由：字段间重要度差异（发票号 0.99 vs 备注 0.5）无法用全局一刀切表达；快照避免改阈值追溯翻动已复核批次；纯前端改动后端无涉
+- 详见 `.harness/decisions.md`（验证：全量 215 passed + tsc 0 错误 + build 成功；突变自证 3 红再还原）

@@ -449,3 +449,26 @@
   - 旧 localStorage 数据（无 originalData）兼容：无快照则弹窗不显示原始值行、Excel 该行原始列为空，行为退化合理
   - `applyFieldEdit` 沿用既有"作用于 source 下全部 results"的行为（与修复前一致，多结果来源属边缘场景，不在本 issue 范围）
   - 验证：TDD 先红（5 失败）后绿；前端 197 passed（21 files，串行）+ tsc 0 错误 + build 成功（exceljs 懒加载 chunk 不变）；突变自证（快照值改成 newValue 后 7 测试变红再还原）；浏览器端到端实测（发票预设提取 → 编辑供应商 → 弹窗显示「Acme Corporation Ltd / 原始值 Acme Corp / 已复核」、localStorage 与导出 JSON 均含 originalData、导出 Excel 无报错）
+
+## D-021：字段级最低置信度阈值（SchemaField.minConfidence + 提交时快照 reviewThresholds）
+
+- **日期**：2026-10-10
+- **状态**：已接受
+- **来源**：GitHub Issue #2（Sora130956/smart-data-extractor）——"每个字段需要支持用户自己配置最低置信度。任一字段低于配置的最低置信度，则触发需要人工复核"（用户拍板：配置入口随字段编辑，放 SchemaEditor）
+- **背景**：
+  - `needsReview` 原逻辑只有两条：均值 < 0.70 或任一字段 < 0.70（全局一刀切），无法表达"发票号必须 0.99、备注 0.5 就够"的字段间差异
+  - 阈值属 schema 配置（随模板保存/预设覆盖持久化），但复核判定属结果消费端（筛选计数、详情警告），二者生命周期不同
+- **决策**：
+  1. 阈值挂 `SchemaField.minConfidence?: number | null`（纯前端字段，不发给后端）：SchemaEditor 类型/名称/描述之间新增「最低置信度」number 列（`parseMinConfidence`：空→null、clamp [0,1]、垃圾→null，placeholder 显示默认 0.70）；随 savedSchemas/presetOverrides 持久化，无需 uiStore 改动
+  2. **提交时快照**（沿用 D-016 presetLabel / fieldLabels 惯例）：`utils/review.ts#buildReviewThresholds(fields, resolved?)` 把编辑器字段映射为按真实字段名 keyed 的 `Record<string, number>`（field_name 优先，缺省回退 display_name 匹配 resolve 回显的 `display_name`），经 `useBatchExtract` → `adaptBatchExtractResponse` 第 7 参挂到 `ExtractionSource.reviewThresholds`——后续 schema 编辑不重判旧批次
+  3. 判定收敛 `utils/confidence.ts`：`fieldThreshold(field, thresholds)` 三级回退（字段级 → `CONFIDENCE_LOW`=0.70）；`needsReview` 增加可选 `thresholds` 参数，均值判定不变 + 任一字段低于**其自身**阈值即触发；`belowThresholdFields` 返回 `{field, threshold}` 驱动警告列表
+  4. 消费端全走 source 快照：App 筛选计数（high=成功且无需复核）与 ResultDetailModal 警告条均传 `source.reviewThresholds`；警告文案列出各字段及其阈值（i18n `resultDetail.needsReviewWarning`：「需人工复核 — N 个字段低于其最低置信度（Invoice Number (0.99)）」）
+- **理由（为什么不选备选方案）**：
+  - 备选 A：阈值存 ExtractionSource 级别的全局 map → 配置入口与字段行脱节，用户得在第二处找配置；随字段编辑（用户拍板）所见即所得
+  - 备选 B：实时读当前 schema 阈值判旧结果 → 违反 D-016 确立的快照原则，改阈值会追溯翻动已复核批次
+  - 备选 C：后端加阈值列 → 判定完全在前端消费端（筛选/警告），后端不发复核指令，纯前端改动最小
+- **影响**：
+  - 阈值编辑触发 `isSchemaModified` → 走 custom schema 提交路径（多一次 `/schema/resolve`，约 $0.0001/次，v1 接受）
+  - smart 智能推断路径首轮字段刚生成、无阈值（回退 0.70），保存模板后第二轮编辑才可配置——已知边界
+  - 纯前端改动，后端无涉；旧 localStorage 批次无 `reviewThresholds` → 全部字段回退 0.70，行为与升级前一致
+  - 验证：TDD 分层先红后绿（confidence 3 新用例 + review 4 + SchemaEditor 4 + adapters 3 + ResultDetailModal 1）；全量 vitest 215 passed（21 files，并发全量无 flake）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功；突变自证（`fieldThreshold` 回退改 0.9 → 3 测试变红再还原）
