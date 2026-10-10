@@ -241,7 +241,9 @@ describe('buildExportModel with reviewed fields (issue #1)', () => {
 });
 
 describe('buildWorkbook', () => {
-  it('builds the two sheets with a bold frozen header row, and writes a valid buffer', async () => {
+  // exceljs buffer writes occasionally exceed the 5s default when the whole
+  // suite runs in parallel (known flake, D-019) — give it headroom.
+  it('builds the two sheets with a bold frozen header row, and writes a valid buffer', { timeout: 20000 }, async () => {
     const model = buildExportModel([labeledSource, bareSource], t);
     const workbook = await buildWorkbook(model);
 
