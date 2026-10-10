@@ -473,3 +473,27 @@
   - 纯前端改动，后端无涉；旧 localStorage 批次无 `reviewThresholds` → 全部字段回退 0.70，行为与升级前一致
   - 验证：TDD 分层先红后绿（confidence 3 新用例 + review 4 + SchemaEditor 4 + adapters 3 + ResultDetailModal 1）；全量 vitest 215 passed（21 files，并发全量无 flake）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功；突变自证（`fieldThreshold` 回退改 0.9 → 3 测试变红再还原）
 - **补记（同日 UI 调整：自由数值输入改预设档位 select）**：用户反馈——「最低置信度」让客户直接填数值门槛过高，改四个预设档位的下拉（用户拍板：严格 0.9 / 较严 0.8 / 默认 0.70 / 宽松 0.5，`<select>` 形式）。实现：`MIN_CONFIDENCE_TIERS`（0.9/0.8/null/0.5，「默认」档存 null 回退 CONFIDENCE_LOW，标签插值 `formatConfidence(CONFIDENCE_LOW)` 与全局默认联动）+ `tierSelectValue`（null 或旧版显式 0.7 → ''）+ `isLegacyConfidence`（旧自由输入遗留的非档位值如 0.85 渲染为独立 option，重选后归位档位）；`parseMinConfidence` clamp 逻辑删除——档位值天然在合法域内；列宽 92px→108px；i18n 删 `minConfidencePlaceholder`、增 `minConfidenceStrict/Moderate/Default/Lenient` 四词条（EN/zh）。数据模型与下游（buildReviewThresholds/fieldThreshold/needsReview）零改动。验证：TDD 先红（5 失败）后绿，SchemaEditor 14 passed；全量 vitest 216 passed（21 files）+ tsc 0 错误 + `vite build` 成功
+
+## D-022：字段级「允许为空」配置（SchemaField.allowEmpty + 提交时快照 allowEmptyFields）
+
+- **日期**：2026-10-10
+- **状态**：已接受
+- **来源**：GitHub Issue #2 后续（用户拍板："需要再加上：是否允许为空"，commit 引用同一 issue）
+- **背景**：
+  - 后端 `ConfidenceBase._zero_confidence_for_nulled_fields`（AC-3）把 null 字段的配对 confidence 归零 0.0，因此**现状下任何空值字段都会经阈值判定触发复核**（0.0 < 0.70），可选字段（如备注）缺省时会产生大量无意义复核
+  - 用户需要按字段表达"这个字段允许为空"：空值不应触发复核
+- **决策**：
+  1. **默认「不允许为空」＝保持现状**：`SchemaField.allowEmpty?: boolean`（undefined/false = 不允许；纯前端，不发给后端），不标记任何字段时复核行为与升级前完全一致——零回归
+  2. 语义拆分：**空值字段不再参与置信度阈值判定**（归零的 0.0 不是质量信号），改由「允许为空」规则单独判定——`confidence.ts` 新增 `isEmptyValue`（null/undefined/'' 为空，0/false 不是）与 `emptyViolatingFields({data, allowEmpty})`；`belowThresholdFields` 传入 `data` 时排除空值字段；`needsReview` 增加可选 `data`/`allowEmpty` 参数（均值低 / 空值违规 / 阈值违规三条判定）
+  3. 豁免仅覆盖空值：标记允许为空的字段**有值时**仍按阈值正常判定（豁免不是免检金牌）
+  4. 提交时快照（沿用 D-016/D-021 惯例）：`review.ts` 抽公共 `keyedFields(fields, keep, resolved?)`（field_name 优先、display_name 回退 re-key），`buildReviewThresholds` 重构为其上薄封装（既有 4 用例保护），新增 `buildAllowEmptyFields` → `ExtractionSource.allowEmptyFields?: string[]`（例外清单：仅存显式标记的字段，通常为空数组则省略）；adapters 第 8 参、useBatchExtract/App 透传
+  5. UI：SchemaEditor「最低置信度」列后新增「允许为空」两档 select（`不允许`(默认)/`允许`，宽 92px）；ResultDetailModal 警告条拆两段——阈值段（`needsReviewWarning`，既有）+ 空值段（`needsReviewEmptyWarning` 新增：「需人工复核 — N 个字段不允许为空（…）」），归因比旧版把空值字段列成"低于置信度 (0.70)"更准确
+- **理由（为什么不选备选方案）**：
+  - 备选 A：默认「允许为空」→ 翻转现状，发票号等关键字段 null 将静默通过不触发复核，危险默认
+  - 备选 B：把 allowEmpty 发给后端让 LLM 知道字段必填 → 跨 DB/后端改动，且复核判定全在前端消费端（同 D-021 备选 C 的结论），v1 纯前端最小
+  - 备选 C：空值字段继续留在 belowThresholdFields 里再在展示层过滤 → 判定与展示耦合两处，不如在单一判定源（confidence.ts）一次分流
+- **影响**：
+  - 警告文案归因变化（既有行为唯一可见变化）：空值字段从「低于其最低置信度 (0.70)」段落移入「不允许为空」段落，复核触发本身不变
+  - 均值判定不豁免：标记允许为空的字段的 0.0 仍计入 avgConfidence，极端配比下仍可能仅因均值触发复核——已知边界，v1 接受（重算均值会让豁免语义雪上加霜）
+  - smart 首轮与 D-021 同边界：字段刚生成无用户配置 → 全部不允许为空（= 现状）
+  - 验证：TDD 分层先红（5 文件 15 失败）后绿（92 passed）；全量 vitest 235 passed（21 files；excelExport 首轮并发负载超时为既有抖动，重跑/单跑均通过）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
