@@ -230,7 +230,7 @@ describe('SchemaEditor', () => {
       }
     });
 
-    it('offers the four preset tiers in the user-stated order', async () => {
+    it('offers the five preset tiers in the user-stated order', async () => {
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
@@ -238,7 +238,13 @@ describe('SchemaEditor', () => {
       const select = screen.getAllByLabelText('Min Confidence')[0];
       expect(
         Array.from(select.querySelectorAll('option')).map((o) => o.textContent),
-      ).toEqual(['Strict (0.9)', 'Moderate (0.8)', 'Default (0.70)', 'Lenient (0.5)']);
+      ).toEqual([
+        'Strict (0.9)',
+        'Moderate (0.8)',
+        'Default (0.70)',
+        'Lenient (0.5)',
+        'Allow empty (0.0)',
+      ]);
     });
 
     it('stores the picked tier on that field and marks the schema modified', async () => {
@@ -288,46 +294,21 @@ describe('SchemaEditor', () => {
       await user.selectOptions(select, '0.9');
       expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
     });
-  });
 
-  describe('allow empty column (issue #2)', () => {
-    it('renders one two-option select per field, defaulting to Not allowed', async () => {
-      stubPresetSchemaFetch();
-      render(<SchemaEditor />, { wrapper });
-
-      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
-      const selects = screen.getAllByLabelText('Allow Empty');
-      expect(selects).toHaveLength(2);
-      for (const select of selects) {
-        expect(select).toHaveValue('');
-        expect(select).toHaveDisplayValue('Not allowed');
-      }
-    });
-
-    it('stores true when Allowed is picked and marks the schema modified', async () => {
+    it('stores 0 when the Allow-empty tier is picked, with no separate column', async () => {
       const user = userEvent.setup();
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
-      await waitFor(() => expect(screen.getAllByLabelText('Allow Empty')).toHaveLength(2));
-      await user.selectOptions(screen.getAllByLabelText('Allow Empty')[0], 'true');
+      await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
+      // Allow-empty lives INSIDE the tier select now — no standalone column.
+      expect(screen.queryByLabelText('Allow Empty')).not.toBeInTheDocument();
 
-      expect(useUiStore.getState().customFields[0].allowEmpty).toBe(true);
-      expect(useUiStore.getState().customFields[1].allowEmpty).toBeUndefined();
+      await user.selectOptions(screen.getAllByLabelText('Min Confidence')[0], '0');
+
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0);
+      expect(useUiStore.getState().customFields[0]).not.toHaveProperty('allowEmpty');
       expect(screen.getByText('Modified')).toBeInTheDocument();
-    });
-
-    it('stores false when switching back to Not allowed', async () => {
-      const user = userEvent.setup();
-      stubPresetSchemaFetch();
-      render(<SchemaEditor />, { wrapper });
-
-      await waitFor(() => expect(screen.getAllByLabelText('Allow Empty')).toHaveLength(2));
-      const select = screen.getAllByLabelText('Allow Empty')[0];
-      await user.selectOptions(select, 'true');
-      await user.selectOptions(select, '');
-
-      expect(useUiStore.getState().customFields[0].allowEmpty).toBe(false);
     });
   });
 });

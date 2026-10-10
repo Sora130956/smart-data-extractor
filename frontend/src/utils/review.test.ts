@@ -124,26 +124,28 @@ describe('buildReviewThresholds (issue #2 submit-time snapshot)', () => {
   });
 });
 
-describe('buildAllowEmptyFields (issue #2 allow-empty snapshot)', () => {
-  it('snapshots only the fields explicitly marked allow-empty', () => {
+describe('buildAllowEmptyFields (issue #2 allow-empty = 0.0 tier)', () => {
+  it('snapshots the fields whose tier is Allow empty (minConfidence 0)', () => {
     expect(
       buildAllowEmptyFields([
-        field({ fieldName: 'notes', displayName: 'Notes', allowEmpty: true }),
-        field({ fieldName: 'vendor', displayName: 'Vendor' }),
+        field({ fieldName: 'notes', displayName: 'Notes', minConfidence: 0 }),
+        field({ fieldName: 'vendor', displayName: 'Vendor', minConfidence: 0.9 }),
+        field({ fieldName: 'total', displayName: 'Total' }),
       ]),
     ).toEqual(['notes']);
   });
 
-  it('returns an empty list when nothing is marked (default: not allowed)', () => {
-    expect(buildAllowEmptyFields([field({ fieldName: 'vendor', allowEmpty: false })])).toEqual([]);
+  it('returns an empty list when no field sits at the 0.0 tier', () => {
+    expect(buildAllowEmptyFields([field({ fieldName: 'vendor', minConfidence: 0.9 })])).toEqual([]);
+    expect(buildAllowEmptyFields([field({ fieldName: 'vendor' })])).toEqual([]);
   });
 
   it('re-keys allowed fields through the resolved schema (display_name match)', () => {
     expect(
       buildAllowEmptyFields(
         [
-          field({ fieldName: 'vendor', displayName: 'Vendor', allowEmpty: true }),
-          field({ fieldName: null, displayName: 'Remarks', allowEmpty: true }),
+          field({ fieldName: 'vendor', displayName: 'Vendor', minConfidence: 0 }),
+          field({ fieldName: null, displayName: 'Remarks', minConfidence: 0 }),
         ],
         {
           vendor: { display_name: 'Vendor' },
@@ -157,8 +159,8 @@ describe('buildAllowEmptyFields (issue #2 allow-empty snapshot)', () => {
     expect(
       buildAllowEmptyFields(
         [
-          field({ fieldName: 'total', displayName: 'Amount', allowEmpty: true }),
-          field({ fieldName: null, displayName: 'Grand Total', allowEmpty: true }),
+          field({ fieldName: 'total', displayName: 'Amount', minConfidence: 0 }),
+          field({ fieldName: null, displayName: 'Grand Total', minConfidence: 0 }),
         ],
         { total: { display_name: 'Grand Total' } },
       ),

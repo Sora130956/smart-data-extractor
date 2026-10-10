@@ -102,6 +102,30 @@ describe('needsReview', () => {
       }),
     ).toBe(true);
   });
+
+  it('treats a 0.0 tier as no bar at all: empty or low non-empty values pass (issue #2)', () => {
+    // Empty value on the 0.0 tier: exempted from the empty rule via the
+    // snapshot, and its zeroed confidence is no quality signal anyway.
+    expect(
+      needsReview({
+        avgConfidence: 0.9,
+        confidence: { notes: 0, total: 0.95 },
+        data: { notes: null, total: 1200 },
+        thresholds: { notes: 0 },
+        allowEmpty: ['notes'],
+      }),
+    ).toBe(false);
+    // Non-empty but weak (0.5 >= 0.0): the 0.0 tier lifts the quality bar
+    // entirely — a fully optional field never flags the batch.
+    expect(
+      needsReview({
+        avgConfidence: 0.9,
+        confidence: { notes: 0.5, total: 0.95 },
+        data: { notes: 'late', total: 1200 },
+        thresholds: { notes: 0 },
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('fieldThreshold', () => {

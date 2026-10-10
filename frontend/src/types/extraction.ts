@@ -77,14 +77,11 @@ export interface SchemaField {
   type: 'string' | 'number' | 'integer' | 'boolean' | 'date';
   description: string;
   /** User-configured minimum confidence for this field (issue #2), in [0, 1].
-   * null/undefined = use the global default (CONFIDENCE_LOW). Frontend-only:
-   * never sent to the backend, it does not change the LLM schema. */
+   * null/undefined = use the global default (CONFIDENCE_LOW); 0 = the
+   * "Allow empty" tier — empty and low-confidence values never flag review.
+   * Frontend-only: never sent to the backend, it does not change the LLM
+   * schema. */
   minConfidence?: number | null;
-  /** Issue #2 allow-empty: true = a null/empty extraction value for this
-   * field does not flag the batch for review. Undefined/false (the default)
-   * keeps flagging it, matching the behaviour before the feature (the
-   * backend zeroes a null field's confidence). Frontend-only. */
-  allowEmpty?: boolean;
   /** Preset fields only: baseline for the needsResolve diff. */
   originalDisplayName?: string;
   originalDescription?: string;

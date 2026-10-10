@@ -21,15 +21,19 @@ const FIELD_TYPES: SchemaField['type'][] = [
 const cellClass =
   'rounded-token border border-border bg-surface px-2 py-1 text-caption text-text';
 
-/** Issue #2 follow-up: the min-confidence column is a preset-tier select
- * (Strict 0.9 / Moderate 0.8 / Default 0.70 / Lenient 0.5) instead of a
- * free numeric input, so non-expert users never have to invent a number.
- * The Default tier stores null and falls back to CONFIDENCE_LOW. */
+/** Issue #2: the min-confidence column is a preset-tier select
+ * (Strict 0.9 / Moderate 0.8 / Default 0.70 / Lenient 0.5 / Allow empty 0.0)
+ * instead of a free numeric input, so non-expert users never have to invent
+ * a number. The Default tier stores null and falls back to CONFIDENCE_LOW.
+ * The Allow-empty tier is a plain 0.0 threshold: the backend zeroes a null
+ * field's confidence, so empty values sail under 0.0 — one mental model, no
+ * separate "allow empty" column to fight with the threshold. */
 const MIN_CONFIDENCE_TIERS: ReadonlyArray<{ value: number | null; labelKey: string }> = [
   { value: 0.9, labelKey: 'schema.minConfidenceStrict' },
   { value: 0.8, labelKey: 'schema.minConfidenceModerate' },
   { value: null, labelKey: 'schema.minConfidenceDefault' },
   { value: 0.5, labelKey: 'schema.minConfidenceLenient' },
+  { value: 0, labelKey: 'schema.minConfidenceEmpty' },
 ];
 
 /** null (or an explicit CONFIDENCE_LOW saved by the old free input) maps to
@@ -157,8 +161,7 @@ export function SchemaEditor() {
         <div className="flex items-center gap-2 text-caption font-semibold text-text-muted">
           <span className="w-[140px] flex-none">{t('schema.fieldName')}</span>
           <span className="w-[110px] flex-none">{t('schema.fieldType')}</span>
-          <span className="w-[108px] flex-none">{t('schema.minConfidence')}</span>
-          <span className="w-[92px] flex-none">{t('schema.allowEmpty')}</span>
+          <span className="w-[120px] flex-none">{t('schema.minConfidence')}</span>
           <span className="flex-1">{t('schema.fieldDescription')}</span>
           <span className="w-[20px] flex-none" />
         </div>
@@ -184,7 +187,7 @@ export function SchemaEditor() {
             </select>
             <select
               aria-label={t('schema.minConfidence')}
-              className={`${cellClass} w-[108px] flex-none`}
+              className={`${cellClass} w-[120px] flex-none`}
               value={tierSelectValue(field.minConfidence)}
               onChange={(e) =>
                 updateField(i, {
@@ -204,19 +207,6 @@ export function SchemaEditor() {
                   {formatConfidence(field.minConfidence)}
                 </option>
               ) : null}
-            </select>
-            {/* Issue #2 allow-empty: a two-option select. "Not allowed" (the
-             * default) keeps flagging empty values for review, exactly as
-             * before the feature; "Allowed" exempts empty values from both
-             * the threshold check and the empty rule. */}
-            <select
-              aria-label={t('schema.allowEmpty')}
-              className={`${cellClass} w-[92px] flex-none`}
-              value={field.allowEmpty === true ? 'true' : ''}
-              onChange={(e) => updateField(i, { allowEmpty: e.target.value === 'true' })}
-            >
-              <option value="">{t('schema.allowEmptyNo')}</option>
-              <option value="true">{t('schema.allowEmptyYes')}</option>
             </select>
             <input
               aria-label={t('schema.fieldDescription')}

@@ -76,12 +76,14 @@ export function buildReviewThresholds(
 }
 
 /** Build the issue #2 allow-empty snapshot for a submission: the keys of the
- * fields the user explicitly marked "may be empty". Unmarked fields default
- * to NOT allowed, which keeps flagging empty values exactly as before the
- * feature existed. */
+ * fields whose tier is "Allow empty" (minConfidence 0). A null field's
+ * confidence is zeroed by the backend, so empty values sail under a 0.0
+ * threshold; the snapshot feeds the empty-value rule on the consumer side.
+ * Fields on any other tier default to NOT allowed, which keeps flagging
+ * empty values exactly as before the feature existed. */
 export function buildAllowEmptyFields(
   fields: SchemaField[],
   resolved?: Record<string, { display_name?: string | null }>,
 ): string[] {
-  return keyedFields(fields, (f) => f.allowEmpty === true, resolved).map(([key]) => key);
+  return keyedFields(fields, (f) => f.minConfidence === 0, resolved).map(([key]) => key);
 }
