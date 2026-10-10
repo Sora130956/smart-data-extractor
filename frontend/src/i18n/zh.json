@@ -120,6 +120,7 @@
     "filterAll": "全部",
     "filterHigh": "高置信度",
     "filterReview": "需复核",
+    "filterReviewed": "已复核",
     "exportJson": "导出全部 JSON",
     "exportExcel": "导出 Excel",
     "emptyTitle": "还没有提取结果",

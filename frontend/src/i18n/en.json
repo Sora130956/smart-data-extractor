@@ -120,6 +120,7 @@
     "filterAll": "All",
     "filterHigh": "High Confidence",
     "filterReview": "Need Review",
+    "filterReviewed": "Reviewed",
     "exportJson": "Export All JSON",
     "exportExcel": "Export Excel",
     "emptyTitle": "No extractions yet",

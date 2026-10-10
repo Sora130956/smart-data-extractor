@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
@@ -537,8 +537,10 @@ describe('F8 field review editing', () => {
 
     // The modal shows the corrected value, the Reviewed badge, and the
     // original extraction value preserved for comparison (issue #1).
+    // Scoped to the dialog: the results header's Reviewed filter chip
+    // (issue #3) carries the same visible text outside of it.
     expect(screen.getAllByText('Beta Ltd').length).toBeGreaterThan(0);
-    expect(screen.getByText('Reviewed')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('Reviewed')).toBeInTheDocument();
     expect(screen.getByText('Original value')).toBeInTheDocument();
     expect(screen.getByText('Acme Corp')).toBeInTheDocument();
 
@@ -564,6 +566,100 @@ describe('F8 field review editing', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByText(/vendor:\s*Beta Ltd/)).toBeInTheDocument();
     expect(screen.queryByText(/vendor:\s*Acme Corp/)).not.toBeInTheDocument();
+  });
+});
+
+describe('issue #3 reviewed filter menu', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useUiStore.setState({
+      preset: 'invoice',
+      instructions: '',
+      customFields: [],
+      isSchemaModified: false,
+      filter: 'all',
+    });
+    localStorage.clear();
+    useHistoryStore.setState({ entries: [] });
+  });
+
+  it('moves an item from Need Review to Reviewed once its problem field is reviewed', async () => {
+    // Single field at 0.6: below the 0.85 default tier -> the one problem field.
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (typeof url === 'string' && url.startsWith('/api/presets/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ fields: [] }) });
+      }
+      if (url === '/api/batch_extract') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            results: [
+              {
+                data: { vendor: 'Acme Corp', vendor_confidence: 0.6 },
+                tokens_used: { input: 120, output: 30 },
+                cost_usd: 0.0002,
+                cost_cny: 0.00145,
+                error: null,
+              },
+            ],
+            total_cost_usd: 0.0002,
+            total_cost_cny: 0.00145,
+            total_tokens: { input: 120, output: 30 },
+            succeeded: 1,
+            failed: 0,
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('invoice.txt', 'Invoice #123 from Acme Corp')] },
+    });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument());
+
+    // Flagged item: Need Review (1), Reviewed bucket still empty.
+    expect(screen.getByRole('button', { name: /Need Review/ })).toHaveTextContent('(1)');
+    expect(screen.getByRole('button', { name: /Reviewed/ })).toHaveTextContent('(0)');
+
+    // Review the flagged field via the detail modal.
+    await user.click(screen.getByRole('button', { name: 'View' }));
+    await user.click(screen.getByRole('button', { name: 'Edit vendor' }));
+    const editInput = screen.getByDisplayValue('Acme Corp');
+    await user.clear(editInput);
+    await user.type(editInput, 'Beta Ltd{Enter}');
+    await user.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+
+    // Every problem field reviewed: the item moved buckets.
+    expect(screen.getByRole('button', { name: /Need Review/ })).toHaveTextContent('(0)');
+    expect(screen.getByRole('button', { name: /Reviewed/ })).toHaveTextContent('(1)');
+
+    // The Reviewed chip shows the item...
+    await user.click(screen.getByRole('button', { name: /Reviewed/ }));
+    expect(screen.getByRole('button', { name: /Reviewed/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument();
+
+    // ...and the Need Review chip no longer does.
+    await user.click(screen.getByRole('button', { name: /Need Review/ }));
+    expect(screen.queryByRole('button', { name: 'View' })).not.toBeInTheDocument();
   });
 });
 

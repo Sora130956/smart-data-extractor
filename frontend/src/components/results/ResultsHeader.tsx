@@ -9,26 +9,30 @@ export interface FilterCounts {
   all: number;
   high: number;
   review: number;
+  reviewed: number;
 }
 
-export const EMPTY_COUNTS: FilterCounts = { all: 0, high: 0, review: 0 };
+export const EMPTY_COUNTS: FilterCounts = { all: 0, high: 0, review: 0, reviewed: 0 };
 
 function Chip({
   label,
   count,
   active,
-  warn = false,
+  tone = 'default',
   onClick,
 }: {
   label: string;
   count: number;
   active: boolean;
-  warn?: boolean;
+  tone?: 'default' | 'warn' | 'success';
   onClick: () => void;
 }) {
-  const idle = warn
-    ? 'border-warning text-warning hover:bg-warning/10'
-    : 'border-border text-text-muted hover:bg-surface-muted';
+  const idle =
+    tone === 'warn'
+      ? 'border-warning text-warning hover:bg-warning/10'
+      : tone === 'success'
+        ? 'border-success text-success hover:bg-success/10'
+        : 'border-border text-text-muted hover:bg-surface-muted';
 
   return (
     <button
@@ -76,10 +80,12 @@ export function ResultsHeader({
     return sources[0]?.presetLabel ?? sources[0]?.name ?? 'extraction-results';
   }
 
-  const chips: Array<{ id: ResultFilter; label: string; count: number; warn?: boolean }> = [
+  const chips: Array<{ id: ResultFilter; label: string; count: number; tone?: 'warn' | 'success' }> = [
     { id: 'all', label: t('results.filterAll'), count: counts.all },
     { id: 'high', label: t('results.filterHigh'), count: counts.high },
-    { id: 'review', label: t('results.filterReview'), count: counts.review, warn: true },
+    { id: 'review', label: t('results.filterReview'), count: counts.review, tone: 'warn' },
+    // Issue #3: items whose every problem field has been reviewed.
+    { id: 'reviewed', label: t('results.filterReviewed'), count: counts.reviewed, tone: 'success' },
   ];
 
   return (
@@ -91,7 +97,7 @@ export function ResultsHeader({
           key={chip.id}
           label={chip.label}
           count={chip.count}
-          warn={chip.warn}
+          tone={chip.tone}
           active={filter === chip.id}
           onClick={() => setFilter(chip.id)}
         />

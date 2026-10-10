@@ -5,7 +5,11 @@
 // Also hosts the issue #2 submit-time snapshots: per-field review thresholds
 // and the allow-empty field list.
 
-import type { ExtractionResult, SchemaField } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
+import { belowThresholdFields, emptyViolatingFields, needsReview } from './confidence';
+
+/** Issue #3 per-result review status, see `reviewState`. */
+export type ReviewState = 'none' | 'pending' | 'reviewed';
 
 /** Returns a new result with the field corrected and marked reviewed.
  * The pre-edit value is snapshotted into `originalData` on the first edit
@@ -86,4 +90,66 @@ export function buildAllowEmptyFields(
   resolved?: Record<string, { display_name?: string | null }>,
 ): string[] {
   return keyedFields(fields, (f) => f.minConfidence === 0, resolved).map(([key]) => key);
+}
+
+/** Issue #3 — the fields that triggered review for a result: those below
+ * their own minimum confidence ∪ those that came back empty while their
+ * schema does not allow it. Empty fields only ever appear in `empty` —
+ * their zeroed confidence carries no quality signal. */
+export function problemFields(
+  result: Pick<ExtractionResult, 'confidence' | 'data'>,
+  source: Pick<ExtractionSource, 'reviewThresholds' | 'allowEmptyFields'>,
+): { belowThreshold: Array<{ field: string; threshold: number }>; empty: string[] } {
+  return {
+    belowThreshold: belowThresholdFields({
+      confidence: result.confidence,
+      thresholds: source.reviewThresholds,
+      data: result.data,
+    }),
+    empty: emptyViolatingFields({
+      data: result.data,
+      allowEmpty: source.allowEmptyFields,
+    }),
+  };
+}
+
+/** Issue #3 three-state review status — the single source of truth shared by
+ * the filter counts, the filter predicate, and the detail modal banner:
+ * - 'none': healthy success, nothing to review (the High Confidence bucket)
+ * - 'pending': review needed and not all problem fields are reviewed yet
+ *   (failed items always land here — they have no fields to review)
+ * - 'reviewed': every problem field has been manually reviewed
+ * The order of the checks is the semantics: failed first keeps failed items
+ * out of 'none' exactly as before; an item flagged ONLY by the aggregate
+ * average rule has no problem fields and can never transition to 'reviewed'. */
+export function reviewState(
+  result: Pick<
+    ExtractionResult,
+    'status' | 'avgConfidence' | 'confidence' | 'data' | 'reviewedFields'
+  >,
+  source: Pick<ExtractionSource, 'reviewThresholds' | 'allowEmptyFields'>,
+): ReviewState {
+  if (result.status === 'failed') return 'pending';
+  if (
+    !needsReview({
+      avgConfidence: result.avgConfidence,
+      confidence: result.confidence,
+      thresholds: source.reviewThresholds,
+      data: result.data,
+      allowEmpty: source.allowEmptyFields,
+    })
+  ) {
+    return 'none';
+  }
+  const problems = problemFields(result, source);
+  const flagged = new Set<string>([
+    ...problems.belowThreshold.map((p) => p.field),
+    ...problems.empty,
+  ]);
+  // Aggregate-only flag: nothing to review, so it can never clear.
+  if (flagged.size === 0) return 'pending';
+  for (const field of flagged) {
+    if (result.reviewedFields?.[field] !== true) return 'pending';
+  }
+  return 'reviewed';
 }

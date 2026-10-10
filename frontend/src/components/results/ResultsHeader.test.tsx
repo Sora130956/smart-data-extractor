@@ -1,9 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { ResultsHeader, EMPTY_COUNTS } from './ResultsHeader';
 import { exportToExcel } from '@/utils/excelExport';
+import { useUiStore } from '@/store/uiStore';
 import type { ExtractionSource } from '@/types/extraction';
 
 vi.mock('@/utils/excelExport', () => ({ exportToExcel: vi.fn() }));
@@ -53,6 +54,27 @@ describe('ResultsHeader', () => {
     expect(screen.getByRole('button', { name: 'Export Excel' })).toBeDisabled();
   });
 
+  describe('reviewed filter chip (issue #3)', () => {
+    afterEach(() => {
+      useUiStore.setState({ filter: 'all' });
+    });
+
+    it('renders the Reviewed chip with its count and switches the filter on click', async () => {
+      const user = userEvent.setup();
+      render(
+        <ResultsHeader counts={{ all: 1, high: 0, review: 0, reviewed: 1 }} sources={sources} />,
+      );
+
+      const chip = screen.getByRole('button', { name: /Reviewed/ });
+      expect(chip).toHaveTextContent('(1)');
+
+      await user.click(chip);
+
+      expect(useUiStore.getState().filter).toBe('reviewed');
+      expect(chip).toHaveAttribute('aria-pressed', 'true');
+    });
+  });
+
   describe('Export Excel', () => {
     beforeEach(() => {
       vi.mocked(exportToExcel).mockReset();
@@ -60,7 +82,7 @@ describe('ResultsHeader', () => {
 
     it('exports all sources to a file named after the template and a timestamp', async () => {
       const user = userEvent.setup();
-      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0 }} sources={sources} />);
+      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0, reviewed: 0 }} sources={sources} />);
 
       await user.click(screen.getByRole('button', { name: 'Export Excel' }));
 
@@ -87,7 +109,7 @@ describe('ResultsHeader', () => {
           downloads.push(this.download);
         });
 
-      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0 }} sources={sources} />);
+      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0, reviewed: 0 }} sources={sources} />);
 
       await user.click(screen.getByRole('button', { name: 'Export All JSON' }));
 

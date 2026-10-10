@@ -15,9 +15,13 @@ import { useBatchExtract } from '@/hooks/useBatchExtract';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
 import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
-import { needsReview } from '@/utils/confidence';
 import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
-import { applyFieldEdit, buildAllowEmptyFields, buildReviewThresholds } from '@/utils/review';
+import {
+  applyFieldEdit,
+  buildAllowEmptyFields,
+  buildReviewThresholds,
+  reviewState,
+} from '@/utils/review';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
@@ -321,23 +325,21 @@ function AppShell() {
   const counts: FilterCounts = useMemo(() => {
     let high = 0;
     let review = 0;
+    let reviewed = 0;
     let all = 0;
     for (const source of sources) {
       for (const result of source.results) {
         all += 1;
-        // Issue #2: judge each result against its own source's snapshot.
-        const needs = needsReview({
-          avgConfidence: result.avgConfidence,
-          confidence: result.confidence,
-          thresholds: source.reviewThresholds,
-          data: result.data,
-          allowEmpty: source.allowEmptyFields,
-        });
-        if (result.status === 'success' && !needs) high += 1;
-        if (result.status === 'failed' || needs) review += 1;
+        // Issue #3: judge each result against its own source's snapshot via
+        // the shared three-state helper; none→high, reviewed→reviewed,
+        // pending (incl. failed)→review.
+        const state = reviewState(result, source);
+        if (state === 'none') high += 1;
+        else if (state === 'reviewed') reviewed += 1;
+        else review += 1;
       }
     }
-    return { all, high, review };
+    return { all, high, review, reviewed };
   }, [sources]);
 
   const visibleSources = useMemo(() => {
@@ -346,15 +348,10 @@ function AppShell() {
       .map((s) => ({
         ...s,
         results: s.results.filter((r) => {
-          const needs = needsReview({
-            avgConfidence: r.avgConfidence,
-            confidence: r.confidence,
-            thresholds: s.reviewThresholds,
-            data: r.data,
-            allowEmpty: s.allowEmptyFields,
-          });
-          if (filter === 'high') return r.status === 'success' && !needs;
-          return r.status === 'failed' || needs;
+          const state = reviewState(r, s);
+          if (filter === 'high') return state === 'none';
+          if (filter === 'reviewed') return state === 'reviewed';
+          return state === 'pending';
         }),
       }))
       .filter((s) => s.results.length > 0);

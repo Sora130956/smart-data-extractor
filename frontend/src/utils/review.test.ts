@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { applyFieldEdit, buildAllowEmptyFields, buildReviewThresholds } from './review';
-import type { ExtractionResult, SchemaField } from '@/types/extraction';
+import {
+  applyFieldEdit,
+  buildAllowEmptyFields,
+  buildReviewThresholds,
+  problemFields,
+  reviewState,
+} from './review';
+import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 function makeResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult {
   return {
@@ -165,5 +171,136 @@ describe('buildAllowEmptyFields (issue #2 allow-empty = 0.0 tier)', () => {
         { total: { display_name: 'Grand Total' } },
       ),
     ).toEqual(['total']);
+  });
+});
+
+/** Minimal source input for the issue #3 helpers: only the two snapshots
+ * reviewState/problemFields actually consume. */
+function makeSource(
+  overrides: Partial<Pick<ExtractionSource, 'reviewThresholds' | 'allowEmptyFields'>> = {},
+): Pick<ExtractionSource, 'reviewThresholds' | 'allowEmptyFields'> {
+  return { ...overrides };
+}
+
+describe('problemFields (issue #3 review triggers)', () => {
+  it('returns the union of below-threshold and empty-violating fields', () => {
+    const result = makeResult({
+      data: { vendor: 'Acme', notes: null },
+      confidence: { vendor: 0.6, notes: 0 },
+    });
+
+    expect(problemFields(result, makeSource())).toEqual({
+      belowThreshold: [{ field: 'vendor', threshold: 0.85 }],
+      empty: ['notes'],
+    });
+  });
+
+  it('keeps empty fields out of belowThreshold (they carry no quality signal)', () => {
+    const result = makeResult({ data: { notes: null }, confidence: { notes: 0 } });
+
+    const problems = problemFields(result, makeSource());
+    expect(problems.belowThreshold).toEqual([]);
+    expect(problems.empty).toEqual(['notes']);
+  });
+
+  it('exempts fields the source allows to be empty', () => {
+    const result = makeResult({ data: { notes: null }, confidence: { notes: 0 } });
+
+    expect(problemFields(result, makeSource({ allowEmptyFields: ['notes'] }))).toEqual({
+      belowThreshold: [],
+      empty: [],
+    });
+  });
+
+  it('judges each field against its own configured threshold', () => {
+    const result = makeResult({ data: { vendor: 'Acme' }, confidence: { vendor: 0.72 } });
+
+    expect(problemFields(result, makeSource({ reviewThresholds: { vendor: 0.5 } }))).toEqual({
+      belowThreshold: [],
+      empty: [],
+    });
+  });
+});
+
+describe('reviewState (issue #3 three-state review status)', () => {
+  it('is none for a healthy success result', () => {
+    expect(reviewState(makeResult(), makeSource())).toBe('none');
+  });
+
+  it('is pending for a failed result even when reviewedFields is populated', () => {
+    const result = makeResult({
+      status: 'failed',
+      data: null,
+      confidence: {},
+      reviewedFields: { vendor: true },
+    });
+    expect(reviewState(result, makeSource())).toBe('pending');
+  });
+
+  it('is pending while a below-threshold field is unreviewed', () => {
+    const result = makeResult({ confidence: { vendor: 0.6, total: 0.88 } });
+    expect(reviewState(result, makeSource())).toBe('pending');
+  });
+
+  it('becomes reviewed once every below-threshold field is reviewed', () => {
+    const result = makeResult({
+      confidence: { vendor: 0.6, total: 0.88 },
+      reviewedFields: { vendor: true },
+    });
+    expect(reviewState(result, makeSource())).toBe('reviewed');
+  });
+
+  it('becomes reviewed once an empty-violating field is reviewed', () => {
+    const result = makeResult({
+      data: { vendor: null, total: 1200 },
+      confidence: { vendor: 0, total: 0.88 },
+      avgConfidence: 0.44,
+      reviewedFields: { vendor: true },
+    });
+    expect(reviewState(result, makeSource())).toBe('reviewed');
+  });
+
+  it('stays pending when only some problem fields are reviewed', () => {
+    const result = makeResult({
+      data: { vendor: 'Acme', notes: null },
+      confidence: { vendor: 0.6, notes: 0 },
+      reviewedFields: { vendor: true },
+    });
+    expect(reviewState(result, makeSource())).toBe('pending');
+  });
+
+  it('stays pending for an aggregate-only flag (avg below LOW, no problem fields)', () => {
+    // Only reachable when the user configures thresholds under CONFIDENCE_LOW:
+    // every field clears its own bar, but the aggregate stays below 0.70.
+    const result = makeResult({
+      data: { vendor: 'Acme', total: 1200 },
+      confidence: { vendor: 0.65, total: 0.65 },
+      avgConfidence: 0.65,
+    });
+    const source = makeSource({ reviewThresholds: { vendor: 0.5, total: 0.5 } });
+    expect(reviewState(result, source)).toBe('pending');
+
+    // No fields are flagged, so reviewing everything still cannot clear it.
+    const reviewed = { ...result, reviewedFields: { vendor: true, total: true } };
+    expect(reviewState(reviewed, source)).toBe('pending');
+  });
+
+  it('ignores reviewedFields entries for fields that are not problem fields', () => {
+    const result = makeResult({
+      confidence: { vendor: 0.6, total: 0.88 },
+      reviewedFields: { total: true, unrelated: true },
+    });
+    expect(reviewState(result, makeSource())).toBe('pending');
+  });
+
+  it('stays reviewed when a reviewed field is edited back to empty', () => {
+    // applyFieldEdit marks the field reviewed even when the correction is
+    // empty — the review mark covers the new empty-violating flag.
+    const initial = makeResult({
+      data: { vendor: 'Acme', total: 1200 },
+      confidence: { vendor: 0.6, total: 0.88 },
+    });
+    const edited = applyFieldEdit(initial, 'vendor', null);
+    expect(reviewState(edited, makeSource())).toBe('reviewed');
   });
 });

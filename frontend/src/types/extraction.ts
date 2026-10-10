@@ -89,7 +89,7 @@ export interface SchemaField {
 
 export type PresetId = string;
 export type ExtractionMode = 'preset' | 'custom';
-export type ResultFilter = 'all' | 'high' | 'review';
+export type ResultFilter = 'all' | 'high' | 'review' | 'reviewed';
 
 /** A schema the user saved locally, either from the "smart" inference flow
  * or (in the future) some other source. Persisted to localStorage. */
