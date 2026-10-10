@@ -90,7 +90,7 @@
     "fieldDescription": "Description",
     "minConfidence": "Min Confidence",
     "minConfidenceStrict": "Strict (0.95)",
-    "minConfidenceModerate": "Moderate (0.85)",
+    "minConfidenceDefault": "Default (0.85)",
     "minConfidenceBalanced": "Balanced (0.70)",
     "minConfidenceLenient": "Lenient (0.5)",
     "minConfidenceEmpty": "Allow empty (0.0)",

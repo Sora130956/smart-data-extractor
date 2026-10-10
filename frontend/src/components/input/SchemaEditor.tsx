@@ -22,23 +22,23 @@ const cellClass =
   'rounded-token border border-border bg-surface px-2 py-1 text-caption text-text';
 
 /** Issue #2: the min-confidence column is a preset-tier select
- * (Strict 0.95 / Moderate 0.85 / Balanced 0.70 / Lenient 0.5 / Allow empty 0)
+ * (Strict 0.95 / Default 0.85 / Balanced 0.70 / Lenient 0.5 / Allow empty 0)
  * instead of a free numeric input, so non-expert users never have to invent
  * a number. Tier values anchor on the on-screen confidence legend
- * (高 ≥ 0.85, 中 0.70–0.85): Moderate 0.85 is the default selection — the
+ * (高 ≥ 0.85, 中 0.70–0.85): Default 0.85 is the preselected tier — the
  * High boundary — so unconfigured fields are held to "high" by default.
  * The Allow-empty tier is a plain 0.0 threshold: the backend zeroes a null
  * field's confidence, so empty values sail under 0.0 — one mental model, no
  * separate "allow empty" column to fight with the threshold. */
 const MIN_CONFIDENCE_TIERS: ReadonlyArray<{ value: number; labelKey: string }> = [
   { value: 0.95, labelKey: 'schema.minConfidenceStrict' },
-  { value: 0.85, labelKey: 'schema.minConfidenceModerate' },
+  { value: 0.85, labelKey: 'schema.minConfidenceDefault' },
   { value: 0.7, labelKey: 'schema.minConfidenceBalanced' },
   { value: 0.5, labelKey: 'schema.minConfidenceLenient' },
   { value: 0, labelKey: 'schema.minConfidenceEmpty' },
 ];
 
-/** Unconfigured (null) fields display the default tier — Moderate 0.85,
+/** Unconfigured (null) fields display the default tier — Default 0.85,
  * which fieldThreshold falls back to; anything else maps to itself. */
 function tierSelectValue(minConfidence: number | null | undefined): string {
   if (minConfidence == null) return String(DEFAULT_MIN_CONFIDENCE);

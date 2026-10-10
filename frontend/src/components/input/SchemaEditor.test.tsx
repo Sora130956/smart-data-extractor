@@ -217,7 +217,7 @@ describe('SchemaEditor', () => {
   });
 
   describe('min confidence column (issue #2 — preset tiers)', () => {
-    it('renders one tier select per field, defaulting to the Moderate (0.85) tier', async () => {
+    it('renders one tier select per field with the Default (0.85) tier selected', async () => {
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
@@ -226,7 +226,7 @@ describe('SchemaEditor', () => {
       expect(selects).toHaveLength(2);
       for (const select of selects) {
         expect(select).toHaveValue('0.85');
-        expect(select).toHaveDisplayValue('Moderate (0.85)');
+        expect(select).toHaveDisplayValue('Default (0.85)');
       }
     });
 
@@ -240,7 +240,7 @@ describe('SchemaEditor', () => {
         Array.from(select.querySelectorAll('option')).map((o) => o.textContent),
       ).toEqual([
         'Strict (0.95)',
-        'Moderate (0.85)',
+        'Default (0.85)',
         'Balanced (0.70)',
         'Lenient (0.5)',
         'Allow empty (0.0)',

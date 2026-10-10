@@ -90,7 +90,7 @@
     "fieldDescription": "描述",
     "minConfidence": "最低置信度",
     "minConfidenceStrict": "严格 (0.95)",
-    "minConfidenceModerate": "较严 (0.85)",
+    "minConfidenceDefault": "默认 (0.85)",
     "minConfidenceBalanced": "平衡 (0.70)",
     "minConfidenceLenient": "宽松 (0.5)",
     "minConfidenceEmpty": "允许为空 (0.0)",
