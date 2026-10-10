@@ -140,7 +140,7 @@ describe('historyStore actions', () => {
     expect(localStorage.getItem(HISTORY_STORAGE_KEY)).toBe('[]');
   });
 
-  it('updateResultField updates the field value, marks it reviewed, and persists the change', () => {
+  it('updateResultField updates the field value, snapshots the original, and persists both', () => {
     const { addEntry, updateResultField } = useHistoryStore.getState();
     addEntry([makeSource('s1')], 'Invoice');
 
@@ -149,9 +149,23 @@ describe('historyStore actions', () => {
     const result = useHistoryStore.getState().entries[0].sources[0].results[0];
     expect(result.data).toEqual({ vendor: 'Globex' });
     expect(result.reviewedFields).toEqual({ vendor: true });
+    expect(result.originalData).toEqual({ vendor: 'Acme' });
     const storedResult = readStored()[0].sources[0].results[0];
     expect(storedResult.data).toEqual({ vendor: 'Globex' });
     expect(storedResult.reviewedFields).toEqual({ vendor: true });
+    expect(storedResult.originalData).toEqual({ vendor: 'Acme' });
+  });
+
+  it('updateResultField keeps the first original snapshot across re-edits', () => {
+    const { addEntry, updateResultField } = useHistoryStore.getState();
+    addEntry([makeSource('s1')], 'Invoice');
+
+    updateResultField('s1', 'vendor', 'Globex');
+    updateResultField('s1', 'vendor', 'Initech');
+
+    const result = useHistoryStore.getState().entries[0].sources[0].results[0];
+    expect(result.data).toEqual({ vendor: 'Initech' });
+    expect(result.originalData).toEqual({ vendor: 'Acme' });
   });
 
   it('updateResultField does nothing when the sourceId is not found', () => {

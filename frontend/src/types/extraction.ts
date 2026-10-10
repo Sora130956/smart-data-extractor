@@ -21,6 +21,11 @@ export interface ExtractionResult {
   error?: string;
   /** field_name -> true once the user has manually reviewed/edited it. */
   reviewedFields?: Record<string, boolean>;
+  /** field_name -> value as originally extracted, snapshotted right before
+   * the FIRST user edit of that field (re-edits keep the first snapshot).
+   * Fields never edited have no entry — their original value is still in
+   * `data`. Lets exports compare the LLM's answer with the correction. */
+  originalData?: Record<string, unknown>;
 }
 
 export interface ExtractionSource {

@@ -405,4 +405,40 @@ describe('ResultDetailModal', () => {
       expect(screen.getAllByText('0.90')).toHaveLength(2);
     });
   });
+
+  describe('original value hint (issue #1)', () => {
+    it('shows the pre-edit extraction value under a reviewed field', () => {
+      render(
+        <ResultDetailModal
+          source={source}
+          result={{
+            ...editableResult,
+            data: { ...editableResult.data, vendor: 'Beta Ltd' },
+            originalData: { vendor: 'Acme Corp' },
+            reviewedFields: { vendor: true },
+          }}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={() => {}}
+        />,
+      );
+
+      expect(screen.getByText('Beta Ltd')).toBeInTheDocument();
+      expect(screen.getByText('Original value')).toBeInTheDocument();
+      expect(screen.getByText('Acme Corp')).toBeInTheDocument();
+    });
+
+    it('shows no hint when nothing was reviewed or no snapshot exists', () => {
+      render(
+        <ResultDetailModal
+          source={source}
+          result={{ ...editableResult, reviewedFields: { vendor: true } }}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(screen.queryByText('Original value')).not.toBeInTheDocument();
+    });
+  });
 });

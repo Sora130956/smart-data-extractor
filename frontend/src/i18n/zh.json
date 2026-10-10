@@ -149,7 +149,8 @@
     "statusFailed": "失败",
     "error": "错误",
     "avgConfidence": "平均置信度",
-    "costUsd": "成本 (USD)"
+    "costUsd": "成本 (USD)",
+    "originalColumn": "{{field}}（原始）"
   },
   "resultDetail": {
     "title": "提取结果 — {{index}}",
@@ -167,6 +168,7 @@
     "openOriginal": "打开<br/>原文件",
     "editField": "编辑{{field}}",
     "reviewed": "已复核",
+    "originalValue": "原始值",
     "stats": {
       "inputTokens": "输入 Token",
       "outputTokens": "输出 Token",

@@ -189,12 +189,18 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
             const level = confidence === undefined ? null : confidenceLevel(confidence);
             const fieldLabel = source.fieldLabels?.[key] ?? key;
             const reviewed = result.reviewedFields?.[key] === true;
+            // Issue #1: reviewed fields keep showing what the LLM originally
+            // extracted, next to the human-corrected value.
+            const hasSnapshot =
+              reviewed &&
+              result.originalData != null &&
+              Object.prototype.hasOwnProperty.call(result.originalData, key);
             return (
               <div
                 key={key}
                 className="flex items-start gap-3 border-b border-border px-3.5 py-2.5 last:border-b-0"
               >
-                <span className="w-[140px] flex-none text-caption text-text-muted">
+                <span className="w-[140px] flex-none self-center text-center text-caption text-text-muted">
                   {fieldLabel}
                 </span>
                 {editing === key ? (
@@ -229,7 +235,15 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
                   )
                 ) : (
                   <>
-                    <span className="flex-1 break-words text-caption">{formatFieldValue(value, t)}</span>
+                    <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
+                      <span className="break-words text-caption">{formatFieldValue(value, t)}</span>
+                      {hasSnapshot ? (
+                        <span className="flex flex-wrap items-baseline gap-1.5 text-caption text-text-muted">
+                          <span className="flex-none">{t('resultDetail.originalValue')}</span>
+                          {formatFieldValue(result.originalData?.[key], t)}
+                        </span>
+                      ) : null}
+                    </div>
                     {onFieldUpdate && isEditableValue(value) ? (
                       <button
                         type="button"

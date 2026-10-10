@@ -63,16 +63,42 @@ export function buildExportModel(sources: ExtractionSource[], t: TFunction): Exp
   const keys = fieldKeys(sources);
   const fields = columnHeaders(sources, keys);
 
+  // Issue #1: a field reviewed on any row gets a companion "(Original)"
+  // column right after it, so the sheet compares the LLM's extraction with
+  // the human correction. Fields never reviewed keep the old layout.
+  const reviewedKeys = new Set<string>();
+  for (const source of sources) {
+    for (const result of source.results) {
+      for (const key of keys) {
+        if (result.reviewedFields?.[key]) reviewedKeys.add(key);
+      }
+    }
+  }
+  const fieldColumns = fields.flatMap((header, i) =>
+    reviewedKeys.has(keys[i]) ? [header, t('excel.originalColumn', { field: header })] : [header],
+  );
+
   const resultsRows: CellValue[][] = [];
   const confidenceRows: CellValue[][] = [];
   for (const source of sources) {
     for (const result of source.results) {
+      const fieldCells = keys.flatMap((key): CellValue[] => {
+        const cells: CellValue[] = [toCell(result.data?.[key])];
+        if (reviewedKeys.has(key)) {
+          cells.push(
+            result.reviewedFields?.[key]
+              ? toCell(result.originalData?.[key] ?? null)
+              : null,
+          );
+        }
+        return cells;
+      });
       resultsRows.push([
         source.name,
         result.index,
         result.status === 'success' ? t('excel.statusSuccess') : t('excel.statusFailed'),
         result.error ?? null,
-        ...keys.map((key) => toCell(result.data?.[key])),
+        ...fieldCells,
         result.avgConfidence,
         result.costUsd,
       ]);
@@ -93,7 +119,7 @@ export function buildExportModel(sources: ExtractionSource[], t: TFunction): Exp
         t('excel.item'),
         t('excel.status'),
         t('excel.error'),
-        ...fields,
+        ...fieldColumns,
         t('excel.avgConfidence'),
         t('excel.costUsd'),
       ],

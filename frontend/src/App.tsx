@@ -17,6 +17,7 @@ import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
 import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
 import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
+import { applyFieldEdit } from '@/utils/review';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
@@ -110,15 +111,13 @@ function AppShell() {
   }
 
   /** Review flow: apply an inline field correction to the on-screen state,
-   * the open modal, and the persisted history entry (marks it reviewed). */
+   * the open modal, and the persisted history entry (marks it reviewed and
+   * snapshots the original extraction value for exports — issue #1). */
   function handleFieldUpdate(fieldKey: string, newValue: unknown) {
     if (!selected) return;
     const sourceId = selected.source.id;
-    const applyEdit = (result: ExtractionResult): ExtractionResult => ({
-      ...result,
-      data: { ...result.data, [fieldKey]: newValue },
-      reviewedFields: { ...result.reviewedFields, [fieldKey]: true },
-    });
+    const applyEdit = (result: ExtractionResult): ExtractionResult =>
+      applyFieldEdit(result, fieldKey, newValue);
     setSources((prev) =>
       prev.map((source) =>
         source.id !== sourceId

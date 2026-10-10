@@ -4,6 +4,7 @@
 
 import { create } from 'zustand';
 import type { ExtractionSource } from '@/types/extraction';
+import { applyFieldEdit } from '@/utils/review';
 
 export const HISTORY_STORAGE_KEY = 'sde.history';
 export const HISTORY_LIMIT = 20;
@@ -77,11 +78,9 @@ export const useHistoryStore = create<HistoryState>((set) => ({
           if (source.id !== sourceId) return source;
           return {
             ...source,
-            results: source.results.map((result) => ({
-              ...result,
-              data: { ...result.data, [fieldKey]: newValue },
-              reviewedFields: { ...result.reviewedFields, [fieldKey]: true },
-            })),
+            results: source.results.map((result) =>
+              applyFieldEdit(result, fieldKey, newValue),
+            ),
           };
         }),
       }));

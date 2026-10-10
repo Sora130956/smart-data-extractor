@@ -75,6 +75,29 @@ const bareSource = makeSource({
   ],
 });
 
+// Issue #1: a reviewed field must keep its original extraction value so the
+// export can compare the LLM's answer with the human correction.
+const reviewedSource = makeSource({
+  id: 'text-3',
+  name: 'Invoice C',
+  fieldLabels: { vendor: 'Vendor', total: 'Total' },
+  results: [
+    makeResult({
+      sourceId: 'text-3',
+      data: { vendor: 'Beta Ltd', total: 1200 },
+      confidence: { vendor: 0.9, total: 0.88 },
+      originalData: { vendor: 'Acme Corp' },
+      reviewedFields: { vendor: true },
+    }),
+    makeResult({
+      sourceId: 'text-3',
+      index: '2',
+      data: { vendor: 'Unreviewed Ltd', total: 300 },
+      confidence: { vendor: 0.9, total: 0.5 },
+    }),
+  ],
+});
+
 describe('buildExportModel', () => {
   const model = buildExportModel([labeledSource, bareSource], t);
 
@@ -169,6 +192,51 @@ describe('buildExportModel', () => {
     expect(model.results.rows).toHaveLength(3);
     expect(model.results.rows[2][0]).toBe('Lead B');
     expect(model.confidence.rows).toHaveLength(3);
+  });
+
+  it('adds no original-value columns when no field was reviewed', () => {
+    expect(model.results.columns.some((c) => c.includes('(Original)'))).toBe(false);
+  });
+});
+
+describe('buildExportModel with reviewed fields (issue #1)', () => {
+  const model = buildExportModel([reviewedSource, bareSource], t);
+
+  it('inserts an "(Original)" column right after each reviewed field column', () => {
+    const columns = model.results.columns;
+    expect(columns).toEqual([
+      'Source',
+      'Item',
+      'Status',
+      'Error',
+      'Vendor',
+      'Vendor (Original)', // reviewed union-wide -> companion column
+      'Total', // never reviewed anywhere -> no companion
+      'email',
+      'Avg Confidence',
+      'Cost (USD)',
+    ]);
+  });
+
+  it('fills the original column only on reviewed rows; unreviewed rows stay empty', () => {
+    // Row 1 (Invoice C / item 1): vendor reviewed -> original 'Acme Corp'.
+    expect(model.results.rows[0][5]).toBe('Acme Corp');
+    expect(model.results.rows[0][4]).toBe('Beta Ltd');
+    // Row 2 (Invoice C / item 2): vendor not reviewed on this row -> empty.
+    expect(model.results.rows[1][5]).toBeNull();
+    // Row 3 (Lead B): empty as well.
+    expect(model.results.rows[2][5]).toBeNull();
+  });
+
+  it('leaves the confidence sheet layout untouched by review state', () => {
+    expect(model.confidence.columns).toEqual([
+      'Source',
+      'Item',
+      'Vendor',
+      'Total',
+      'email',
+      'Avg Confidence',
+    ]);
   });
 });
 

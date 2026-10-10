@@ -535,18 +535,27 @@ describe('F8 field review editing', () => {
     await user.clear(editInput);
     await user.type(editInput, 'Beta Ltd{Enter}');
 
-    // The modal shows the corrected value plus the Reviewed badge.
+    // The modal shows the corrected value, the Reviewed badge, and the
+    // original extraction value preserved for comparison (issue #1).
     expect(screen.getAllByText('Beta Ltd').length).toBeGreaterThan(0);
     expect(screen.getByText('Reviewed')).toBeInTheDocument();
+    expect(screen.getByText('Original value')).toBeInTheDocument();
+    expect(screen.getByText('Acme Corp')).toBeInTheDocument();
 
-    // The correction is persisted into the history entry with the reviewed mark.
+    // The correction is persisted into the history entry with the reviewed
+    // mark AND the original value snapshot.
     const stored = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? '[]') as Array<{
       sources: Array<{
-        results: Array<{ data: Record<string, unknown>; reviewedFields?: Record<string, boolean> }>;
+        results: Array<{
+          data: Record<string, unknown>;
+          reviewedFields?: Record<string, boolean>;
+          originalData?: Record<string, unknown>;
+        }>;
       }>;
     }>;
     expect(stored[0].sources[0].results[0].data.vendor).toBe('Beta Ltd');
     expect(stored[0].sources[0].results[0].reviewedFields?.vendor).toBe(true);
+    expect(stored[0].sources[0].results[0].originalData?.vendor).toBe('Acme Corp');
 
     // The result list behind the modal reflects the correction too (rendered
     // as a "vendor: Beta Ltd" chip; the source's text preview still mentions

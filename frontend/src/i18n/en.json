@@ -149,7 +149,8 @@
     "statusFailed": "Failed",
     "error": "Error",
     "avgConfidence": "Avg Confidence",
-    "costUsd": "Cost (USD)"
+    "costUsd": "Cost (USD)",
+    "originalColumn": "{{field}} (Original)"
   },
   "resultDetail": {
     "title": "Extraction Result — {{index}}",
@@ -167,6 +168,7 @@
     "openOriginal": "Open Original",
     "editField": "Edit {{field}}",
     "reviewed": "Reviewed",
+    "originalValue": "Original value",
     "stats": {
       "inputTokens": "Input Tokens",
       "outputTokens": "Output Tokens",
