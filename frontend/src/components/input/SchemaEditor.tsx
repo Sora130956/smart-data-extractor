@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
+import { CONFIDENCE_LOW, formatConfidence } from '@/utils/confidence';
 import type { SchemaField } from '@/types/extraction';
 
 const FIELD_TYPES: SchemaField['type'][] = [
@@ -69,6 +70,15 @@ export function SchemaEditor() {
     setCustomFields([...customFields, { displayName: '', fieldName: null, type: 'string', description: '' }]);
   }
 
+  /** Issue #2: empty input -> null (fall back to the global default);
+   * anything numeric is clamped into [0, 1]; garbage parses as null. */
+  function parseMinConfidence(raw: string): number | null {
+    if (raw.trim() === '') return null;
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed)) return null;
+    return Math.min(1, Math.max(0, parsed));
+  }
+
   /** Reset discards the saved override too, so the preset returns to its
    * backend baseline (not to a previously saved local edit). */
   function handleReset() {
@@ -128,6 +138,7 @@ export function SchemaEditor() {
         <div className="flex items-center gap-2 text-caption font-semibold text-text-muted">
           <span className="w-[140px] flex-none">{t('schema.fieldName')}</span>
           <span className="w-[110px] flex-none">{t('schema.fieldType')}</span>
+          <span className="w-[92px] flex-none">{t('schema.minConfidence')}</span>
           <span className="flex-1">{t('schema.fieldDescription')}</span>
           <span className="w-[20px] flex-none" />
         </div>
@@ -151,6 +162,20 @@ export function SchemaEditor() {
                 </option>
               ))}
             </select>
+            <input
+              aria-label={t('schema.minConfidence')}
+              className={`${cellClass} w-[92px] flex-none`}
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              inputMode="decimal"
+              value={field.minConfidence ?? ''}
+              placeholder={t('schema.minConfidencePlaceholder', {
+                threshold: formatConfidence(CONFIDENCE_LOW),
+              })}
+              onChange={(e) => updateField(i, { minConfidence: parseMinConfidence(e.target.value) })}
+            />
             <input
               aria-label={t('schema.fieldDescription')}
               className={`${cellClass} flex-1`}

@@ -21,13 +21,16 @@ export interface BatchExtractInput {
   presetLabel?: string;
   /** Per-text Blob URL for the original uploaded file, if any (session-scoped). */
   fileUrls?: Array<string | undefined>;
+  /** field_name -> user-configured minimum confidence, snapshotted onto each
+   * source so review flags survive later schema edits (issue #2). */
+  reviewThresholds?: Record<string, number>;
 }
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls }) => {
+    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds }) => {
       const response = await batchExtract({ texts, preset, schema, instructions, lang });
-      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls);
+      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds);
     },
   });
 }

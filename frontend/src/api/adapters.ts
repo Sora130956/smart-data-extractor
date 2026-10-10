@@ -59,6 +59,7 @@ export function adaptBatchExtractResponse(
   fieldLabels?: Record<string, string>,
   presetLabel?: string,
   fileUrls?: Array<string | undefined>,
+  reviewThresholds?: Record<string, number>,
 ): ExtractionSource[] {
   // Ids must stay unique across batches: the UI accumulates results from
   // successive extractions, so `text-${i}` alone would collide as a React key.
@@ -70,6 +71,8 @@ export function adaptBatchExtractResponse(
     // Attribute the one-off /schema/resolve cost to the first source only,
     // so it is counted once in the aggregate totals rather than duplicated.
     const isFirst = i === 0;
+    const hasThresholds =
+      reviewThresholds != null && Object.keys(reviewThresholds).length > 0;
 
     return {
       id: sourceId,
@@ -80,6 +83,7 @@ export function adaptBatchExtractResponse(
       meta: preview,
       ...(presetLabel ? { presetLabel } : {}),
       ...(fieldLabels ? { fieldLabels } : {}),
+      ...(hasThresholds ? { reviewThresholds } : {}),
       ...(fileUrls?.[i] ? { sourceFileUrl: fileUrls[i] } : {}),
       results: [result],
       stats: {

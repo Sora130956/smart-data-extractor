@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyFieldEdit } from './review';
-import type { ExtractionResult } from '@/types/extraction';
+import { applyFieldEdit, buildReviewThresholds } from './review';
+import type { ExtractionResult, SchemaField } from '@/types/extraction';
 
 function makeResult(overrides: Partial<ExtractionResult> = {}): ExtractionResult {
   return {
@@ -67,5 +67,59 @@ describe('applyFieldEdit (review flow keeps the original value)', () => {
     expect(next.data).toEqual({ vendor: 'Beta Ltd' });
     expect(next.originalData).toEqual({ vendor: null });
     expect(next.reviewedFields).toEqual({ vendor: true });
+  });
+});
+
+describe('buildReviewThresholds (issue #2 submit-time snapshot)', () => {
+  const field = (overrides: Partial<SchemaField>): SchemaField => ({
+    displayName: 'x',
+    fieldName: null,
+    type: 'string',
+    description: '',
+    ...overrides,
+  });
+
+  it('maps fields with a known fieldName and an explicit threshold', () => {
+    const thresholds = buildReviewThresholds([
+      field({ fieldName: 'vendor', displayName: 'Vendor', minConfidence: 0.9 }),
+      field({ fieldName: 'total', displayName: 'Total' }),
+    ]);
+
+    expect(thresholds).toEqual({ vendor: 0.9 });
+  });
+
+  it('returns an empty map when no field carries a threshold', () => {
+    expect(
+      buildReviewThresholds([field({ fieldName: 'vendor', displayName: 'Vendor' })]),
+    ).toEqual({});
+  });
+
+  it('re-keys thresholds through the resolved schema (display_name match)', () => {
+    const thresholds = buildReviewThresholds(
+      [
+        // Known key survives resolve untouched.
+        field({ fieldName: 'vendor', displayName: 'Vendor', minConfidence: 0.9 }),
+        // Renamed field: backend assigns a fresh key, matched by display name.
+        field({ fieldName: null, displayName: 'Grand Total', minConfidence: 0.8 }),
+      ],
+      {
+        vendor: { display_name: 'Vendor' },
+        amount_total: { display_name: 'Grand Total' },
+      },
+    );
+
+    expect(thresholds).toEqual({ vendor: 0.9, amount_total: 0.8 });
+  });
+
+  it('prefers the explicit field_name match over a display-name match for the same key', () => {
+    const thresholds = buildReviewThresholds(
+      [
+        field({ fieldName: 'total', displayName: 'Amount', minConfidence: 0.8 }),
+        field({ fieldName: null, displayName: 'Grand Total', minConfidence: 0.6 }),
+      ],
+      { total: { display_name: 'Grand Total' } },
+    );
+
+    expect(thresholds).toEqual({ total: 0.8 });
   });
 });

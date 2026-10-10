@@ -95,6 +95,29 @@ describe('ResultDetailModal', () => {
     expect(screen.getByText(/Needs review/)).toBeInTheDocument();
   });
 
+  it("judges the warning against the source's per-field thresholds and names them (issue #2)", () => {
+    // invoice_number sits at 0.95 — above the 0.70 default, but strictly
+    // under a configured 0.99 threshold.
+    const thresholdedSource = { ...source, reviewThresholds: { invoice_number: 0.99 } };
+    const { rerender } = render(
+      <ResultDetailModal
+        source={thresholdedSource}
+        result={highConfidenceResult}
+        label="Text 1"
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Needs review/)).toBeInTheDocument();
+    // The warning names the field and the threshold it was judged against.
+    expect(screen.getByText(/Invoice Number \(0\.99\)/)).toBeInTheDocument();
+
+    // Same result without configured thresholds: everything clears 0.70.
+    rerender(
+      <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
+    );
+    expect(screen.queryByText(/Needs review/)).not.toBeInTheDocument();
+  });
+
   it('calls onClose when pressing Escape', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

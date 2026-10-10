@@ -17,7 +17,7 @@ import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
 import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
 import { needsReview } from '@/utils/confidence';
 import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
-import { applyFieldEdit } from '@/utils/review';
+import { applyFieldEdit, buildReviewThresholds } from '@/utils/review';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
@@ -137,6 +137,9 @@ function AppShell() {
     let target: { schema: Record<string, unknown> } | { preset: string };
     let schemaResolveCost: { costUsd: number; costCny: number } | undefined;
     let fieldLabels: Record<string, string> | undefined;
+    // Issue #2: field_name -> minimum confidence, snapshotted at submit so
+    // review flags never re-evaluate against a later schema edit.
+    let reviewThresholds: Record<string, number> | undefined;
     // History label snapshot: the preset's display name in the UI language at
     // submit time (custom/smart schema batches get a fixed label instead).
     let presetLabel: string;
@@ -227,6 +230,9 @@ function AppShell() {
             .filter(([, spec]) => spec.display_name)
             .map(([name, spec]) => [name, spec.display_name as string]),
         );
+        // Issue #2: the backend owns the keys after resolve, so re-key the
+        // configured thresholds through the resolved schema.
+        reviewThresholds = buildReviewThresholds(customFields, resolved.schema.fields);
       } catch (err) {
         setResolveError(err instanceof Error ? err.message : String(err));
         return;
@@ -245,6 +251,11 @@ function AppShell() {
               .map((f) => [f.fieldName as string, f.displayName]),
           )
         : undefined;
+      // Plain preset path: keys are already the backend's field names. Only
+      // reachable with configured thresholds if a saved override exists (in
+      // which case the custom path above runs instead), so this is normally
+      // empty — kept for safety if that routing ever changes.
+      reviewThresholds = buildReviewThresholds(customFields);
       presetLabel = templateName(preset);
     }
 
@@ -261,6 +272,7 @@ function AppShell() {
         schemaResolveCost,
         fieldLabels,
         presetLabel,
+        reviewThresholds,
       },
       {
         onSuccess: (newSources) => {
@@ -301,14 +313,23 @@ function AppShell() {
   }, [sources]);
 
   const counts: FilterCounts = useMemo(() => {
-    const allResults = sources.flatMap((s) => s.results);
-    const high = allResults.filter(
-      (r) => r.status === 'success' && !needsReview({ avgConfidence: r.avgConfidence, confidence: r.confidence }),
-    ).length;
-    const review = allResults.filter(
-      (r) => r.status === 'failed' || needsReview({ avgConfidence: r.avgConfidence, confidence: r.confidence }),
-    ).length;
-    return { all: allResults.length, high, review };
+    let high = 0;
+    let review = 0;
+    let all = 0;
+    for (const source of sources) {
+      for (const result of source.results) {
+        all += 1;
+        // Issue #2: judge each result against its own source's snapshot.
+        const needs = needsReview({
+          avgConfidence: result.avgConfidence,
+          confidence: result.confidence,
+          thresholds: source.reviewThresholds,
+        });
+        if (result.status === 'success' && !needs) high += 1;
+        if (result.status === 'failed' || needs) review += 1;
+      }
+    }
+    return { all, high, review };
   }, [sources]);
 
   const visibleSources = useMemo(() => {
@@ -317,13 +338,13 @@ function AppShell() {
       .map((s) => ({
         ...s,
         results: s.results.filter((r) => {
-          if (filter === 'high') {
-            return (
-              r.status === 'success' &&
-              !needsReview({ avgConfidence: r.avgConfidence, confidence: r.confidence })
-            );
-          }
-          return r.status === 'failed' || needsReview({ avgConfidence: r.avgConfidence, confidence: r.confidence });
+          const needs = needsReview({
+            avgConfidence: r.avgConfidence,
+            confidence: r.confidence,
+            thresholds: s.reviewThresholds,
+          });
+          if (filter === 'high') return r.status === 'success' && !needs;
+          return r.status === 'failed' || needs;
         }),
       }))
       .filter((s) => s.results.length > 0);

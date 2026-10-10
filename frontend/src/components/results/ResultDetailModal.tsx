@@ -3,7 +3,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import {
-  CONFIDENCE_LOW,
+  belowThresholdFields,
   confidenceLevel,
   formatConfidence,
   needsReview,
@@ -69,9 +69,14 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
 
   const entries = Object.entries(result.data ?? {});
   const nullCount = entries.filter(([, v]) => v === null || v === undefined).length;
-  const reviewFields = Object.entries(result.confidence)
-    .filter(([, v]) => v < CONFIDENCE_LOW)
-    .map(([key]) => source.fieldLabels?.[key] ?? key);
+  // Issue #2: each field is judged against its own configured minimum
+  // confidence (snapshotted on the source), falling back to the global low.
+  const reviewFields = belowThresholdFields({
+    confidence: result.confidence,
+    thresholds: source.reviewThresholds,
+  }).map(
+    ({ field, threshold }) => `${source.fieldLabels?.[field] ?? field} (${formatConfidence(threshold)})`,
+  );
   const cost = formatCost(result.costUsd, result.costCny, i18n.resolvedLanguage ?? 'en');
 
   function startEdit(key: string, value: unknown) {
@@ -170,13 +175,16 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
           </button>
         </div>
 
-        {needsReview(result) && (
+        {needsReview({
+          avgConfidence: result.avgConfidence,
+          confidence: result.confidence,
+          thresholds: source.reviewThresholds,
+        }) && (
           <div className="mx-4.5 mt-3.5 flex items-start gap-2 rounded-token border border-warning bg-warning/12 px-3 py-2.5 text-caption">
             <span>⚠️</span>
             <span>
               {t('resultDetail.needsReviewWarning', {
                 count: reviewFields.length,
-                threshold: formatConfidence(CONFIDENCE_LOW),
                 fields: reviewFields.join(', '),
               })}
             </span>

@@ -44,6 +44,10 @@ export interface ExtractionSource {
   /** field_name -> localized display label, snapshotted at submit time so
    * chips stay labeled with the schema that produced them. */
   fieldLabels?: Record<string, string>;
+  /** field_name -> user-configured minimum confidence, snapshotted at submit
+   * time (issue #2) so later schema edits never re-flag old batches. Absent
+   * when no field had a configured threshold. */
+  reviewThresholds?: Record<string, number>;
   /** Blob URL for the original uploaded file (pdf/image), session-scoped. */
   sourceFileUrl?: string;
   results: ExtractionResult[];
@@ -68,6 +72,10 @@ export interface SchemaField {
   fieldName: string | null;
   type: 'string' | 'number' | 'integer' | 'boolean' | 'date';
   description: string;
+  /** User-configured minimum confidence for this field (issue #2), in [0, 1].
+   * null/undefined = use the global default (CONFIDENCE_LOW). Frontend-only:
+   * never sent to the backend, it does not change the LLM schema. */
+  minConfidence?: number | null;
   /** Preset fields only: baseline for the needsResolve diff. */
   originalDisplayName?: string;
   originalDescription?: string;

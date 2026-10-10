@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
@@ -213,5 +214,61 @@ describe('SchemaEditor', () => {
 
     await waitFor(() => expect(screen.queryByText('Modified')).not.toBeInTheDocument());
     expect(useUiStore.getState().savedSchemas[0].fields).toEqual(fields);
+  });
+
+  describe('min confidence column (issue #2)', () => {
+    it('renders one empty min-confidence input per field, placeholder showing the default', async () => {
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      const inputs = screen.getAllByLabelText('Min Confidence');
+      expect(inputs).toHaveLength(2);
+      // Empty <input type="number"> reports its value as null (valueAsNumber).
+      for (const input of inputs) expect(input).toHaveValue(null);
+      expect(inputs[0]).toHaveAttribute('placeholder', 'Default 0.70');
+    });
+
+    it('stores the typed threshold on that field and marks the schema modified', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
+      await user.type(screen.getAllByLabelText('Min Confidence')[0], '0.9');
+
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
+      expect(useUiStore.getState().customFields[1].minConfidence).toBeUndefined();
+      expect(screen.getByText('Modified')).toBeInTheDocument();
+    });
+
+    it('clearing the input restores null (fall back to the default)', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
+      const input = screen.getAllByLabelText('Min Confidence')[0];
+      await user.type(input, '0.9');
+      await user.clear(input);
+
+      expect(useUiStore.getState().customFields[0].minConfidence).toBeNull();
+    });
+
+    it('clamps out-of-range values into [0, 1]', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
+      const input = screen.getAllByLabelText('Min Confidence')[0];
+
+      await user.type(input, '5');
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(1);
+
+      await user.clear(input);
+      await user.type(input, '-0.5');
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0);
+    });
   });
 });
