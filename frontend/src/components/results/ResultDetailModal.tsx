@@ -3,15 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import {
+  CONFIDENCE_LOW,
   confidenceLevel,
   formatConfidence,
-  needsReview,
   type ConfidenceLevel,
 } from '@/utils/confidence';
 import { formatCost } from '@/utils/currency';
 import { exportToExcel } from '@/utils/excelExport';
 import { buildExportFilename } from '@/utils/exportFilename';
-import { problemFields } from '@/utils/review';
+import { problemFields, reviewState } from '@/utils/review';
 import { findFieldRanges } from '@/utils/textHighlight';
 import { SourcePreviewPane } from './SourcePreviewPane';
 
@@ -77,6 +77,7 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
   // Issue #2 / issue #3 kernel: the two review triggers, computed once and
   // consumed by the warning banner AND the pane highlight colors (issue #4).
   const problems = useMemo(() => problemFields(result, source), [result, source]);
+  const state = useMemo(() => reviewState(result, source), [result, source]);
   const reviewFields = problems.belowThreshold.map(
     ({ field, threshold }) => `${source.fieldLabels?.[field] ?? field} (${formatConfidence(threshold)})`,
   );
@@ -191,17 +192,15 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
           </button>
         </div>
 
-        {needsReview({
-          avgConfidence: result.avgConfidence,
-          confidence: result.confidence,
-          thresholds: source.reviewThresholds,
-          data: result.data,
-          allowEmpty: source.allowEmptyFields,
-        }) && (
+        {/* Issue #3: the banner follows the shared three-state review status.
+            pending → per-field attribution, or the aggregate-average warning
+            when no single field is to blame; reviewed → success banner so a
+            fully reviewed item never claims to still need review. */}
+        {state === 'pending' ? (
           <div className="mx-4.5 mt-3.5 flex items-start gap-2 rounded-token border border-warning bg-warning/12 px-3 py-2.5 text-caption">
             <span>⚠️</span>
             <div className="flex flex-col gap-0.5">
-              {reviewFields.length > 0 || emptyFields.length === 0 ? (
+              {reviewFields.length > 0 ? (
                 <span>
                   {t('resultDetail.needsReviewWarning', {
                     count: reviewFields.length,
@@ -217,9 +216,21 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
                   })}
                 </span>
               ) : null}
+              {reviewFields.length === 0 && emptyFields.length === 0 ? (
+                <span>
+                  {t('resultDetail.needsReviewAvgWarning', {
+                    threshold: formatConfidence(CONFIDENCE_LOW),
+                  })}
+                </span>
+              ) : null}
             </div>
           </div>
-        )}
+        ) : state === 'reviewed' ? (
+          <div className="mx-4.5 mt-3.5 flex items-start gap-2 rounded-token border border-success bg-success/12 px-3 py-2.5 text-caption">
+            <span>✅</span>
+            <span>{t('resultDetail.allReviewed')}</span>
+          </div>
+        ) : null}
 
         <div className="mx-4.5 mt-3.5 overflow-hidden rounded-card border border-border">
           {entries.map(([key, value]) => {

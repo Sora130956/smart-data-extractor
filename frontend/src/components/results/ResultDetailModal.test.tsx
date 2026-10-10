@@ -164,6 +164,46 @@ describe('ResultDetailModal', () => {
     expect(screen.getByText(/Notes \(0\.85\)/)).toBeInTheDocument();
   });
 
+  it('explains an aggregate-only flag with the average-confidence warning (issue #3)', () => {
+    // Every field clears its own (loose) threshold, but the average stays
+    // below 0.70 — there is no single field to blame.
+    const avgOnlyResult: ExtractionResult = {
+      ...highConfidenceResult,
+      data: { invoice_number: 'INV-2024-001', vendor: 'Acme Corp', notes: null },
+      confidence: { invoice_number: 0.65, vendor: 0.65, notes: 0.65 },
+      avgConfidence: 0.65,
+    };
+    render(
+      <ResultDetailModal
+        source={{
+          ...source,
+          reviewThresholds: { invoice_number: 0.5, vendor: 0.5, notes: 0.5 },
+        }}
+        result={avgOnlyResult}
+        label="Text 1"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/average confidence is below/)).toBeInTheDocument();
+    // Not the vacuous "0 field(s)" line — no field is below its threshold.
+    expect(screen.queryByText(/below their min confidence/)).not.toBeInTheDocument();
+  });
+
+  it('replaces the warning with an all-reviewed banner once every problem field is reviewed (issue #3)', () => {
+    render(
+      <ResultDetailModal
+        source={source}
+        result={{ ...lowConfidenceResult, reviewedFields: { invoice_number: true } }}
+        label="Text 1"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/All problem fields have been reviewed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Needs review/)).not.toBeInTheDocument();
+  });
+
   it('calls onClose when pressing Escape', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
