@@ -425,3 +425,27 @@
   - 同一出口 IP（公司/校园 NAT）共享单 IP 限额，正常试用 50 次/天够用
   - 计数在部署/重启后清零，/stats 数字是"本次部署以来"的当日用量
   - 验证：后端 226 passed / 2 skipped（新增 14 测试，含突变自证——禁用 per-IP 检查后 4 测试变红）；前端 184 passed（串行全量）+ tsc 0 错误。`excelExport.test.ts` 在并发满载下偶发超时（单独跑通过，与本决策无关，机器负载问题待观察）
+
+## D-020：复核字段保留原始提取值（originalData 快照）+ 导出对比
+
+- **日期**：2026-10-10
+- **状态**：已接受
+- **来源**：GitHub Issue #1（Sora130956/smart-data-extractor）——"复核字段时，需要保留原始字段值。导出的JSON和Excel中也要体现这一点，要能够对比原始提取值和复核后的值"
+- **背景**：
+  - F8 复核流的三处写入点（App `applyEdit`、historyStore `updateResultField`）都用 spread 直接覆盖 `result.data[fieldKey]`，原始提取值在内存与 localStorage 中均无处保存
+  - 导出 JSON（单条/全部/剪贴板/Raw JSON 面板）序列化的是覆盖后的 `data`，无法对比 LLM 答案与人工修正
+  - Excel `buildExportModel` 只读 `data`，无任何"已复核"标记或原始值列
+- **决策**：
+  1. `ExtractionResult` 新增 `originalData?: Record<string, unknown>`：仅在字段**首次**被编辑时快照旧值（re-edit 保留首快照，`hasOwnProperty` 判重）；未编辑字段无条目（其原始值就是 `data`）
+  2. 快照逻辑收敛为纯函数 `utils/review.ts#applyFieldEdit(result, fieldKey, newValue)`，App（屏上 state + 打开中的 modal）与 historyStore（localStorage 持久化镜像）共用，保证两处快照语义一致；data 为 null 时快照 null（字段原本不存在也算"原始值为空"）
+  3. JSON 导出零改动自动携带（序列化整个 result/source，`data`=复核后 + `originalData`=原始 + `reviewedFields`=标记）
+  4. Excel results sheet：字段在**任意行**被复核过 → 紧随其后插入「{字段名}（原始）/ (Original)」伴随列（i18n `excel.originalColumn` 插值）；行值仅在该行该字段已复核时填 `originalData` 快照，否则留空；confidence sheet 布局不受影响；无任何复核时保持原布局（向后兼容）
+  5. 详情弹窗：已复核且有快照的字段在当前值下方以弱化小字显示「原始值 Acme Corp / Original value Acme Corp」（i18n `resultDetail.originalValue`）
+- **理由（为什么不选备选方案）**：
+  - 备选 A：始终全量快照 `originalData = data`（提取完成时就复制一份）→ 放弃。多占内存/存储，且绝大多数字段从未被复核；按需快照让"originalData 有 key"本身就等于"被人工改过"
+  - 备选 B：Excel 加"已复核"布尔列 → 不够。Issue 明确要求"对比原始提取值和复核后的值"，布尔标记不提供对比内容；伴随列让两值并排
+  - 备选 C：在 reviewedFields 里存 `{ [key]: '原值' }`（布尔改值）→ 放弃。破坏既有布尔语义，localStorage 里旧数据不兼容
+- **影响**：
+  - 旧 localStorage 数据（无 originalData）兼容：无快照则弹窗不显示原始值行、Excel 该行原始列为空，行为退化合理
+  - `applyFieldEdit` 沿用既有"作用于 source 下全部 results"的行为（与修复前一致，多结果来源属边缘场景，不在本 issue 范围）
+  - 验证：TDD 先红（5 失败）后绿；前端 197 passed（21 files，串行）+ tsc 0 错误 + build 成功（exceljs 懒加载 chunk 不变）；突变自证（快照值改成 newValue 后 7 测试变红再还原）；浏览器端到端实测（发票预设提取 → 编辑供应商 → 弹窗显示「Acme Corporation Ltd / 原始值 Acme Corp / 已复核」、localStorage 与导出 JSON 均含 originalData、导出 Excel 无报错）
