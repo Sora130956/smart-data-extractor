@@ -497,3 +497,26 @@
   - 均值判定不豁免：标记允许为空的字段的 0.0 仍计入 avgConfidence，极端配比下仍可能仅因均值触发复核——已知边界，v1 接受（重算均值会让豁免语义雪上加霜）
   - smart 首轮与 D-021 同边界：字段刚生成无用户配置 → 全部不允许为空（= 现状）
   - 验证：TDD 分层先红（5 文件 15 失败）后绿（92 passed）；全量 vitest 235 passed（21 files；excelExport 首轮并发负载超时为既有抖动，重跑/单跑均通过）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
+
+## D-023：「允许为空」并入最低置信度 0.0 档（撤销独立列）
+
+- **日期**：2026-10-10
+- **状态**：已接受（替代 D-022 的 UI 形态；判定内核与快照机制沿用 D-022 不变）
+- **来源**：GitHub Issue #2 后续（用户拍板："那这里其实很令人困惑，允许为空，但置信度又有要求。要不取消允许为空这一列，最低置信度加一档允许为空 (0.0)"）
+- **背景**：
+  - D-022 交付后用户指出 UX 困惑：独立「允许为空」列与「最低置信度」列并排，"允许为空但置信度又有要求"两个旋钮互相打架，客户难以理解
+  - 用户洞察：允许为空本质就是阈值 0.0 的特例（后端把 null 字段 confidence 归零 0.0，空值天然从 0.0 线下通过）——可统一为单一心智模型："阈值就是一条线，空值＝0.0，跟线比即可"
+- **决策**：
+  1. 撤销独立列与独立字段：删 `SchemaField.allowEmpty`、SchemaEditor「允许为空」select 及词条（allowEmpty/allowEmptyNo/allowEmptyYes）
+  2. `MIN_CONFIDENCE_TIERS` 增第五档 `{ value: 0, labelKey: schema.minConfidenceEmpty }`（「允许为空 (0.0) / Allow empty (0.0)」），列宽 108px→120px 容纳长标签
+  3. `buildAllowEmptyFields` 谓词改 `f.minConfidence === 0`：0.0 档字段同时进两个快照——`reviewThresholds[field]=0`（非空低分 0.5 ≥ 0 通过）+ `allowEmptyFields[]`（空值豁免空值规则）；其余四档默认不允许为空＝现状
+  4. **语义收紧为完全免检**（用户设计的自然推论，替代 D-022 的"豁免仅覆盖空值"）：选 0.0 档后该字段非空低置信度也不再触发复核——对备注类完全可选字段更合理；confidence.ts 判定内核、allowEmptyFields 快照、Modal 两段警告归因、App 筛选计数全部沿用 D-022 零改动
+  5. 顺手修既有 flake：excelExport buildWorkbook 用例加 `{ timeout: 20000 }`（D-019 记录过的并发满载超时，连续两轮全量红后修掉）
+- **理由**：
+  - 单一旋钮 < 两个旋钮：档位下拉天然表达"越往下要求越松"，0.0 就是"无要求"，无需第二列解释交互关系
+  - 判定内核复用：thresholds/allowEmpty 两快照在 D-022 已就位，本次仅换谓词与 UI，改动面小
+- **影响**：
+  - 0.0 档字段非空低置信度不再复核（与 D-022 语义差异，接受：完全可选字段本就不设质量门槛）
+  - 均值判定仍不豁免（0.0 计入 avgConfidence）——沿用 D-022 已知边界
+  - D-022 的 allowEmpty 布尔字段仅存在于未推送的本地 commit，无线上数据，无需迁移
+  - 验证：TDD 先红（5 失败：SchemaEditor 五档顺序/无独立列 + review 谓词 3 用例；confidence 层 API 未变新用例直接通过）后绿（5 文件 91 passed）；全量 vitest 234 passed（21 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功
