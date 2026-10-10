@@ -52,11 +52,12 @@ export const useHistoryStore = create<HistoryState>((set) => ({
         savedAt: new Date().toISOString(),
         presetLabel,
         // Session-scoped file data is stripped before persisting (D-026/D-027):
-        // blob URLs die on reload, and the base64 page renders / locate boxes
-        // are heavy or unrenderable without the live file — localStorage only
-        // keeps the text snapshot (sourceText) that still renders after a
-        // restore. The live on-screen sources keep everything.
-        sources: sources.map(({ sourceFileUrl: _url, pageImages: _pages, fieldBoxes: _boxes, ...rest }) => rest),
+        // blob URLs die on reload, and the base64 page renders are heavy and
+        // unrenderable without the live file — localStorage only keeps the
+        // text snapshot (sourceText) and the lightweight OCR grounding blocks
+        // (pagesBlocks, D-028) that still work after a restore. The live
+        // on-screen sources keep everything.
+        sources: sources.map(({ sourceFileUrl: _url, pageImages: _pages, ...rest }) => rest),
       };
       const entries = [entry, ...state.entries].slice(0, HISTORY_LIMIT);
       persist(entries);

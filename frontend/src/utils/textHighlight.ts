@@ -4,6 +4,13 @@
 // in the extraction pipeline, so "where" is approximated by finding the
 // value as a substring of the source, tolerant of case and whitespace
 // differences (OCR output frequently re-flows line breaks and spacing).
+//
+// D-028 companion: matchFieldBoxes below grounds values against the OCR
+// grounding blocks instead (exact match after normalization). It must stay
+// semantically identical to the backend's locate.match_field_boxes — that
+// implementation's tests are the anchor for this one.
+
+import type { FieldBox, OcrBlock } from '@/types/extraction';
 
 export type FieldRange = [number, number];
 
@@ -88,4 +95,52 @@ export function findFieldRanges(
     ranges[field] = range;
   }
   return ranges;
+}
+
+/** Comparison key mirroring the backend _normalize: drop all whitespace
+ * (including the ideographic space), fold case, fold fullwidth ASCII to
+ * halfwidth (common in CJK OCR output). */
+function foldForMatch(s: string): string {
+  let out = '';
+  for (const ch of s) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code >= 0xff01 && code <= 0xff5e) {
+      out += String.fromCharCode(code - 0xfee0);
+    } else if (!/\s/.test(ch)) {
+      out += ch.toLowerCase();
+    }
+  }
+  return out;
+}
+
+/** D-028: match each scalar field value of `data` against the source's
+ * per-page OCR grounding blocks. Normalized exact match only — no
+ * substring or fuzzy matching (a value inside a longer line does not
+ * hit); the first hit in page order wins. Returns field -> {page, box};
+ * unmatched fields are simply absent. Pure and cheap: safe to call in a
+ * useMemo on every modal open. */
+export function matchFieldBoxes(
+  data: Record<string, unknown> | null | undefined,
+  pagesBlocks: Array<OcrBlock[] | null | undefined> | undefined,
+): Record<string, FieldBox> {
+  const boxes: Record<string, FieldBox> = {};
+  if (data == null || pagesBlocks == null) return boxes;
+
+  const pages = pagesBlocks.map((blocks) =>
+    (blocks ?? []).map((b) => ({ text: foldForMatch(b.text), block: b })),
+  );
+
+  for (const [field, value] of Object.entries(data)) {
+    if (value == null || typeof value === 'object') continue;
+    const needle = foldForMatch(String(value));
+    if (needle === '') continue;
+    for (let page = 0; page < pages.length; page += 1) {
+      const hit = pages[page].find(({ text }) => text === needle);
+      if (hit != null) {
+        boxes[field] = { page, box: hit.block.box };
+        break;
+      }
+    }
+  }
+  return boxes;
 }

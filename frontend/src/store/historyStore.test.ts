@@ -178,28 +178,30 @@ describe('historyStore actions', () => {
     expect(useHistoryStore.getState().entries).toEqual(before);
   });
 
-  it('addEntry strips session-scoped file data (blob url, page images, boxes) before persisting', () => {
+  it('addEntry strips session-scoped file data (blob url, page images) before persisting', () => {
     const { addEntry } = useHistoryStore.getState();
     const source: ExtractionSource = {
       ...makeSource('s1'),
       type: 'pdf',
       sourceFileUrl: 'blob:mock-url',
       pageImages: ['aGk=', 'Ynk='],
-      fieldBoxes: { vendor: { page: 0, box: [1, 2, 3, 4] } },
+      pagesBlocks: [[{ text: 'Acme', box: [1, 2, 3, 4] }], null],
     };
 
     addEntry([source], 'Invoice');
 
     // Both the in-memory entry and the persisted copy are stripped: page
     // renders are heavy base64 payloads that would blow the localStorage
-    // quota, and blob urls are dead after a reload (D-026/D-027).
+    // quota, and blob urls are dead after a reload (D-026/D-027). The
+    // lightweight OCR grounding blocks survive (D-028) so the restored
+    // review pane can still match field boxes locally.
     const persisted = useHistoryStore.getState().entries[0].sources[0];
     expect(persisted).not.toHaveProperty('sourceFileUrl');
     expect(persisted).not.toHaveProperty('pageImages');
-    expect(persisted).not.toHaveProperty('fieldBoxes');
+    expect(persisted.pagesBlocks).toEqual([[{ text: 'Acme', box: [1, 2, 3, 4] }], null]);
     const stored = readStored()[0].sources[0];
     expect(stored).not.toHaveProperty('sourceFileUrl');
     expect(stored).not.toHaveProperty('pageImages');
-    expect(stored).not.toHaveProperty('fieldBoxes');
+    expect(stored.pagesBlocks).toEqual([[{ text: 'Acme', box: [1, 2, 3, 4] }], null]);
   });
 });

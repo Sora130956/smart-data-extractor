@@ -74,12 +74,23 @@ export const schemaResolveResponseSchema = z.object({
   cost_cny: z.number(),
 });
 
+// One OCR grounding block (D-028): a text line/phrase plus its bounding box
+// normalized to 0-100 (percentages of the page image).
+export const ocrBlockSchema = z.object({
+  text: z.string(),
+  box: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+});
+
 export const parsePdfResponseSchema = z.object({
   text: z.string(),
   // Per-page OCR text aligned to the original page order; null marks a failed page.
   pages: z.array(z.string().nullable()),
+  // Per-page OCR grounding blocks (D-028), aligned with `pages` — the review
+  // pane matches extracted values against them locally. Optional/null: pages
+  // without coordinate info and older backends omit it.
+  pages_blocks: z.array(z.array(ocrBlockSchema).nullable()).nullish(),
   pages_failed: z.array(z.number()),
-  // Per-page base64 PNG renders (D-027) — the review pane overlays locate
+  // Per-page base64 PNG renders (D-027) — the review pane overlays grounding
   // boxes on them. Optional/null: image parsing and older backends omit it.
   pages_images: z.array(z.string()).nullish(),
   tokens_used: tokensUsedSchema,
@@ -90,22 +101,6 @@ export const parsePdfResponseSchema = z.object({
 // /parse_image returns the same shape (one image = one "page").
 export const parseImageResponseSchema = parsePdfResponseSchema;
 
-export const locateBoxSchema = z.object({
-  // 0-based page index the value was found on; null = single-image sources.
-  page: z.number().nullable(),
-  // Normalized 0-100 bounding box: [x1, y1, x2, y2], top-left / bottom-right.
-  box: z.tuple([z.number(), z.number(), z.number(), z.number()]),
-});
-
-export const locateFieldsResponseSchema = z.object({
-  // Order-aligned with the submitted values list; null = not found.
-  boxes: z.array(locateBoxSchema.nullable()),
-  pages_scanned: z.number(),
-  tokens_used: tokensUsedSchema,
-  cost_usd: z.number(),
-  cost_cny: z.number(),
-});
-
 export type TokensUsed = z.infer<typeof tokensUsedSchema>;
 export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
 export type BatchExtractResponse = z.infer<typeof batchExtractResponseSchema>;
@@ -115,4 +110,3 @@ export type PresetListItem = z.infer<typeof presetListItemSchema>;
 export type SchemaResolveResponse = z.infer<typeof schemaResolveResponseSchema>;
 export type ParsePdfResponse = z.infer<typeof parsePdfResponseSchema>;
 export type ParseImageResponse = ParsePdfResponse;
-export type LocateFieldsResponse = z.infer<typeof locateFieldsResponseSchema>;

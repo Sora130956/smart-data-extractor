@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   batchExtractResponseSchema,
-  locateFieldsResponseSchema,
   parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
@@ -301,44 +300,57 @@ describe('parsePdfResponseSchema', () => {
     const parsed = parsePdfResponseSchema.parse(payload);
     expect(parsed.pages_images).toBeNull();
   });
-});
 
-describe('locateFieldsResponseSchema', () => {
-  const payload = {
-    boxes: [
-      { page: 0, box: [10, 20, 30, 40] },
-      null,
-      { page: null, box: [5, 5, 6, 6] },
-    ],
-    pages_scanned: 2,
-    tokens_used: { input: 100, output: 20 },
-    cost_usd: 0.001,
-    cost_cny: 0.00725,
-  };
+  it('parses per-page grounding blocks when present (D-028)', () => {
+    const payload = {
+      text: 'page one',
+      pages: ['page one'],
+      pages_failed: [],
+      pages_images: ['aGk='],
+      pages_blocks: [
+        [
+          { text: 'Invoice Number', box: [10, 20, 30, 25] },
+          { text: 'INV-001', box: [40, 20, 60, 25] },
+        ],
+        null,
+      ],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
 
-  it('parses an order-aligned box list mixing found, missing and unpaged entries', () => {
-    const parsed = locateFieldsResponseSchema.parse(payload);
-    expect(parsed.boxes).toHaveLength(3);
-    expect(parsed.boxes[0]).toEqual({ page: 0, box: [10, 20, 30, 40] });
-    expect(parsed.boxes[1]).toBeNull();
-    expect(parsed.boxes[2]).toEqual({ page: null, box: [5, 5, 6, 6] });
-    expect(parsed.pages_scanned).toBe(2);
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages_blocks).toHaveLength(2);
+    expect(parsed.pages_blocks?.[0]).toHaveLength(2);
+    expect(parsed.pages_blocks?.[0]?.[1]).toEqual({ text: 'INV-001', box: [40, 20, 60, 25] });
+    expect(parsed.pages_blocks?.[1]).toBeNull();
   });
 
-  it('rejects a box that is not a 4-number tuple', () => {
-    expect(() =>
-      locateFieldsResponseSchema.parse({ ...payload, boxes: [{ page: 0, box: [1, 2, 3] }] }),
-    ).toThrow();
+  it('rejects a grounding block whose box is not a 4-number tuple', () => {
+    const payload = {
+      text: 'page one',
+      pages: ['page one'],
+      pages_failed: [],
+      pages_blocks: [[{ text: 'INV-001', box: [1, 2, 3] }]],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    expect(() => parsePdfResponseSchema.parse(payload)).toThrow();
   });
 
-  it('rejects a payload missing boxes', () => {
-    expect(() =>
-      locateFieldsResponseSchema.parse({
-        pages_scanned: 1,
-        tokens_used: { input: 0, output: 0 },
-        cost_usd: 0,
-        cost_cny: 0,
-      }),
-    ).toThrow();
+  it('tolerates a missing pages_blocks key (older backends)', () => {
+    const payload = {
+      text: 'page one',
+      pages: ['page one'],
+      pages_failed: [],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages_blocks).toBeUndefined();
   });
 });

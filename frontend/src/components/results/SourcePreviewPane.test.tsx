@@ -146,10 +146,4 @@ describe('SourcePreviewPane file view (D-027)', () => {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
   });
-
-  it('shows a locating hint while the vision model is searching', () => {
-    renderPane({ source: { ...base, pageImages: ['aGk='] }, locating: true });
-
-    expect(screen.getByText('Locating fields…')).toBeInTheDocument();
-  });
 });

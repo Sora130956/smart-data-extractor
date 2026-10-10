@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findFieldRanges, findFieldRange } from './textHighlight';
+import { findFieldRanges, findFieldRange, matchFieldBoxes } from './textHighlight';
 
 // OCR text: values may differ in case or be split across lines/whitespace.
 const INVOICE_TEXT = `INVOICE
@@ -92,5 +92,60 @@ describe('findFieldRanges', () => {
   it('returns an empty map for empty data', () => {
     expect(findFieldRanges(INVOICE_TEXT, {})).toEqual({});
     expect(findFieldRanges(INVOICE_TEXT, null as unknown as Record<string, unknown>)).toEqual({});
+  });
+});
+
+describe('matchFieldBoxes (D-028 local grounding match)', () => {
+  const blocks = (text: string, box: [number, number, number, number]) => ({ text, box });
+
+  it('returns the page and box of the first exact match, keyed by field', () => {
+    const boxes = matchFieldBoxes(
+      { invoice_number: 'INV-2024-001' },
+      [[blocks('INV-2024-001', [10, 20, 30, 40])]],
+    );
+
+    expect(boxes).toEqual({ invoice_number: { page: 0, box: [10, 20, 30, 40] } });
+  });
+
+  it('searches later pages and keeps the first hit in page order', () => {
+    const boxes = matchFieldBoxes(
+      { vendor: 'Acme Corp' },
+      [null, [], [blocks('Acme Corp', [1, 2, 3, 4])]],
+    );
+
+    expect(boxes).toEqual({ vendor: { page: 2, box: [1, 2, 3, 4] } });
+  });
+
+  it('folds whitespace, case, and fullwidth characters before comparing', () => {
+    const boxes = matchFieldBoxes(
+      { vendor: 'acme corp' },
+      [
+        [
+          blocks('　ACME　Corp　', [5, 5, 50, 15]), // U+3000 ideographic spaces
+          blocks('ＡＢＣ', [0, 0, 10, 10]), // fullwidth ASCII
+        ],
+      ],
+    );
+
+    expect(boxes).toEqual({ vendor: { page: 0, box: [5, 5, 50, 15] } });
+  });
+
+  it('does not match substrings or blocks that merely contain the value', () => {
+    const boxes = matchFieldBoxes(
+      { invoice_number: 'INV-2024-001' },
+      [[blocks('Invoice No: INV-2024-001', [10, 20, 30, 40])]],
+    );
+
+    expect(boxes).toEqual({});
+  });
+
+  it('skips nullish, object, and empty-string values', () => {
+    const pages = [[blocks('x', [1, 2, 3, 4])]];
+    expect(matchFieldBoxes({ notes: null, items: [{ a: 1 }], blank: '' }, pages)).toEqual({});
+  });
+
+  it('returns an empty map when data or pagesBlocks is missing', () => {
+    expect(matchFieldBoxes(null, [[blocks('x', [1, 2, 3, 4])]])).toEqual({});
+    expect(matchFieldBoxes({ a: 'x' }, undefined)).toEqual({});
   });
 });

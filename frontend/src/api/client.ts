@@ -3,14 +3,12 @@
 
 import {
   batchExtractResponseSchema,
-  locateFieldsResponseSchema,
   parseImageResponseSchema,
   parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
   type BatchExtractResponse,
-  type LocateFieldsResponse,
   type ParseImageResponse,
   type ParsePdfResponse,
   type PresetListItem,
@@ -162,30 +160,4 @@ export async function parseImage(file: File): Promise<ParseImageResponse> {
   if (!res.ok) throw await toApiError(res);
 
   return parseImageResponseSchema.parse(await res.json());
-}
-
-/**
- * POST /locate_fields (D-027): ask the vision model where each extracted
- * value sits in the original file. The response boxes are order-aligned
- * with `values`. Billed like other LLM endpoints (daily quota applies).
- */
-export async function locateFields(
-  file: File,
-  values: string[],
-): Promise<LocateFieldsResponse> {
-  const formData = new FormData();
-  formData.append('file', file);
-  // Repeated form field: one entry per value, order preserved.
-  for (const value of values) {
-    formData.append('values', value);
-  }
-
-  const res = await fetch('/api/locate_fields', {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) throw await toApiError(res);
-
-  return locateFieldsResponseSchema.parse(await res.json());
 }

@@ -4,7 +4,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { adaptBatchExtractResponse } from '@/api/adapters';
 import { batchExtract } from '@/api/client';
-import type { ExtractionSource } from '@/types/extraction';
+import type { ExtractionSource, OcrBlock } from '@/types/extraction';
 
 export interface BatchExtractInput {
   texts: string[];
@@ -27,6 +27,9 @@ export interface BatchExtractInput {
   /** Per-text base64 page renders for pdf uploads (D-027), aligned by
    * index — the review pane overlays locate boxes on these page images. */
   pageImages?: Array<string[] | undefined>;
+  /** Per-text OCR grounding blocks (D-028), aligned by index — the review
+   * pane matches extracted values against them locally. */
+  pagesBlocks?: Array<Array<OcrBlock[] | null> | undefined>;
   /** field_name -> user-configured minimum confidence, snapshotted onto each
    * source so review flags survive later schema edits (issue #2). */
   reviewThresholds?: Record<string, number>;
@@ -37,9 +40,9 @@ export interface BatchExtractInput {
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, fileTypes, pageImages, reviewThresholds, allowEmptyFields }) => {
+    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, fileTypes, pageImages, pagesBlocks, reviewThresholds, allowEmptyFields }) => {
       const response = await batchExtract({ texts, preset, schema, instructions, lang });
-      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields, fileTypes, pageImages);
+      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields, fileTypes, pageImages, pagesBlocks);
     },
   });
 }

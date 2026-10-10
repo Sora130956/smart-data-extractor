@@ -1,16 +1,13 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import i18next from 'i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { ResultDetailModal } from './ResultDetailModal';
-import { locateFields } from '@/api/client';
-import type { LocateFieldsResponse } from '@/api/schemas';
 import { exportToExcel } from '@/utils/excelExport';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 
 vi.mock('@/utils/excelExport', () => ({ exportToExcel: vi.fn() }));
-vi.mock('@/api/client', () => ({ locateFields: vi.fn() }));
 
 const source: ExtractionSource = {
   id: 'text-0',
@@ -687,7 +684,7 @@ describe('ResultDetailModal', () => {
     });
   });
 
-  describe('auto locate on the original file (D-027)', () => {
+  describe('grounding boxes from OCR blocks (D-028)', () => {
     const PANE_TEXT =
       'INVOICE\nInvoice No: INV-2024-001\nVendor: Acme Corp\nTotal Amount: $100.00\n';
 
@@ -697,170 +694,104 @@ describe('ResultDetailModal', () => {
         type: 'image',
         sourceFileUrl: 'blob:img',
         sourceText: PANE_TEXT,
+        // One page of OCR grounding blocks: block text is matched against
+        // the extracted values verbatim (after normalization).
+        pagesBlocks: [
+          [
+            { text: 'INVOICE', box: [5, 5, 30, 10] },
+            { text: 'INV-2024-001', box: [40, 12, 70, 18] },
+            { text: 'Acme Corp', box: [40, 20, 70, 26] },
+          ],
+        ],
         ...overrides,
       };
     }
 
     afterEach(() => {
       vi.unstubAllGlobals();
-      vi.clearAllMocks();
     });
 
-    it('locates the field values in the original file on open and reports key-mapped boxes', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        blob: async () => new Blob(['x'], { type: 'image/png' }),
-      });
-      vi.stubGlobal('fetch', fetchMock);
-      vi.mocked(locateFields).mockResolvedValue({
-        boxes: [{ page: null, box: [10, 20, 30, 40] }, null],
-        pages_scanned: 1,
-        tokens_used: { input: 100, output: 20 },
-        cost_usd: 0,
-        cost_cny: 0,
-      });
-      const onLocateBoxes = vi.fn();
-
-      render(
-        <ResultDetailModal
-          source={makeFileSource()}
-          result={highConfidenceResult}
-          label="Text 1"
-          onClose={() => {}}
-          onLocateBoxes={onLocateBoxes}
-        />,
-      );
-
-      await waitFor(() => expect(onLocateBoxes).toHaveBeenCalledTimes(1));
-      // The uploaded blob is re-fetched and posted back as a File.
-      expect(fetchMock).toHaveBeenCalledWith('blob:img');
-      const [sentFile, sentValues] = vi.mocked(locateFields).mock.calls[0];
-      expect(sentFile).toBeInstanceOf(File);
-      expect(sentFile.name).toBe('Manual Input 1');
-      // Null values are skipped; the rest go as strings in entry order.
-      expect(sentValues).toEqual(['INV-2024-001', 'Acme Corp']);
-      // Boxes come back keyed by field name; unfound values are dropped.
-      expect(onLocateBoxes).toHaveBeenCalledWith({
-        invoice_number: { page: null, box: [10, 20, 30, 40] },
-      });
-    });
-
-    it('skips the locate call when boxes are already cached on the source', () => {
+    it('matches field boxes locally from the persisted grounding blocks on open, with no network call', () => {
       const fetchMock = vi.fn();
       vi.stubGlobal('fetch', fetchMock);
+
       render(
         <ResultDetailModal
-          source={makeFileSource({ fieldBoxes: {} })}
+          source={makeFileSource()}
           result={highConfidenceResult}
           label="Text 1"
           onClose={() => {}}
-          onLocateBoxes={vi.fn()}
         />,
       );
 
-      // The cache guard returns before anything is fetched or billed.
+      // Both matched fields offer the locate button; nothing is fetched —
+      // the boxes come from the parse-time grounding, not a second call.
+      expect(
+        screen.getByRole('button', { name: 'Locate Invoice Number in source' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Locate Vendor in source' })).toBeInTheDocument();
+      // notes is null and unmatched values expose no button.
+      expect(screen.queryByRole('button', { name: /Locate Notes/ })).not.toBeInTheDocument();
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(locateFields).not.toHaveBeenCalled();
     });
 
-    it('skips text sources and sources without a file url', () => {
-      const onLocateBoxes = vi.fn();
-      const { rerender } = render(
-        <ResultDetailModal
-          source={source}
-          result={highConfidenceResult}
-          label="Text 1"
-          onClose={() => {}}
-          onLocateBoxes={onLocateBoxes}
-        />,
-      );
-      expect(locateFields).not.toHaveBeenCalled();
-
-      // File-backed type but the blob url is gone (restored history entry).
-      rerender(
-        <ResultDetailModal
-          source={makeFileSource({ sourceFileUrl: undefined })}
-          result={highConfidenceResult}
-          label="Text 1"
-          onClose={() => {}}
-          onLocateBoxes={onLocateBoxes}
-        />,
-      );
-      expect(locateFields).not.toHaveBeenCalled();
-      expect(onLocateBoxes).not.toHaveBeenCalled();
-    });
-
-    it('stays silent and usable when the locate request fails', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        blob: async () => new Blob(['x'], { type: 'image/png' }),
-      });
-      vi.stubGlobal('fetch', fetchMock);
-      vi.mocked(locateFields).mockRejectedValue(new Error('vision model exploded'));
-      const onLocateBoxes = vi.fn();
-
+    it('does not match when the source has no grounding blocks (text-only / legacy data)', () => {
       render(
         <ResultDetailModal
-          source={makeFileSource()}
+          source={makeFileSource({ sourceText: undefined, pagesBlocks: undefined })}
           result={highConfidenceResult}
           label="Text 1"
           onClose={() => {}}
-          onLocateBoxes={onLocateBoxes}
         />,
       );
 
-      await waitFor(() => expect(locateFields).toHaveBeenCalledTimes(1));
-      expect(onLocateBoxes).not.toHaveBeenCalled();
-      // The modal keeps working — the text view is the fallback.
-      expect(screen.getByText('INV-2024-001')).toBeInTheDocument();
+      // No text to highlight and no blocks to match: no locate buttons.
+      expect(screen.queryByRole('button', { name: /Locate/ })).not.toBeInTheDocument();
     });
 
-    it('shows a locating hint while the request is in flight', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({
-        blob: async () => new Blob(['x'], { type: 'image/png' }),
-      });
-      vi.stubGlobal('fetch', fetchMock);
-      let resolveLocate!: (value: LocateFieldsResponse) => void;
-      vi.mocked(locateFields).mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            resolveLocate = resolve;
-          }),
-      );
-
-      render(
-        <ResultDetailModal
-          source={makeFileSource()}
-          result={highConfidenceResult}
-          label="Text 1"
-          onClose={() => {}}
-          onLocateBoxes={vi.fn()}
-        />,
-      );
-
-      expect(await screen.findByText('Locating fields…')).toBeInTheDocument();
-
-      resolveLocate({
-        boxes: [],
-        pages_scanned: 1,
-        tokens_used: { input: 0, output: 0 },
-        cost_usd: 0,
-        cost_cny: 0,
-      });
-      await waitFor(() =>
-        expect(screen.queryByText('Locating fields…')).not.toBeInTheDocument(),
-      );
-    });
-
-    it('offers the locate button for vision-located fields even without a text match', () => {
+    it('ignores blocks whose text only contains the value (exact block match only)', () => {
       render(
         <ResultDetailModal
           source={makeFileSource({
             sourceText: undefined,
-            fieldBoxes: { invoice_number: { page: null, box: [1, 2, 3, 4] } },
+            pagesBlocks: [[{ text: 'Invoice No: INV-2024-001', box: [10, 20, 30, 40] }]],
           })}
           result={highConfidenceResult}
           label="Text 1"
           onClose={() => {}}
-          onLocateBoxes={vi.fn()}
+        />,
+      );
+
+      // The block text must equal the extracted value after normalization —
+      // a surrounding label is not a match (mirrors the backend semantics).
+      expect(screen.queryByRole('button', { name: /Locate/ })).not.toBeInTheDocument();
+    });
+
+    it('folds whitespace, case, and fullwidth characters when matching', () => {
+      render(
+        <ResultDetailModal
+          source={makeFileSource({
+            sourceText: undefined,
+            pagesBlocks: [[{ text: '  inv-2024-001  ', box: [10, 20, 30, 40] }]],
+          })}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: 'Locate Invoice Number in source' }),
+      ).toBeInTheDocument();
+    });
+
+    it('offers the locate button for grounded fields even without a text match', () => {
+      render(
+        <ResultDetailModal
+          source={makeFileSource({ sourceText: undefined })}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
         />,
       );
 
@@ -873,14 +804,10 @@ describe('ResultDetailModal', () => {
       const user = userEvent.setup();
       render(
         <ResultDetailModal
-          source={makeFileSource({
-            pageImages: ['aGk='],
-            fieldBoxes: { invoice_number: { page: null, box: [10, 20, 30, 40] } },
-          })}
+          source={makeFileSource({ pageImages: ['aGk='] })}
           result={highConfidenceResult}
           label="Text 1"
           onClose={() => {}}
-          onLocateBoxes={vi.fn()}
         />,
       );
 

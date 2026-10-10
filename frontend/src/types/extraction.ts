@@ -4,11 +4,19 @@
 export type SourceType = 'pdf' | 'image' | 'text';
 export type ResultStatus = 'success' | 'failed';
 
-/** Where an extracted value sits in the original file (D-027): a
- * normalized 0-100 bounding box, plus the 0-based page index it was found
- * on (null = single-image sources, which have no paging). */
+/** One OCR grounding block (D-028): a text line/phrase and its bounding
+ * box normalized to 0-100 (percentages of the page image). */
+export interface OcrBlock {
+  text: string;
+  box: [number, number, number, number];
+}
+
+/** Where an extracted value sits in the original file: a normalized 0-100
+ * bounding box plus the 0-based page index it was matched on. Computed at
+ * render time from the source's OCR grounding blocks (D-028) — never
+ * persisted. */
 export interface FieldBox {
-  page: number | null;
+  page: number;
   box: [number, number, number, number];
 }
 
@@ -68,15 +76,16 @@ export interface ExtractionSource {
    * `meta` (a 60-char preview) it is never clipped. */
   sourceText?: string;
   /** Per-page base64 PNG renders of the original PDF (D-027) — the review
-   * pane overlays locate boxes on these page images instead of an iframe.
+   * pane overlays grounding boxes on these page images instead of an iframe.
    * Session-scoped like `sourceFileUrl`; stripped from persisted history
    * (heavy base64 payloads would blow the localStorage quota). */
   pageImages?: string[];
-  /** field_name -> where its value sits in the original file (D-027),
-   * cached from the /locate_fields call so re-opening the detail modal
-   * does not re-bill the vision model. Session-scoped: restored history
-   * entries have no file to render boxes on, so it is not persisted. */
-  fieldBoxes?: Record<string, FieldBox>;
+  /** Per-page OCR grounding blocks (D-028), aligned with `pages` — the
+   * review pane matches extracted values against them locally to overlay
+   * highlight boxes. Part of the OCR result itself, so it persists with
+   * the history entry (lightweight: text + 4 numbers per block); null
+   * marks a page without coordinate info. */
+  pagesBlocks?: Array<OcrBlock[] | null>;
   results: ExtractionResult[];
   stats: {
     succeeded: number;

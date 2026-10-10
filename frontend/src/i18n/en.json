@@ -183,8 +183,7 @@
       "noSource": "No source preview available",
       "pageOf": "Page {{page}} / {{total}}",
       "prevPage": "Previous page",
-      "nextPage": "Next page",
-      "locating": "Locating fields…"
+      "nextPage": "Next page"
     },
     "editField": "Edit {{field}}",
     "reviewed": "Reviewed",

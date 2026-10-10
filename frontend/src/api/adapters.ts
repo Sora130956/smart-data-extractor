@@ -3,7 +3,7 @@
 // == exactly one Result (the 1:1 special case of the general 1:N model).
 
 import type { BatchExtractResponse, BatchResultItem } from './schemas';
-import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource, OcrBlock } from '@/types/extraction';
 
 const CONFIDENCE_SUFFIX = '_confidence';
 
@@ -63,6 +63,9 @@ export function adaptBatchExtractResponse(
   allowEmptyFields?: string[],
   fileTypes?: Array<'pdf' | 'image' | undefined>,
   pageImages?: Array<string[] | undefined>,
+  /** Per-text OCR grounding blocks (D-028), aligned by index — the review
+   * pane matches extracted values against them locally to overlay boxes. */
+  pagesBlocks?: Array<Array<OcrBlock[] | null> | undefined>,
 ): ExtractionSource[] {
   // Ids must stay unique across batches: the UI accumulates results from
   // successive extractions, so `text-${i}` alone would collide as a React key.
@@ -78,6 +81,7 @@ export function adaptBatchExtractResponse(
       reviewThresholds != null && Object.keys(reviewThresholds).length > 0;
     const hasAllowEmpty = allowEmptyFields != null && allowEmptyFields.length > 0;
     const hasPageImages = pageImages != null && (pageImages[i]?.length ?? 0) > 0;
+    const hasPagesBlocks = pagesBlocks != null && (pagesBlocks[i]?.length ?? 0) > 0;
 
     return {
       id: sourceId,
@@ -95,6 +99,7 @@ export function adaptBatchExtractResponse(
       ...(fileUrls?.[i] ? { sourceFileUrl: fileUrls[i] } : {}),
       ...(texts[i] ? { sourceText: texts[i] } : {}),
       ...(hasPageImages ? { pageImages: pageImages[i] } : {}),
+      ...(hasPagesBlocks ? { pagesBlocks: pagesBlocks[i] } : {}),
       results: [result],
       stats: {
         succeeded: result.status === 'success' ? 1 : 0,

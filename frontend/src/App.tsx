@@ -22,7 +22,7 @@ import {
   buildReviewThresholds,
   reviewState,
 } from '@/utils/review';
-import type { ExtractionResult, ExtractionSource, FieldBox, SchemaField } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource, OcrBlock, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
 
@@ -107,8 +107,12 @@ function AppShell() {
     fileUrl?: string,
     fileType?: 'pdf' | 'image',
     pageImages?: string[],
+    pagesBlocks?: Array<OcrBlock[] | null>,
   ) {
-    setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text, fileUrl, fileType, pageImages }]);
+    setStaged((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), name, text, fileUrl, fileType, pageImages, pagesBlocks },
+    ]);
   }
 
   function handleRemove(id: string) {
@@ -139,23 +143,6 @@ function AppShell() {
       prev && prev.source.id === sourceId ? { ...prev, result: applyEdit(prev.result) } : prev,
     );
     updateResultField(sourceId, fieldKey, newValue);
-  }
-
-  /** D-027: cache the vision-locate boxes on the source (on-screen list and
-   * the open modal's snapshot) so re-opening the detail view never re-bills
-   * the locate call. History entries are unaffected — they never render
-   * file previews and strip boxes on persist anyway. */
-  function handleLocateBoxes(boxes: Record<string, FieldBox>) {
-    if (!selected) return;
-    const sourceId = selected.source.id;
-    setSources((prev) =>
-      prev.map((source) => (source.id === sourceId ? { ...source, fieldBoxes: boxes } : source)),
-    );
-    setSelected((prev) =>
-      prev && prev.source.id === sourceId
-        ? { ...prev, source: { ...prev.source, fieldBoxes: boxes } }
-        : prev,
-    );
   }
 
   async function handleStart() {
@@ -300,8 +287,11 @@ function AppShell() {
         // Upload kind per blob url (issue #4 review pane).
         fileTypes: staged.map((item) => item.fileType),
         // Per-text base64 page renders for pdf uploads (D-027): the review
-        // pane overlays locate boxes on these page images.
+        // pane overlays grounding boxes on these page images.
         pageImages: staged.map((item) => item.pageImages),
+        // Per-text OCR grounding blocks (D-028): the review pane matches
+        // extracted values against them locally.
+        pagesBlocks: staged.map((item) => item.pagesBlocks),
         ...target,
         instructions: instructions || undefined,
         // UI language: preset field descriptions sent to the LLM follow it.
@@ -431,7 +421,6 @@ function AppShell() {
           label={t('paste.itemLabel', { index: selected.resultIndex + 1 })}
           onClose={() => setSelected(null)}
           onFieldUpdate={handleFieldUpdate}
-          onLocateBoxes={handleLocateBoxes}
         />
       ) : null}
 

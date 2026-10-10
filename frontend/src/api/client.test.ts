@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, batchExtract, getPresets, getPresetSchema, locateFields, parseImage, parsePdf, resolveSchema } from './client';
+import { ApiError, batchExtract, getPresets, getPresetSchema, parseImage, parsePdf, resolveSchema } from './client';
 
 describe('batchExtract', () => {
   afterEach(() => {
@@ -403,62 +403,6 @@ describe('parseImage', () => {
     await expect(parseImage(file)).rejects.toMatchObject({
       status: 422,
       message: 'File must be an image',
-    });
-  });
-});
-
-describe('locateFields', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('posts the file and every value as multipart form data and parses boxes', async () => {
-    const payload = {
-      boxes: [{ page: null, box: [10, 20, 30, 40] }, null],
-      pages_scanned: 1,
-      tokens_used: { input: 100, output: 20 },
-      cost_usd: 0,
-      cost_cny: 0,
-    };
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => payload,
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const file = new File([new Uint8Array([1, 2, 3])], 'scan.png', { type: 'image/png' });
-    const result = await locateFields(file, ['Acme', 'INV-001']);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/locate_fields',
-      expect.objectContaining({ method: 'POST' }),
-    );
-    const call = fetchMock.mock.calls[0][1];
-    expect(call.body).toBeInstanceOf(FormData);
-    expect(call.body.get('file')).toBe(file);
-    // Repeated form field: one "values" entry per submitted value, order kept.
-    expect(call.body.getAll('values')).toEqual(['Acme', 'INV-001']);
-    expect(result.boxes).toHaveLength(2);
-    expect(result.boxes[0]).toEqual({ page: null, box: [10, 20, 30, 40] });
-    expect(result.boxes[1]).toBeNull();
-  });
-
-  it('throws ApiError on a non-ok response', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      statusText: 'Too Many Requests',
-      text: async () =>
-        JSON.stringify({
-          detail: { code: 'quota_per_ip', message: 'daily quota reached', reset_at: '00:00 UTC' },
-        }),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const file = new File([new Uint8Array([1])], 'scan.png', { type: 'image/png' });
-    await expect(locateFields(file, ['Acme'])).rejects.toMatchObject({
-      status: 429,
-      code: 'quota_per_ip',
     });
   });
 });

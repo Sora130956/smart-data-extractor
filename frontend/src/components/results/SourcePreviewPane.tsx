@@ -1,12 +1,13 @@
 // Issue #4 review pane: shows the original file / extraction text beside
 // the field list so reviewers can compare in place instead of opening a
-// new tab. D-027: the file view renders the original as page images with
-// the locate boxes overlaid directly on them — warning color for fields
+// new tab. D-028: the file view renders the original as page images with
+// the grounding boxes overlaid directly on them — warning color for fields
 // that need review, success for reviewed ones — so a reviewer verifies a
-// low-confidence value against the source image at a glance. A locate
-// click jumps to the box's page and flashes it; PDFs without page renders
-// (legacy data) fall back to the iframe embed, and the text view keeps the
-// issue #4 inline highlights as the no-vision fallback.
+// low-confidence value against the source image at a glance. The boxes are
+// matched locally from the OCR grounding blocks (no extra model call). A
+// locate click jumps to the box's page and flashes it; PDFs without page
+// renders (legacy data) fall back to the iframe embed, and the text view
+// keeps the issue #4 inline highlights as the fallback.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -30,11 +31,9 @@ export interface SourcePreviewPaneProps {
   /** Locate request from the field list; a fresh nonce re-triggers the
    * scroll+flash (re-clicking the same field must work). */
   focus: { field: string; nonce: number } | null;
-  /** field -> where its value sits in the original file (D-027), from
-   * /locate_fields via the detail modal. Drives the file-view overlays. */
+  /** field -> where its value sits in the original file (D-028), matched
+   * locally from the OCR grounding blocks. Drives the file-view overlays. */
   boxes: Record<string, FieldBox>;
-  /** True while the modal's background /locate_fields call is running. */
-  locating?: boolean;
 }
 
 export function SourcePreviewPane({
@@ -44,7 +43,6 @@ export function SourcePreviewPane({
   reviewedFields,
   focus,
   boxes,
-  locating = false,
 }: SourcePreviewPaneProps) {
   const { t } = useTranslation();
   const hasFile = source.sourceFileUrl != null;
@@ -69,14 +67,14 @@ export function SourcePreviewPane({
   // Stay in range when a rerender shrinks the page list.
   const safeIndex = Math.min(pageIndex, Math.max(pages.length - 1, 0));
 
-  // Locate click: prefer the vision box (jump to its page on the file view
+  // Locate click: prefer the grounding box (jump to its page on the file view
   // and flash it); fall back to the text-view highlight when there is none.
   useEffect(() => {
     if (focus == null) return;
     const box = boxes[focus.field];
     if (box != null) {
       setTab('file');
-      if (box.page != null && pages.length > 0) {
+      if (pages.length > 0) {
         setPageIndex(Math.min(Math.max(box.page, 0), pages.length - 1));
       }
       setActiveField(focus.field);
@@ -166,15 +164,6 @@ export function SourcePreviewPane({
             {t('resultDetail.preview.text')}
           </button>
         ) : null}
-        {tab === 'file' && locating ? (
-          <span className="flex items-center gap-1.5 text-caption text-text-muted">
-            <span
-              className="inline-block h-3 w-3 flex-none animate-spin rounded-full border-2 border-border border-t-brand"
-              aria-hidden
-            />
-            {t('resultDetail.preview.locating')}
-          </span>
-        ) : null}
         <div className="flex-1" />
         {hasFile ? (
           <a
@@ -228,7 +217,7 @@ export function SourcePreviewPane({
                   className="max-w-full rounded-token border border-border bg-surface"
                 />
                 {Object.entries(boxes)
-                  .filter(([, box]) => (box.page ?? 0) === safeIndex)
+                  .filter(([, box]) => box.page === safeIndex)
                   .map(([field, box]) => (
                     <div
                       key={field}

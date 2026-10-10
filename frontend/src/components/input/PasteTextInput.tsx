@@ -3,6 +3,7 @@ import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
+import type { OcrBlock } from '@/types/extraction';
 import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
 
 const ACCEPT = '.txt,.pdf,.png,.jpg,.jpeg,.bmp';
@@ -24,8 +25,11 @@ export interface StagedText {
   fileType?: 'pdf' | 'image';
   /** Per-page base64 renders for pdf uploads (D-027): the whole document in
    * "whole" mode, or just this source's page in "pages" split mode. The
-   * review pane overlays locate boxes on these instead of an iframe. */
+   * review pane overlays grounding boxes on these instead of an iframe. */
   pageImages?: string[];
+  /** Per-page OCR grounding blocks (D-028), aligned with the source's
+   * pages — the review pane matches extracted values against them locally. */
+  pagesBlocks?: Array<OcrBlock[] | null>;
 }
 
 interface PasteTextInputProps {
@@ -36,6 +40,7 @@ interface PasteTextInputProps {
     fileUrl?: string,
     fileType?: 'pdf' | 'image',
     pageImages?: string[],
+    pagesBlocks?: Array<OcrBlock[] | null>,
   ) => void;
   onRemove: (id: string) => void;
 }
@@ -79,10 +84,19 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
                 // One single-image array per source: just this page's render.
                 const render = result.pages_images?.[i];
                 const pageImages = render ? [render] : undefined;
-                onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages);
+                const blocks = result.pages_blocks?.[i];
+                const pagesBlocks = blocks ? [blocks] : undefined;
+                onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages, pagesBlocks);
               });
             } else {
-              onAdd(file.name, result.text, fileUrl, 'pdf', result.pages_images ?? undefined);
+              onAdd(
+                file.name,
+                result.text,
+                fileUrl,
+                'pdf',
+                result.pages_images ?? undefined,
+                result.pages_blocks ?? undefined,
+              );
             }
           } catch (err) {
             const quota = quotaErrorCode(err);
@@ -97,7 +111,14 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
           try {
             const fileUrl = URL.createObjectURL(file);
             const result = await parseImage(file);
-            onAdd(file.name, result.text, fileUrl, 'image');
+            onAdd(
+              file.name,
+              result.text,
+              fileUrl,
+              'image',
+              undefined,
+              result.pages_blocks ?? undefined,
+            );
           } catch (err) {
             const quota = quotaErrorCode(err);
             const message = quota
