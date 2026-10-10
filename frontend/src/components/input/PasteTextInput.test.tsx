@@ -118,7 +118,7 @@ describe('PasteTextInput', () => {
     const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url'));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf'));
     expect(parsePdf).toHaveBeenCalledWith(file);
   });
 
@@ -140,8 +140,8 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
-    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url');
-    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url');
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url', 'pdf');
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url', 'pdf');
     expect(onAdd).not.toHaveBeenCalledWith(expect.stringContaining('P2'), expect.anything());
   });
 
@@ -176,7 +176,7 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
-    expect(onAdd).toHaveBeenCalledWith('scan.jpg', 'image OCR text', 'blob:mock-url');
+    expect(onAdd).toHaveBeenCalledWith('scan.jpg', 'image OCR text', 'blob:mock-url', 'image');
     expect(parseImage).toHaveBeenCalledWith(file);
     expect(parsePdf).not.toHaveBeenCalled();
   });
@@ -222,7 +222,7 @@ describe('PasteTextInput', () => {
     expect(status.querySelector('.animate-spin')).not.toBeNull();
 
     resolvePdf();
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url'));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf'));
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

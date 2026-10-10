@@ -61,6 +61,7 @@ export function adaptBatchExtractResponse(
   fileUrls?: Array<string | undefined>,
   reviewThresholds?: Record<string, number>,
   allowEmptyFields?: string[],
+  fileTypes?: Array<'pdf' | 'image' | undefined>,
 ): ExtractionSource[] {
   // Ids must stay unique across batches: the UI accumulates results from
   // successive extractions, so `text-${i}` alone would collide as a React key.
@@ -78,7 +79,9 @@ export function adaptBatchExtractResponse(
 
     return {
       id: sourceId,
-      type: 'text',
+      // Issue #4: real upload kind (pdf/image), text for everything else —
+      // the review pane picks its file-preview strategy from this.
+      type: fileTypes?.[i] ?? 'text',
       name: `Manual Input ${i + 1}`, // English fallback; UI layer re-labels via i18n
       ordinal: i + 1,
       uploadedAt: new Date().toISOString(),
@@ -88,6 +91,7 @@ export function adaptBatchExtractResponse(
       ...(hasThresholds ? { reviewThresholds } : {}),
       ...(hasAllowEmpty ? { allowEmptyFields } : {}),
       ...(fileUrls?.[i] ? { sourceFileUrl: fileUrls[i] } : {}),
+      ...(texts[i] ? { sourceText: texts[i] } : {}),
       results: [result],
       stats: {
         succeeded: result.status === 'success' ? 1 : 0,

@@ -19,11 +19,14 @@ export interface StagedText {
   name: string;
   text: string;
   fileUrl?: string;
+  /** Upload kind for fileUrl ('pdf' | 'image'); undefined for plain text —
+   * the review pane (issue #4) picks its preview strategy from it. */
+  fileType?: 'pdf' | 'image';
 }
 
 interface PasteTextInputProps {
   staged: StagedText[];
-  onAdd: (name: string, text: string, fileUrl?: string) => void;
+  onAdd: (name: string, text: string, fileUrl?: string, fileType?: 'pdf' | 'image') => void;
   onRemove: (id: string) => void;
 }
 
@@ -62,10 +65,10 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
             if (pdfSplitMode === 'pages') {
               // Failed pages come back as null; index+1 is the original page number.
               result.pages.forEach((page, i) => {
-                if (page !== null) onAdd(`${file.name} · P${i + 1}`, page, fileUrl);
+                if (page !== null) onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf');
               });
             } else {
-              onAdd(file.name, result.text, fileUrl);
+              onAdd(file.name, result.text, fileUrl, 'pdf');
             }
           } catch (err) {
             const quota = quotaErrorCode(err);
@@ -80,7 +83,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
           try {
             const fileUrl = URL.createObjectURL(file);
             const result = await parseImage(file);
-            onAdd(file.name, result.text, fileUrl);
+            onAdd(file.name, result.text, fileUrl, 'image');
           } catch (err) {
             const quota = quotaErrorCode(err);
             const message = quota

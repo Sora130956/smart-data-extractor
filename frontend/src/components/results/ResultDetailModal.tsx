@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Trans, useTranslation } from 'react-i18next';
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import {
-  belowThresholdFields,
   confidenceLevel,
-  emptyViolatingFields,
   formatConfidence,
   needsReview,
   type ConfidenceLevel,
@@ -13,6 +11,9 @@ import {
 import { formatCost } from '@/utils/currency';
 import { exportToExcel } from '@/utils/excelExport';
 import { buildExportFilename } from '@/utils/exportFilename';
+import { problemFields } from '@/utils/review';
+import { findFieldRanges } from '@/utils/textHighlight';
+import { SourcePreviewPane } from './SourcePreviewPane';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
 
@@ -59,6 +60,9 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
   // Inline editing: key of the field being edited + its working value.
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // Issue #4: locate request into the review pane; the nonce makes repeated
+  // clicks on the same field re-trigger the scroll+flash.
+  const [focus, setFocus] = useState<{ field: string; nonce: number } | null>(null);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -70,22 +74,34 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
 
   const entries = Object.entries(result.data ?? {});
   const nullCount = entries.filter(([, v]) => v === null || v === undefined).length;
-  // Issue #2: each field is judged against its own configured minimum
-  // confidence (snapshotted on the source), falling back to the global low.
-  // Empty fields are judged by the allow-empty rule instead, never by a
-  // threshold — their zeroed confidence is not a quality signal.
-  const reviewFields = belowThresholdFields({
-    confidence: result.confidence,
-    thresholds: source.reviewThresholds,
-    data: result.data,
-  }).map(
+  // Issue #2 / issue #3 kernel: the two review triggers, computed once and
+  // consumed by the warning banner AND the pane highlight colors (issue #4).
+  const problems = useMemo(() => problemFields(result, source), [result, source]);
+  const reviewFields = problems.belowThreshold.map(
     ({ field, threshold }) => `${source.fieldLabels?.[field] ?? field} (${formatConfidence(threshold)})`,
   );
-  const emptyFields = emptyViolatingFields({
-    data: result.data,
-    allowEmpty: source.allowEmptyFields,
-  }).map((field) => source.fieldLabels?.[field] ?? field);
+  const emptyFields = problems.empty.map((field) => source.fieldLabels?.[field] ?? field);
   const cost = formatCost(result.costUsd, result.costCny, i18n.resolvedLanguage ?? 'en');
+
+  // Issue #4: where each field value came from in the source text, plus the
+  // per-field review/reviewed state that colors the pane's highlights.
+  const ranges = useMemo(
+    () => findFieldRanges(source.sourceText ?? '', result.data),
+    [source.sourceText, result.data],
+  );
+  const reviewFieldSet = useMemo(
+    () => new Set([...problems.belowThreshold.map(({ field }) => field), ...problems.empty]),
+    [problems],
+  );
+  const reviewedFieldSet = useMemo(
+    () =>
+      new Set(
+        Object.entries(result.reviewedFields ?? {})
+          .filter(([, reviewed]) => reviewed)
+          .map(([field]) => field),
+      ),
+    [result.reviewedFields],
+  );
 
   function startEdit(key: string, value: unknown) {
     setEditing(key);
@@ -140,9 +156,13 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
       <div
         role="dialog"
         aria-modal="true"
-        className="max-h-[90vh] w-full max-w-[680px] overflow-y-auto rounded-card border border-border bg-surface shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-[1080px] overflow-hidden rounded-card border border-border bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Issue #4: two columns — fields on the left, the original file /
+            extraction text on the right for in-place review. The pane hides
+            on narrow screens (the header's export actions still work). */}
+        <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="flex items-center gap-2 border-b border-border px-4.5 py-3.5">
           <div>
             <div className="text-title font-semibold">{t('resultDetail.title', { index: label })}</div>
@@ -152,18 +172,6 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
             </div>
           </div>
           <div className="flex-1" />
-          {source.sourceFileUrl ? (
-            <a
-              href={source.sourceFileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-token border border-border bg-surface px-2.5 py-1 text-caption font-medium text-text transition-colors hover:bg-surface-muted"
-            >
-              <span>
-                <Trans i18nKey="resultDetail.openOriginal" components={{ br: <br /> }} />
-              </span>
-            </a>
-          ) : null}
           <Button size="sm" onClick={handleCopy}>
             {copied ? t('resultDetail.copied') : t('resultDetail.copyJson')}
           </Button>
@@ -274,6 +282,18 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
                         </span>
                       ) : null}
                     </div>
+                    {ranges[key] ? (
+                      <button
+                        type="button"
+                        aria-label={t('resultDetail.locateField', { field: fieldLabel })}
+                        onClick={() =>
+                          setFocus({ field: key, nonce: (focus?.nonce ?? 0) + 1 })
+                        }
+                        className="flex-none rounded-token px-1 text-caption text-text-muted hover:text-brand"
+                      >
+                        🔍
+                      </button>
+                    ) : null}
                     {onFieldUpdate && isEditableValue(value) ? (
                       <button
                         type="button"
@@ -338,6 +358,16 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
             {t('resultDetail.retryThisItem')}
           </Button>
         </div>
+        </div>
+        <aside className="hidden w-[400px] flex-none border-l border-border lg:block">
+          <SourcePreviewPane
+            source={source}
+            ranges={ranges}
+            reviewFields={reviewFieldSet}
+            reviewedFields={reviewedFieldSet}
+            focus={focus}
+          />
+        </aside>
       </div>
     </div>
   );

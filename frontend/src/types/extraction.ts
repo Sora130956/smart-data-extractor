@@ -54,6 +54,11 @@ export interface ExtractionSource {
   allowEmptyFields?: string[];
   /** Blob URL for the original uploaded file (pdf/image), session-scoped. */
   sourceFileUrl?: string;
+  /** Full input text snapshotted at submit time (pasted text, .txt content,
+   * or the OCR text for pdf/image) — the review pane (issue #4) matches
+   * extracted values against it to highlight where they came from. Unlike
+   * `meta` (a 60-char preview) it is never clipped. */
+  sourceText?: string;
   results: ExtractionResult[];
   stats: {
     succeeded: number;

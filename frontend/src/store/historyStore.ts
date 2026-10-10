@@ -51,7 +51,11 @@ export const useHistoryStore = create<HistoryState>((set) => ({
         id: crypto.randomUUID(),
         savedAt: new Date().toISOString(),
         presetLabel,
-        sources,
+        // Issue #4: blob URLs are session-scoped — after a reload they are
+        // dead and would render a broken file preview. The full sourceText
+        // (also snapshotted on the source) keeps the text preview working
+        // for restored batches; the live on-screen sources keep their URL.
+        sources: sources.map(({ sourceFileUrl: _dropped, ...rest }) => rest),
       };
       const entries = [entry, ...state.entries].slice(0, HISTORY_LIMIT);
       persist(entries);

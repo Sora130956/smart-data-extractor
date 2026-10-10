@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import i18next from 'i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -508,6 +508,141 @@ describe('ResultDetailModal', () => {
       );
 
       expect(screen.queryByText('Original value')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('review pane (issue #4)', () => {
+    const PANE_TEXT =
+      'INVOICE\nInvoice No: INV-2024-001\nVendor: Acme Corp\nTotal Amount: $100.00\n';
+
+    it('renders the full source text with matched values highlighted', () => {
+      render(
+        <ResultDetailModal
+          source={{ ...source, sourceText: PANE_TEXT }}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      const pane = screen.getByRole('region', { name: 'Extracted Text' });
+      // Both scalar values are located inside the pane's text.
+      expect(within(pane).getByText('INV-2024-001')).toBeInTheDocument();
+      expect(within(pane).getByText(/Acme Corp/)).toBeInTheDocument();
+      // Values that pass their threshold get the neutral brand highlight.
+      expect(within(pane).getByText('INV-2024-001').className).toContain('bg-brand');
+    });
+
+    it('colors a below-threshold field value with the warning highlight', () => {
+      render(
+        <ResultDetailModal
+          source={{ ...source, sourceText: PANE_TEXT }}
+          result={lowConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      const pane = screen.getByRole('region', { name: 'Extracted Text' });
+      // invoice_number sits at 0.5 → needs review → warning highlight.
+      expect(within(pane).getByText('INV-2024-001').className).toContain('bg-warning');
+      // vendor at 0.9 stays neutral.
+      expect(within(pane).getByText(/Acme Corp/).className).not.toContain('bg-warning');
+    });
+
+    it('defaults to the file view for uploads and embeds the original inline', () => {
+      render(
+        <ResultDetailModal
+          source={{ ...source, type: 'pdf', sourceFileUrl: 'blob:pdf', sourceText: PANE_TEXT }}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      const filePane = screen.getByRole('region', { name: 'Original File' });
+      const frame = within(filePane).getByTitle('Manual Input 1');
+      expect(frame).toHaveAttribute('src', 'blob:pdf');
+      // The text pane is one toggle away.
+      expect(screen.queryByRole('region', { name: 'Extracted Text' })).not.toBeInTheDocument();
+    });
+
+    it('embeds images directly instead of a pdf frame', () => {
+      render(
+        <ResultDetailModal
+          source={{ ...source, type: 'image', sourceFileUrl: 'blob:img', sourceText: PANE_TEXT }}
+          result={highConfidenceResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      const filePane = screen.getByRole('region', { name: 'Original File' });
+      expect(within(filePane).getByRole('img', { name: 'Manual Input 1' })).toHaveAttribute(
+        'src',
+        'blob:img',
+      );
+    });
+
+    it('switches to the text view when a locate button is clicked, scrolling to the match', async () => {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        const user = userEvent.setup();
+        render(
+          <ResultDetailModal
+            source={{ ...source, type: 'pdf', sourceFileUrl: 'blob:pdf', sourceText: PANE_TEXT }}
+            result={lowConfidenceResult}
+            label="Text 1"
+            onClose={() => {}}
+          />,
+        );
+
+        // Starts on the file view.
+        expect(screen.getByRole('region', { name: 'Original File' })).toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Locate Invoice Number in source' }));
+
+        // Auto-switched to the text view and scrolled the match into view.
+        const pane = screen.getByRole('region', { name: 'Extracted Text' });
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        // The located match flashes (active styling on the same node).
+        expect(within(pane).getByText('INV-2024-001').className).toContain('animate-pulse');
+      } finally {
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    });
+
+    it('offers no locate button when the value has no match or no source text exists', () => {
+      const unmatchedResult: ExtractionResult = {
+        ...highConfidenceResult,
+        data: { invoice_number: 'NOPE-999', vendor: 'Ghost Ltd', notes: null },
+        confidence: { invoice_number: 0.95, vendor: 0.9, notes: 0.9 },
+      };
+      const { rerender } = render(
+        <ResultDetailModal
+          source={{ ...source, sourceText: PANE_TEXT }}
+          result={unmatchedResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /Locate/ })).not.toBeInTheDocument();
+
+      // No sourceText at all (e.g. legacy history): still nothing to locate.
+      rerender(
+        <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
+      );
+      expect(screen.queryByRole('button', { name: /Locate/ })).not.toBeInTheDocument();
+    });
+
+    it('shows an empty state when there is neither a file url nor source text', () => {
+      render(
+        <ResultDetailModal source={source} result={highConfidenceResult} label="Text 1" onClose={() => {}} />,
+      );
+
+      expect(screen.getByText('No source preview available')).toBeInTheDocument();
     });
   });
 });

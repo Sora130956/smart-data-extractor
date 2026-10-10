@@ -449,7 +449,7 @@ describe('F7 original file url', () => {
     useHistoryStore.setState({ entries: [] });
   });
 
-  it('keeps the uploaded pdf blob url on the extracted source', async () => {
+  it('persists the source text for the review pane but strips the session-scoped blob url (issue #4)', async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url === '/api/presets') {
         return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
@@ -494,11 +494,14 @@ describe('F7 original file url', () => {
     await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument());
 
-    // The staged pdf's blob url survives into the extracted (and persisted) source.
+    // Issue #4: the FULL input text is snapshotted for the review pane, while
+    // the session-scoped blob url must NOT survive into history — it is dead
+    // after a reload and would render a broken preview.
     const stored = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? '[]') as Array<{
-      sources: Array<{ sourceFileUrl?: string }>;
+      sources: Array<{ sourceFileUrl?: string; sourceText?: string }>;
     }>;
-    expect(stored[0].sources[0].sourceFileUrl).toBe('blob:mock-url');
+    expect(stored[0].sources[0].sourceFileUrl).toBeUndefined();
+    expect(stored[0].sources[0].sourceText).toBe('OCR extracted text');
   });
 });
 

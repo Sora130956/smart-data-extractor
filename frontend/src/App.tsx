@@ -101,8 +101,8 @@ function AppShell() {
     return presets?.find((p) => p.id === id)?.[isZh ? 'display_name_zh' : 'display_name_en'] ?? id;
   };
 
-  function handleAdd(name: string, text: string, fileUrl?: string) {
-    setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text, fileUrl }]);
+  function handleAdd(name: string, text: string, fileUrl?: string, fileType?: 'pdf' | 'image') {
+    setStaged((prev) => [...prev, { id: crypto.randomUUID(), name, text, fileUrl, fileType }]);
   }
 
   function handleRemove(id: string) {
@@ -274,6 +274,8 @@ function AppShell() {
         // Blob urls of the original uploads, aligned with texts by index;
         // only pdf/image sources have one (PasteTextInput creates it there).
         fileUrls: staged.map((item) => item.fileUrl),
+        // Upload kind per blob url (issue #4 review pane).
+        fileTypes: staged.map((item) => item.fileType),
         ...target,
         instructions: instructions || undefined,
         // UI language: preset field descriptions sent to the LLM follow it.

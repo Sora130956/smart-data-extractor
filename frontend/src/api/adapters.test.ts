@@ -353,4 +353,59 @@ describe('adaptBatchExtractResponse', () => {
 
     expect(source.fieldLabels).toBeUndefined();
   });
+
+  it('snapshots the FULL input text onto the source for the review pane (issue #4)', () => {
+    const longText = 'x'.repeat(200);
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1, a_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 1, output: 1 },
+      succeeded: 1,
+      failed: 0,
+    };
+
+    const [source] = adaptBatchExtractResponse(response, [longText]);
+
+    expect(source.sourceText).toBe(longText);
+    // The meta preview stays a short clipped label.
+    expect(source.meta).toHaveLength(60);
+  });
+
+  it('maps per-text file types onto source.type, defaulting to text (issue #4)', () => {
+    const response: BatchExtractResponse = {
+      results: [1, 2, 3].map((n) => ({
+        data: { [`f${n}`]: n, [`f${n}_confidence`]: 1 },
+        tokens_used: { input: 1, output: 1 },
+        cost_usd: 0, cost_cny: 0,
+        error: null,
+      })),
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 3, output: 3 },
+      succeeded: 3,
+      failed: 0,
+    };
+
+    const sources = adaptBatchExtractResponse(
+      response,
+      ['pdf page', 'a photo', 'pasted'],
+      undefined,
+      undefined,
+      undefined,
+      ['blob:pdf', 'blob:img', undefined],
+      undefined,
+      undefined,
+      ['pdf', 'image', undefined],
+    );
+
+    expect(sources[0].type).toBe('pdf');
+    expect(sources[1].type).toBe('image');
+    expect(sources[2].type).toBe('text');
+  });
 });
