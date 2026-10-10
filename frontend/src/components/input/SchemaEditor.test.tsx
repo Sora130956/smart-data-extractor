@@ -216,59 +216,77 @@ describe('SchemaEditor', () => {
     expect(useUiStore.getState().savedSchemas[0].fields).toEqual(fields);
   });
 
-  describe('min confidence column (issue #2)', () => {
-    it('renders one empty min-confidence input per field, placeholder showing the default', async () => {
+  describe('min confidence column (issue #2 — preset tiers)', () => {
+    it('renders one tier select per field, defaulting to the Default tier', async () => {
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
       await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
-      const inputs = screen.getAllByLabelText('Min Confidence');
-      expect(inputs).toHaveLength(2);
-      // Empty <input type="number"> reports its value as null (valueAsNumber).
-      for (const input of inputs) expect(input).toHaveValue(null);
-      expect(inputs[0]).toHaveAttribute('placeholder', 'Default 0.70');
+      const selects = screen.getAllByLabelText('Min Confidence');
+      expect(selects).toHaveLength(2);
+      for (const select of selects) {
+        expect(select).toHaveValue('');
+        expect(select).toHaveDisplayValue('Default (0.70)');
+      }
     });
 
-    it('stores the typed threshold on that field and marks the schema modified', async () => {
+    it('offers the four preset tiers in the user-stated order', async () => {
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
+      const select = screen.getAllByLabelText('Min Confidence')[0];
+      expect(
+        Array.from(select.querySelectorAll('option')).map((o) => o.textContent),
+      ).toEqual(['Strict (0.9)', 'Moderate (0.8)', 'Default (0.70)', 'Lenient (0.5)']);
+    });
+
+    it('stores the picked tier on that field and marks the schema modified', async () => {
       const user = userEvent.setup();
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
       await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
-      await user.type(screen.getAllByLabelText('Min Confidence')[0], '0.9');
+      await user.selectOptions(screen.getAllByLabelText('Min Confidence')[0], '0.9');
 
       expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
       expect(useUiStore.getState().customFields[1].minConfidence).toBeUndefined();
       expect(screen.getByText('Modified')).toBeInTheDocument();
     });
 
-    it('clearing the input restores null (fall back to the default)', async () => {
+    it('picking the Default tier stores null (fall back to the global default)', async () => {
       const user = userEvent.setup();
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
       await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
-      const input = screen.getAllByLabelText('Min Confidence')[0];
-      await user.type(input, '0.9');
-      await user.clear(input);
+      const select = screen.getAllByLabelText('Min Confidence')[0];
+      await user.selectOptions(select, '0.9');
+      await user.selectOptions(select, '');
 
       expect(useUiStore.getState().customFields[0].minConfidence).toBeNull();
     });
 
-    it('clamps out-of-range values into [0, 1]', async () => {
+    it('keeps a legacy free-input value visible until a tier is picked', async () => {
       const user = userEvent.setup();
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
       await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
-      const input = screen.getAllByLabelText('Min Confidence')[0];
+      useUiStore.setState({
+        customFields: useUiStore.getState().customFields.map((f, i) =>
+          i === 0 ? { ...f, minConfidence: 0.85 } : f,
+        ),
+      });
 
-      await user.type(input, '5');
-      expect(useUiStore.getState().customFields[0].minConfidence).toBe(1);
+      const select = screen.getAllByLabelText('Min Confidence')[0];
+      await waitFor(() => {
+        expect(select).toHaveValue('0.85');
+        expect(select).toHaveDisplayValue('0.85');
+      });
 
-      await user.clear(input);
-      await user.type(input, '-0.5');
-      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0);
+      await user.selectOptions(select, '0.9');
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
     });
   });
 });

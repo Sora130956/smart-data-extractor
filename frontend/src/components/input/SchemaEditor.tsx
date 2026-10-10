@@ -21,6 +21,34 @@ const FIELD_TYPES: SchemaField['type'][] = [
 const cellClass =
   'rounded-token border border-border bg-surface px-2 py-1 text-caption text-text';
 
+/** Issue #2 follow-up: the min-confidence column is a preset-tier select
+ * (Strict 0.9 / Moderate 0.8 / Default 0.70 / Lenient 0.5) instead of a
+ * free numeric input, so non-expert users never have to invent a number.
+ * The Default tier stores null and falls back to CONFIDENCE_LOW. */
+const MIN_CONFIDENCE_TIERS: ReadonlyArray<{ value: number | null; labelKey: string }> = [
+  { value: 0.9, labelKey: 'schema.minConfidenceStrict' },
+  { value: 0.8, labelKey: 'schema.minConfidenceModerate' },
+  { value: null, labelKey: 'schema.minConfidenceDefault' },
+  { value: 0.5, labelKey: 'schema.minConfidenceLenient' },
+];
+
+/** null (or an explicit CONFIDENCE_LOW saved by the old free input) maps to
+ * the Default tier's empty option value; anything else maps to itself. */
+function tierSelectValue(minConfidence: number | null | undefined): string {
+  if (minConfidence == null || minConfidence === CONFIDENCE_LOW) return '';
+  return String(minConfidence);
+}
+
+/** Values saved by the old free-numeric input (e.g. 0.85) are not tiers;
+ * keep them visible as their own option until the user picks a tier. */
+function isLegacyConfidence(minConfidence: number | null | undefined): minConfidence is number {
+  return (
+    minConfidence != null &&
+    minConfidence !== CONFIDENCE_LOW &&
+    !MIN_CONFIDENCE_TIERS.some((tier) => tier.value === minConfidence)
+  );
+}
+
 export function SchemaEditor() {
   const { t } = useTranslation();
   const {
@@ -68,15 +96,6 @@ export function SchemaEditor() {
 
   function addField() {
     setCustomFields([...customFields, { displayName: '', fieldName: null, type: 'string', description: '' }]);
-  }
-
-  /** Issue #2: empty input -> null (fall back to the global default);
-   * anything numeric is clamped into [0, 1]; garbage parses as null. */
-  function parseMinConfidence(raw: string): number | null {
-    if (raw.trim() === '') return null;
-    const parsed = Number(raw);
-    if (Number.isNaN(parsed)) return null;
-    return Math.min(1, Math.max(0, parsed));
   }
 
   /** Reset discards the saved override too, so the preset returns to its
@@ -138,7 +157,7 @@ export function SchemaEditor() {
         <div className="flex items-center gap-2 text-caption font-semibold text-text-muted">
           <span className="w-[140px] flex-none">{t('schema.fieldName')}</span>
           <span className="w-[110px] flex-none">{t('schema.fieldType')}</span>
-          <span className="w-[92px] flex-none">{t('schema.minConfidence')}</span>
+          <span className="w-[108px] flex-none">{t('schema.minConfidence')}</span>
           <span className="flex-1">{t('schema.fieldDescription')}</span>
           <span className="w-[20px] flex-none" />
         </div>
@@ -162,20 +181,29 @@ export function SchemaEditor() {
                 </option>
               ))}
             </select>
-            <input
+            <select
               aria-label={t('schema.minConfidence')}
-              className={`${cellClass} w-[92px] flex-none`}
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              inputMode="decimal"
-              value={field.minConfidence ?? ''}
-              placeholder={t('schema.minConfidencePlaceholder', {
-                threshold: formatConfidence(CONFIDENCE_LOW),
-              })}
-              onChange={(e) => updateField(i, { minConfidence: parseMinConfidence(e.target.value) })}
-            />
+              className={`${cellClass} w-[108px] flex-none`}
+              value={tierSelectValue(field.minConfidence)}
+              onChange={(e) =>
+                updateField(i, {
+                  minConfidence: e.target.value === '' ? null : Number(e.target.value),
+                })
+              }
+            >
+              {MIN_CONFIDENCE_TIERS.map((tier) => (
+                <option key={tier.labelKey} value={tier.value == null ? '' : String(tier.value)}>
+                  {tier.value == null
+                    ? t(tier.labelKey, { threshold: formatConfidence(CONFIDENCE_LOW) })
+                    : t(tier.labelKey)}
+                </option>
+              ))}
+              {isLegacyConfidence(field.minConfidence) ? (
+                <option value={String(field.minConfidence)}>
+                  {formatConfidence(field.minConfidence)}
+                </option>
+              ) : null}
+            </select>
             <input
               aria-label={t('schema.fieldDescription')}
               className={`${cellClass} flex-1`}
