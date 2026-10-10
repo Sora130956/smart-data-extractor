@@ -217,7 +217,7 @@ describe('SchemaEditor', () => {
   });
 
   describe('min confidence column (issue #2 — preset tiers)', () => {
-    it('renders one tier select per field, defaulting to the Default tier', async () => {
+    it('renders one tier select per field, defaulting to the Moderate (0.85) tier', async () => {
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
@@ -225,8 +225,8 @@ describe('SchemaEditor', () => {
       const selects = screen.getAllByLabelText('Min Confidence');
       expect(selects).toHaveLength(2);
       for (const select of selects) {
-        expect(select).toHaveValue('');
-        expect(select).toHaveDisplayValue('Default (0.70)');
+        expect(select).toHaveValue('0.85');
+        expect(select).toHaveDisplayValue('Moderate (0.85)');
       }
     });
 
@@ -239,9 +239,9 @@ describe('SchemaEditor', () => {
       expect(
         Array.from(select.querySelectorAll('option')).map((o) => o.textContent),
       ).toEqual([
-        'Strict (0.9)',
-        'Moderate (0.8)',
-        'Default (0.70)',
+        'Strict (0.95)',
+        'Moderate (0.85)',
+        'Balanced (0.70)',
         'Lenient (0.5)',
         'Allow empty (0.0)',
       ]);
@@ -253,24 +253,24 @@ describe('SchemaEditor', () => {
       render(<SchemaEditor />, { wrapper });
 
       await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
-      await user.selectOptions(screen.getAllByLabelText('Min Confidence')[0], '0.9');
+      await user.selectOptions(screen.getAllByLabelText('Min Confidence')[0], '0.95');
 
-      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.95);
       expect(useUiStore.getState().customFields[1].minConfidence).toBeUndefined();
       expect(screen.getByText('Modified')).toBeInTheDocument();
     });
 
-    it('picking the Default tier stores null (fall back to the global default)', async () => {
+    it('picking the Balanced tier stores its explicit 0.7 value', async () => {
       const user = userEvent.setup();
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
       await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
       const select = screen.getAllByLabelText('Min Confidence')[0];
-      await user.selectOptions(select, '0.9');
-      await user.selectOptions(select, '');
+      await user.selectOptions(select, '0.95');
+      await user.selectOptions(select, '0.7');
 
-      expect(useUiStore.getState().customFields[0].minConfidence).toBeNull();
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.7);
     });
 
     it('keeps a legacy free-input value visible until a tier is picked', async () => {
@@ -281,18 +281,18 @@ describe('SchemaEditor', () => {
       await waitFor(() => expect(screen.getAllByLabelText('Min Confidence')).toHaveLength(2));
       useUiStore.setState({
         customFields: useUiStore.getState().customFields.map((f, i) =>
-          i === 0 ? { ...f, minConfidence: 0.85 } : f,
+          i === 0 ? { ...f, minConfidence: 0.75 } : f,
         ),
       });
 
       const select = screen.getAllByLabelText('Min Confidence')[0];
       await waitFor(() => {
-        expect(select).toHaveValue('0.85');
-        expect(select).toHaveDisplayValue('0.85');
+        expect(select).toHaveValue('0.75');
+        expect(select).toHaveDisplayValue('0.75');
       });
 
-      await user.selectOptions(select, '0.9');
-      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.9);
+      await user.selectOptions(select, '0.95');
+      expect(useUiStore.getState().customFields[0].minConfidence).toBe(0.95);
     });
 
     it('stores 0 when the Allow-empty tier is picked, with no separate column', async () => {

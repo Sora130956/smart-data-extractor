@@ -159,8 +159,9 @@ describe('ResultDetailModal', () => {
       <ResultDetailModal source={source} result={notesLowResult} label="Text 1" onClose={() => {}} />,
     );
 
-    // The exemption only covers empty values.
-    expect(screen.getByText(/Notes \(0\.70\)/)).toBeInTheDocument();
+    // The exemption only covers empty values: a non-empty value is still
+    // judged against the 0.85 default minimum.
+    expect(screen.getByText(/Notes \(0\.85\)/)).toBeInTheDocument();
   });
 
   it('calls onClose when pressing Escape', async () => {

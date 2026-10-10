@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
-import { CONFIDENCE_LOW, formatConfidence } from '@/utils/confidence';
+import { DEFAULT_MIN_CONFIDENCE, formatConfidence } from '@/utils/confidence';
 import type { SchemaField } from '@/types/extraction';
 
 const FIELD_TYPES: SchemaField['type'][] = [
@@ -22,33 +22,34 @@ const cellClass =
   'rounded-token border border-border bg-surface px-2 py-1 text-caption text-text';
 
 /** Issue #2: the min-confidence column is a preset-tier select
- * (Strict 0.9 / Moderate 0.8 / Default 0.70 / Lenient 0.5 / Allow empty 0.0)
+ * (Strict 0.95 / Moderate 0.85 / Balanced 0.70 / Lenient 0.5 / Allow empty 0)
  * instead of a free numeric input, so non-expert users never have to invent
- * a number. The Default tier stores null and falls back to CONFIDENCE_LOW.
+ * a number. Tier values anchor on the on-screen confidence legend
+ * (高 ≥ 0.85, 中 0.70–0.85): Moderate 0.85 is the default selection — the
+ * High boundary — so unconfigured fields are held to "high" by default.
  * The Allow-empty tier is a plain 0.0 threshold: the backend zeroes a null
  * field's confidence, so empty values sail under 0.0 — one mental model, no
  * separate "allow empty" column to fight with the threshold. */
-const MIN_CONFIDENCE_TIERS: ReadonlyArray<{ value: number | null; labelKey: string }> = [
-  { value: 0.9, labelKey: 'schema.minConfidenceStrict' },
-  { value: 0.8, labelKey: 'schema.minConfidenceModerate' },
-  { value: null, labelKey: 'schema.minConfidenceDefault' },
+const MIN_CONFIDENCE_TIERS: ReadonlyArray<{ value: number; labelKey: string }> = [
+  { value: 0.95, labelKey: 'schema.minConfidenceStrict' },
+  { value: 0.85, labelKey: 'schema.minConfidenceModerate' },
+  { value: 0.7, labelKey: 'schema.minConfidenceBalanced' },
   { value: 0.5, labelKey: 'schema.minConfidenceLenient' },
   { value: 0, labelKey: 'schema.minConfidenceEmpty' },
 ];
 
-/** null (or an explicit CONFIDENCE_LOW saved by the old free input) maps to
- * the Default tier's empty option value; anything else maps to itself. */
+/** Unconfigured (null) fields display the default tier — Moderate 0.85,
+ * which fieldThreshold falls back to; anything else maps to itself. */
 function tierSelectValue(minConfidence: number | null | undefined): string {
-  if (minConfidence == null || minConfidence === CONFIDENCE_LOW) return '';
+  if (minConfidence == null) return String(DEFAULT_MIN_CONFIDENCE);
   return String(minConfidence);
 }
 
-/** Values saved by the old free-numeric input (e.g. 0.85) are not tiers;
+/** Values saved by the old free-numeric input (e.g. 0.75) are not tiers;
  * keep them visible as their own option until the user picks a tier. */
 function isLegacyConfidence(minConfidence: number | null | undefined): minConfidence is number {
   return (
     minConfidence != null &&
-    minConfidence !== CONFIDENCE_LOW &&
     !MIN_CONFIDENCE_TIERS.some((tier) => tier.value === minConfidence)
   );
 }
@@ -189,17 +190,11 @@ export function SchemaEditor() {
               aria-label={t('schema.minConfidence')}
               className={`${cellClass} w-[120px] flex-none`}
               value={tierSelectValue(field.minConfidence)}
-              onChange={(e) =>
-                updateField(i, {
-                  minConfidence: e.target.value === '' ? null : Number(e.target.value),
-                })
-              }
+              onChange={(e) => updateField(i, { minConfidence: Number(e.target.value) })}
             >
               {MIN_CONFIDENCE_TIERS.map((tier) => (
-                <option key={tier.labelKey} value={tier.value == null ? '' : String(tier.value)}>
-                  {tier.value == null
-                    ? t(tier.labelKey, { threshold: formatConfidence(CONFIDENCE_LOW) })
-                    : t(tier.labelKey)}
+                <option key={tier.labelKey} value={String(tier.value)}>
+                  {t(tier.labelKey)}
                 </option>
               ))}
               {isLegacyConfidence(field.minConfidence) ? (

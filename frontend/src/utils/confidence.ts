@@ -5,11 +5,20 @@ export const CONFIDENCE_HIGH = 0.85;
 export const CONFIDENCE_LOW = 0.7;
 
 /** User-configured per-field minimum confidences, keyed by field name
- * (issue #2). Absent fields fall back to CONFIDENCE_LOW. */
+ * (issue #2). Absent fields fall back to DEFAULT_MIN_CONFIDENCE. */
 export type ReviewThresholds = Record<string, number>;
 
+/** Issue #2 default per-field minimum confidence (user-set): the High band
+ * boundary — 高 ≥ 0.85 in the on-screen legend — so unconfigured fields are
+ * held to "high" by default and the tier options share the legend's numbers.
+ * The Medium band (0.70–0.85) stays a display band; the aggregate review
+ * bar below stays at CONFIDENCE_LOW (需复核 < 0.70). */
+export const DEFAULT_MIN_CONFIDENCE = CONFIDENCE_HIGH;
+
+/** The minimum confidence a field must clear: its configured threshold
+ * (issue #2) or the default minimum. */
 export function fieldThreshold(field: string, thresholds?: ReviewThresholds): number {
-  return thresholds?.[field] ?? CONFIDENCE_LOW;
+  return thresholds?.[field] ?? DEFAULT_MIN_CONFIDENCE;
 }
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
@@ -58,8 +67,8 @@ export function belowThresholdFields(input: {
 }
 
 /** §8.4 + issue #2 — Need Review = aggregate below LOW, any single field
- * below its configured minimum confidence (default LOW), or any field that
- * came back empty while its schema does not allow it. */
+ * below its configured minimum confidence (default DEFAULT_MIN_CONFIDENCE),
+ * or any field that came back empty while its schema does not allow it. */
 export function needsReview(input: {
   avgConfidence: number;
   confidence: Record<string, number>;

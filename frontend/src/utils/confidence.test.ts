@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONFIDENCE_HIGH,
   CONFIDENCE_LOW,
+  DEFAULT_MIN_CONFIDENCE,
   belowThresholdFields,
   confidenceLevel,
   emptyViolatingFields,
@@ -33,9 +34,9 @@ describe('needsReview', () => {
     ).toBe(true);
   });
 
-  it('passes when the aggregate and every field clear the low threshold', () => {
+  it('passes when the aggregate and every field clear the default minimum', () => {
     expect(
-      needsReview({ avgConfidence: 0.88, confidence: { a: 0.92, b: 0.71 } }),
+      needsReview({ avgConfidence: 0.91, confidence: { a: 0.92, b: 0.9 } }),
     ).toBe(false);
   });
 
@@ -60,14 +61,14 @@ describe('needsReview', () => {
     ).toBe(false);
   });
 
-  it('falls back to the global default for fields without a configured threshold', () => {
+  it('falls back to the default minimum for fields without a configured threshold', () => {
     expect(
       needsReview({
         avgConfidence: 0.9,
-        confidence: { vendor: 0.85, total: 0.69 },
+        confidence: { vendor: 0.95, total: 0.84 },
         thresholds: { vendor: 0.9 },
       }),
-    ).toBe(true); // total has no entry -> still judged against 0.70
+    ).toBe(true); // total has no entry -> judged against the 0.85 default
   });
 
   it('flags an empty field that is not allowed to be empty (issue #2)', () => {
@@ -133,9 +134,15 @@ describe('fieldThreshold', () => {
     expect(fieldThreshold('vendor', { vendor: 0.9 })).toBe(0.9);
   });
 
-  it('falls back to the global default when absent', () => {
-    expect(fieldThreshold('vendor', { total: 0.9 })).toBe(CONFIDENCE_LOW);
-    expect(fieldThreshold('vendor', undefined)).toBe(CONFIDENCE_LOW);
+  it('falls back to the default minimum when absent', () => {
+    expect(fieldThreshold('vendor', { total: 0.9 })).toBe(DEFAULT_MIN_CONFIDENCE);
+    expect(fieldThreshold('vendor', undefined)).toBe(DEFAULT_MIN_CONFIDENCE);
+  });
+
+  it('anchors the default on the High band boundary (legend: 高 ≥ 0.85)', () => {
+    // User-set design: unconfigured fields are held to "high" by default, so
+    // the tier options and the on-screen confidence legend tell one story.
+    expect(DEFAULT_MIN_CONFIDENCE).toBe(CONFIDENCE_HIGH);
   });
 });
 
@@ -149,10 +156,11 @@ describe('belowThresholdFields', () => {
     ).toEqual([{ field: 'vendor', threshold: 0.9 }]);
   });
 
-  it('judges unconfigured fields against the global default', () => {
+  it('judges unconfigured fields against the default minimum', () => {
+    // 0.84 would have passed the old 0.70 default — it fails the 0.85 one.
     expect(
-      belowThresholdFields({ confidence: { vendor: 0.69, total: 0.95 } }),
-    ).toEqual([{ field: 'vendor', threshold: CONFIDENCE_LOW }]);
+      belowThresholdFields({ confidence: { vendor: 0.84, total: 0.95 } }),
+    ).toEqual([{ field: 'vendor', threshold: DEFAULT_MIN_CONFIDENCE }]);
   });
 
   it('returns an empty list when every field clears its threshold', () => {
@@ -169,12 +177,12 @@ describe('belowThresholdFields', () => {
         confidence: { vendor: 0, total: 0.69 },
         data: { vendor: null, total: 1200 },
       }),
-    ).toEqual([{ field: 'total', threshold: CONFIDENCE_LOW }]);
+    ).toEqual([{ field: 'total', threshold: DEFAULT_MIN_CONFIDENCE }]);
   });
 
   it('keeps the legacy behaviour when no data is passed', () => {
     expect(belowThresholdFields({ confidence: { vendor: 0 } })).toEqual([
-      { field: 'vendor', threshold: CONFIDENCE_LOW },
+      { field: 'vendor', threshold: DEFAULT_MIN_CONFIDENCE },
     ]);
   });
 });
