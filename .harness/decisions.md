@@ -591,3 +591,28 @@
   - App F7 用例改写：断言 sourceText 持久化 + blob URL 被剥离（原断言"blob 存活"作废——旧行为本就是 bug）
   - 突变自证：findFieldRange 回映射改 `nStart` → 千分位用例红（回映射存在的意义正是归一化偏移）再还原
   - 验证：TDD 先红后绿（textHighlight 10 用例 + review pane 7 用例 + adapters 2 用例）；全量 vitest 271 passed（22 files）+ tsc 0 错误 + build 成功（exceljs chunk >500kB 提示为既有）
+
+## D-027：图上叠框——独立 /locate_fields 定位端点 + PDF 页图预览（Issue #4 纠偏升级）
+
+- **日期**：2026-10-10
+- **状态**：已接受（用户对 D-026 V1 交付纠偏后拍板；后续追问中补拍板「PDF 也要图上叠框」）
+- **来源**：Issue #4 用户反馈——「有点偏差，我的意思是，高亮框应该展示在右侧的预览图片中。这个是为了让客户对照原图快速核验用的」
+- **背景**：
+  - D-026 的文本级高亮交付后用户指出偏差：客户核验的对照对象是**原图**，OCR 提取文本与版面视觉脱节，文本高亮无法支撑「对照原图快速核验」
+  - 主提取链路（PyMuPDF→GLM-4V OCR→纯文本）仍无坐标，图上叠框需要**独立的二次定位调用**；PDF 原用 iframe 内嵌预览，无渲染画布可叠加
+- **决策**：
+  1. **独立 `/locate_fields` 端点**（后端 commit adde51f）：接收原文件 + `values[]`（≤20，422 拒绝超长）→ GLM-4V 单次调用返回 JSON 定位（`extraction/locate.py`：容错 JSON 解析 / 0-1 与 0-1000 双尺度归一化 / 图片整图单页 / PDF 逐页搜索 / 找齐即早停），返回 `boxes: ({page, box} | null)[]` 与请求值按索引对齐（page 0-based，box=[x1,y1,x2,y2] 0-100 归一化百分比，null=未找到）；与主提取解耦——定位失败不阻塞提取结果本身
+  2. **`parse_pdf` 增返 `pages_images`**：每页渲染 base64 PNG（nullish，旧客户端零感知）——前端 PDF 预览从 iframe 改为页图序列，为叠框提供画布
+  3. **前端页图渲染 + 叠框**：`SourcePreviewPane` 重写——pdf 用 `pageImages` 生成 `data:image/png;base64` 页图、image 用 blob URL 单页、多页翻页器（`pageOf`/`prevPage`/`nextPage`）；叠框按复核状态配色（active `warning+animate-pulse` / reviewed `success` / review `warning` / 默认 `brand`），`data-field` 便于测试与 focus 匹配；box 只画在其所在页
+  4. **自动定位 + 双重防重复计费**：弹窗打开即后台定位——`fetch(blobUrl).blob()` 还原 File → `locateFields(file, values)`（null 与非标量值剔除、`.slice(0, 20)` 镜像后端上限防首次 422）→ `onLocateBoxes(boxes)` 回调由 App 写回 `source.fieldBoxes` 缓存（重开不重复计费）；守卫链：`fieldBoxes != null`（**空对象也算已定位**——`{}`=定位过无结果 vs `undefined`=未定位）+ `locateStartedFor` ref（防 effect 重跑）+ cancelled flag（防卸载后 setState）
+  5. **降级链**（每层失败都有兜底）：定位请求失败静默（modal 照常可用）→ 无 box 字段回退 D-026 文本高亮（🔍 按钮条件 `ranges[key] || boxes[key]`）→ 旧数据无页图回退 pdf iframe → historyStore 持久化剥离 `sourceFileUrl`/`pageImages`/`fieldBoxes`（session-scoped + 体积保护，localStorage 只存 `sourceText` 文本快照）
+- **理由**：
+  - 对照核验的闭环必须在原图上完成：客户拿着原图找「发票号在哪」，叠框给出视觉锚点，文本高亮只是无坐标时的降级
+  - 独立端点而非塞进主提取：定位是增强功能（可失败、可跳过、可缓存），混入主链路会让 OCR 提取的稳定性受 vision 定位质量牵连；每源只付一次定位成本，缓存后重开零成本
+  - PDF 走页图而非 PDF.js 叠加（V3）：后端 PyMuPDF 已有渲染能力（OCR 链路现成），`pages_images` 一次返回零前端依赖；PDF.js 需引入新库 + 坐标系换算
+- **影响**：
+  - `PasteTextInput.onAdd` 加第 5 参 `pageImages`（whole 模式传全部页图 / pages 模式每源只传本页单图）
+  - 后端验证：TDD 先红后绿 + 双突变自证（locate `page_index→0` 抓 2 红——页码标注用例；`normalize_boxes` `scale 10→1` 抓 2 红——0-1000 归一化用例），全量 259 passed / 2 skipped（commit adde51f）
+  - 前端验证：TDD 先红（数据链路 13 红 / UI 12 红）后绿；全量 vitest 301 passed（23 files）+ tsc 0 错误 + build 成功
+  - 前端突变自证：pane 分页过滤改恒 true → 「只画在所在页」用例红再还原；**modal 缓存守卫突变首次未被抓到**——缓存用例没 stub fetch，守卫禁用后 `fetch('blob:...')` 在 Node 下失败被 catch 静默掩盖断言 → 修复测试（stub fetch + 断言守卫在 fetch 之前 return）后重放突变抓红再还原，测试漏洞修复本身即是突变自证的价值证明
+  - historyStore 剥离面扩大：`sourceFileUrl`（D-026 已剥）之外新增 `pageImages`/`fieldBoxes`——页图 base64 体积大（每页 ~100KB 级）绝不入 localStorage，恢复的历史批次仍可走 `sourceText` 文本高亮
