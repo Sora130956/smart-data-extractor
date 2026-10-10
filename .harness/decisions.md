@@ -616,3 +616,27 @@
   - 前端验证：TDD 先红（数据链路 13 红 / UI 12 红）后绿；全量 vitest 301 passed（23 files）+ tsc 0 错误 + build 成功
   - 前端突变自证：pane 分页过滤改恒 true → 「只画在所在页」用例红再还原；**modal 缓存守卫突变首次未被抓到**——缓存用例没 stub fetch，守卫禁用后 `fetch('blob:...')` 在 Node 下失败被 catch 静默掩盖断言 → 修复测试（stub fetch + 断言守卫在 fetch 之前 return）后重放突变抓红再还原，测试漏洞修复本身即是突变自证的价值证明
   - historyStore 剥离面扩大：`sourceFileUrl`（D-026 已剥）之外新增 `pageImages`/`fieldBoxes`——页图 base64 体积大（每页 ~100KB 级）绝不入 localStorage，恢复的历史批次仍可走 `sourceText` 文本高亮
+
+## D-028：OCR 原生 grounding + 本地匹配，取代二次定位调用（替代 D-027 定位链路）
+
+- **日期**：2026-10-10
+- **状态**：已接受
+- **来源**：用户反馈——D-027 的自动定位（「正在定位字段…」）耗时过长且经常不结束；用户提出替代方向：GLM 的 OCR vision 模型本身能否原生返回文本坐标（grounding），一次调用同时拿到文本和位置
+- **背景**：
+  - D-027 的 `/locate_fields` 为每个待核验字段发起独立二次 vision 调用；PDF 场景逐页串行扫描（`locate_in_pdf`），延迟随页数线性累加
+  - 后端 `build_glm_model`/前端 `fetch` 均无超时控制（无 `timeout`/`AbortController`），一旦上游响应慢或页数多，请求挂起不返回，前端的"正在定位字段…"提示因此长期不消失
+  - 根因是架构性的（二次调用本身必然串行且不可控耗时），而非可通过加超时/重试缓解的局部缺陷
+- **决策**：
+  1. **OCR 阶段原生输出坐标**：`extraction/ocr.py` 的 `OCR_PROMPT` 改为要求模型按行/短语输出 `{"blocks": [{"text", "box"}]}`（而非纯文本），`box` 为 0-100 百分比，复用 D-027 已有的 `_extract_json_object`/`_is_valid_box`/`normalize_boxes` 容错解析；`parse_pdf`/`parse_image` 返回新增 `pages_blocks`（按页对齐，失败页为 `None`），`text` 字段保留（由 blocks 拼接），向后兼容纯文本展示/粘贴流程
+  2. **定位阶段改为本地字符串匹配**：新增 `match_field_boxes`——字段值规范化（去空格/大小写折叠/全半角统一）后，在对应页的 `blocks` 中找规范化后的**精确匹配**；找不到即返回 `None`，不做模糊/子串匹配
+  3. **彻底删除 `/locate_fields` 端点及二次调用链路**：`locate_in_pdf`/`locate_in_image`/`build_locate_agent`/`build_locate_prompt`/`locate_fields` dispatcher、路由、DI seam、`LocateBox`/`LocateFieldsResponse` schema、前端 `client.ts` 的 `locateFields`、`locateBoxSchema`/`locateFieldsResponseSchema` 全部移除
+  4. **`locate.py` 保留文件名**，内容替换为：保留可复用的 JSON/坐标解析工具函数（`parse_box_payload`/`normalize_boxes`/`_extract_json_object`/`_is_valid_box`），新增本地匹配函数，删除所有二次 vision 调用相关代码
+  5. **`fieldBoxes` 不持久化缓存**：`ResultDetailModal` 每次打开用 `useMemo` 从 `source.pagesBlocks` 同步计算，不写回 `historyStore`；`pagesBlocks`（OCR 结果的一部分）正常持久化
+- **理由**：
+  - 把"找坐标"合并进 OCR 一次调用，彻底消除二次调用的串行延迟和挂起风险，而非给旧链路加超时治标
+  - 精确匹配而非模糊匹配：OCR 文本块与抽取字段值理论上应逐字一致（同一张图同一次 OCR 来源），模糊匹配引入的误匹配风险（框错位置）比"找不到就不叠框"更损害核验可信度
+  - 不缓存 `fieldBoxes`：本地字符串匹配开销极小（纯内存遍历，无网络调用），缓存带来的实现复杂度（缓存失效、与 `pagesBlocks` 一致性）不值得
+- **影响**：
+  - 后端：`extraction/ocr.py`（prompt + 解析扩展）、`extraction/locate.py`（大幅重写）、`api/schemas.py`（`ParsePdfResponse`/`ParseImageResponse` 加 `pages_blocks`，删 `LocateBox`/`LocateFieldsResponse`）、`api/routes.py`（删 `/locate_fields` 路由 + DI seam）、`extraction/__init__.py`（删 `locate_fields` 导出）
+  - 前端：`types/extraction.ts`（`ExtractionSource.pagesBlocks` 替代 `fieldBoxes` 持久化字段）、`api/schemas.ts`/`client.ts`（扩展 parse 响应 schema，删 locate 相关）、`ResultDetailModal.tsx`（移除自动定位 `useEffect`/`locating` state，改 `useMemo` 本地同步计算）、`SourcePreviewPane.tsx`（移除 `locating` 提示 UI，`boxes` 渲染逻辑不变）
+  - 待验证：TDD 先红后绿 + 突变自证，全量 pytest/vitest/tsc/build

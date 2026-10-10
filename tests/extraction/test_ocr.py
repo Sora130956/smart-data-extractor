@@ -1,4 +1,8 @@
-"""Tests for extraction.ocr: PDF -> page images -> GLM vision OCR (offline, TestModel)."""
+"""Tests for extraction.ocr: PDF -> page images -> GLM vision OCR with
+native grounding blocks (issue #4, D-028). Offline: TestModel or a faked
+GLM transport (MockTransport), never a real network call."""
+
+import json
 
 import fitz
 import pytest
@@ -12,6 +16,7 @@ from pydantic_ai.usage import RunUsage
 import smart_data_extractor.extraction.ocr as ocr_module
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction.ocr import (
+    _parse_grounding,
     build_glm_model,
     build_ocr_agent,
     calculate_glm_cost,
@@ -93,6 +98,75 @@ def test_pdf_to_images_single_page():
     assert len(images) == 1
 
 
+# --- _parse_grounding (D-028: OCR-native block parsing) ---
+
+
+def test_parse_grounding_happy_path_joins_block_texts():
+    raw = json.dumps(
+        {
+            "blocks": [
+                {"text": "Invoice Number", "box": [10, 10, 40, 15]},
+                {"text": "INV-001", "box": [10, 20, 30, 25]},
+            ]
+        }
+    )
+    text, blocks = _parse_grounding(raw)
+    assert text == "Invoice Number\nINV-001"
+    assert blocks == [
+        {"text": "Invoice Number", "box": [10, 10, 40, 15]},
+        {"text": "INV-001", "box": [10, 20, 30, 25]},
+    ]
+
+
+def test_parse_grounding_rescales_0_1000_boxes():
+    """GLM-4.5V grounding natively emits 0-1000 coordinates: boxes are
+    normalized to 0-100 percentages."""
+    raw = json.dumps({"blocks": [{"text": "v", "box": [100, 200, 300, 400]}]})
+    _, blocks = _parse_grounding(raw)
+    assert blocks == [{"text": "v", "box": [10, 20, 30, 40]}]
+
+
+def test_parse_grounding_strips_code_fences():
+    raw = '```json\n{"blocks": [{"text": "v", "box": [1, 2, 3, 4]}]}\n```'
+    text, blocks = _parse_grounding(raw)
+    assert text == "v"
+    assert blocks == [{"text": "v", "box": [1, 2, 3, 4]}]
+
+
+def test_parse_grounding_plain_text_degrades_to_raw_text():
+    """Weak models may answer with prose instead of JSON: the text survives
+    (backwards compatible), the page just has no blocks."""
+    text, blocks = _parse_grounding("just some plain text")
+    assert text == "just some plain text"
+    assert blocks is None
+
+
+def test_parse_grounding_drops_blocks_with_invalid_boxes():
+    """Blocks whose box is missing/garbled keep their text in the page text
+    but are dropped from the coordinate list (box=None marks them)."""
+    raw = json.dumps(
+        {
+            "blocks": [
+                {"text": "ok", "box": [1, 2, 3, 4]},
+                {"text": "no box"},
+                {"text": "bad box", "box": [1, 2, 3]},
+                "not even a dict",
+            ]
+        }
+    )
+    text, blocks = _parse_grounding(raw)
+    assert text == "ok\nno box\nbad box"
+    assert blocks == [{"text": "ok", "box": [1, 2, 3, 4]}]
+
+
+def test_parse_grounding_empty_blocks_degrades_to_raw():
+    """A blocks list with no usable entries is treated as unparseable."""
+    raw = json.dumps({"blocks": []})
+    text, blocks = _parse_grounding(raw)
+    assert text == raw
+    assert blocks is None
+
+
 # --- parse_pdf ---
 
 
@@ -113,6 +187,8 @@ async def test_parse_pdf_builds_glm_model_when_model_omitted(monkeypatch, fake_o
 
     assert build_calls == [True]
     assert result["text"] == "OCR TEXT"
+    # Plain-text model output degrades: no blocks for the page.
+    assert result["pages_blocks"] == [None]
 
 
 async def test_parse_pdf_defaults_model_ref_to_settings_glm_model(monkeypatch, fake_openai_env):
@@ -149,7 +225,12 @@ async def test_parse_pdf_tolerates_glm_response_missing_object_field(
             {
                 "index": 0,
                 "finish_reason": "stop",
-                "message": {"role": "assistant", "content": "OCR TEXT"},
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {"blocks": [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]}
+                    ),
+                },
             }
         ],
         "created": 1_700_000_000,
@@ -168,18 +249,24 @@ async def test_parse_pdf_tolerates_glm_response_missing_object_field(
 
     assert result["pages_failed"] == []
     assert result["text"] == "OCR TEXT"
+    assert result["pages_blocks"] == [[{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]]
     assert result["tokens_used"] == {"input": 10, "output": 5}
 
 
 async def test_parse_pdf_concatenates_page_text(monkeypatch, test_model):
     """Multi-page OCR output joins into one text blob, one Source = one Result."""
     monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"page1", b"page2"])
-    model = TestModel(custom_output_text="OCR TEXT")
+    grounding = json.dumps({"blocks": [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]})
+    model = TestModel(custom_output_text=grounding)
 
     result = await parse_pdf(b"fake-pdf-bytes", model=model)
 
     assert result["text"] == "OCR TEXT\n\nOCR TEXT"
     assert result["pages"] == ["OCR TEXT", "OCR TEXT"]
+    assert result["pages_blocks"] == [
+        [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}],
+        [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}],
+    ]
     assert result["pages_failed"] == []
 
 
@@ -204,7 +291,8 @@ async def test_parse_pdf_skips_failed_pages(monkeypatch, test_model):
     async def fake_ocr_page(agent, image_bytes, media_type="image/png"):
         if image_bytes == b"p2":
             raise RuntimeError("boom")
-        return f"text-for-{image_bytes.decode()}", RunUsage(input_tokens=10, output_tokens=5)
+        name = f"text-for-{image_bytes.decode()}"
+        return name, [{"text": name, "box": [1, 2, 3, 4]}], RunUsage(input_tokens=10, output_tokens=5)
 
     monkeypatch.setattr(ocr_module, "_ocr_page", fake_ocr_page)
 
@@ -212,6 +300,11 @@ async def test_parse_pdf_skips_failed_pages(monkeypatch, test_model):
 
     assert result["pages_failed"] == [1]
     assert result["pages"] == ["text-for-p1", None, "text-for-p3"]
+    assert result["pages_blocks"] == [
+        [{"text": "text-for-p1", "box": [1, 2, 3, 4]}],
+        None,
+        [{"text": "text-for-p3", "box": [1, 2, 3, 4]}],
+    ]
     assert result["text"] == "text-for-p1\n\ntext-for-p3"
     assert result["tokens_used"] == {"input": 20, "output": 10}
 
@@ -229,6 +322,7 @@ async def test_parse_pdf_all_pages_fail_returns_empty_text(monkeypatch, test_mod
 
     assert result["text"] == ""
     assert result["pages_failed"] == [0, 1]
+    assert result["pages_blocks"] == [None, None]
     assert result["tokens_used"] == {"input": 0, "output": 0}
     assert result["cost_usd"] == 0.0
 
@@ -249,7 +343,7 @@ async def test_parse_image_ocrs_bytes_directly_with_media_type(monkeypatch, test
 
     async def fake_ocr_page(agent, image_bytes, media_type="image/png"):
         captured["media_type"] = media_type
-        return "OCR TEXT", RunUsage(input_tokens=7, output_tokens=3)
+        return "OCR TEXT", [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}], RunUsage(input_tokens=7, output_tokens=3)
 
     monkeypatch.setattr(ocr_module, "_ocr_page", fake_ocr_page)
 
@@ -258,6 +352,7 @@ async def test_parse_image_ocrs_bytes_directly_with_media_type(monkeypatch, test
     assert captured["media_type"] == "image/jpeg"
     assert result["pages"] == ["OCR TEXT"]
     assert result["text"] == "OCR TEXT"
+    assert result["pages_blocks"] == [[{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]]
     assert result["pages_failed"] == []
     assert result["tokens_used"] == {"input": 7, "output": 3}
 
@@ -277,6 +372,8 @@ async def test_parse_image_builds_glm_model_when_model_omitted(monkeypatch, fake
 
     assert build_calls == [True]
     assert result["text"] == "OCR TEXT"
+    # Plain-text model output degrades: no blocks for the page.
+    assert result["pages_blocks"] == [None]
 
 
 async def test_parse_image_failed_ocr_returns_empty_text(monkeypatch, test_model):
@@ -291,6 +388,7 @@ async def test_parse_image_failed_ocr_returns_empty_text(monkeypatch, test_model
 
     assert result["text"] == ""
     assert result["pages"] == [None]
+    assert result["pages_blocks"] == [None]
     assert result["pages_failed"] == [0]
     assert result["tokens_used"] == {"input": 0, "output": 0}
     assert result["cost_usd"] == 0.0

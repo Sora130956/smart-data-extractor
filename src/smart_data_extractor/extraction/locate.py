@@ -1,77 +1,43 @@
-"""Ground extracted field values in the original image (issue #4, D-027).
+"""Grounding-block utilities + local field matching (issue #4, D-028).
 
 The review pane overlays highlight boxes directly on the original file
-preview, so reviewers verify low-confidence fields against the source
-image in place. Coordinates can only come from a vision model — the
-extraction pipeline (PyMuPDF render -> GLM OCR -> plain text) carries no
-position info anywhere, and the frontend cannot know where a value sits
-in an image.
+preview. D-027 asked a *second* vision-model call where each extracted
+value sits; D-028 replaces that with OCR-native grounding: the OCR pass
+itself returns text blocks with bounding boxes (see ocr.py), and
+extracted values are matched against those blocks locally — no extra
+model call, no extra latency or cost, no "locating…" spinners.
 
-Design (vs. changing the OCR contract): a dedicated *locate* pass asks the
-vision model WHERE each already-extracted value appears. This never
-touches the OCR -> extraction path (no fidelity regression), and it works
-precisely where text matching fails — low-confidence fields whose LLM
-value drifted from the OCR text are exactly the ones needing review, and
-the vision model can still find them visually.
+What remains here:
+- parse_box_payload / normalize_boxes (+ their helpers): defensive
+  JSON-box parsing and scale-tolerant cleanup, shared with the OCR
+  grounding parser. ocr.py imports them, so this module MUST stay
+  dependency-free (no imports from ocr.py — that would be a cycle).
+- match_field_boxes: the local exact-match lookup that turns
+  "value -> where is it" into {"page", "box"} without any LLM. It is
+  the semantic reference implementation; the frontend's TS port must
+  behave identically (normalized exact match, first hit wins).
 
-Robustness against weak/quirky vision models:
-- plain-text output (no tool calling) + defensive JSON extraction, so
-  models without function-call support still work;
-- coordinate-scale tolerance: GLM-4.5V grounding natively emits 0-1000
-  relative coordinates while the prompt asks for 0-100 percentages — any
-  response scale (0-100 / 0-1000 / pixel-like) is normalized to 0-100;
-- inverted corners are swapped, out-of-range values clamped, degenerate
-  zero-area boxes and unparseable entries degrade to "not found" (null).
+Robustness against weak/quirky vision models (unchanged in spirit from
+D-027): coordinate-scale tolerance — GLM-4.5V grounding natively emits
+0-1000 relative coordinates while the prompt asks for 0-100 percentages,
+so any response scale (0-100 / 0-1000 / pixel-like) is normalized to
+0-100; inverted corners are swapped, out-of-range values clamped,
+degenerate zero-area boxes dropped.
+
+Match policy (D-028 decision): normalize (whitespace removal, case
+folding, fullwidth->halfwidth) then compare for exact equality — no
+substring or fuzzy matching. A miss returns None; the caller simply
+shows no box.
 """
 
 import json
-import logging
 import math
 import re
 from typing import Any
 
-from pydantic_ai import Agent, BinaryContent
-from pydantic_ai.settings import ModelSettings
-
-from smart_data_extractor.extraction.ocr import (
-    _resolve_model,
-    calculate_glm_cost,
-    pdf_to_images,
-)
-
-logger = logging.getLogger(__name__)
-
-# One grounding call must stay sane: cap the values per request (the route
-# enforces this) and the pages scanned for a whole-PDF search.
+# Convention cap kept from D-027: one grounding match request stays
+# bounded (schemas are small; shared upper bound for callers).
 MAX_VALUES = 20
-MAX_PDF_PAGES_SCANNED = 10
-
-
-def build_locate_prompt(values: list[str]) -> str:
-    """Numbered values + the exact JSON contract the parser expects."""
-    numbered = "\n".join(f"{i + 1}. {v}" for i, v in enumerate(values))
-    return (
-        "You are given a document image and a numbered list of values that "
-        "were extracted from it. Locate where each value appears in the image.\n"
-        "Return ONLY a JSON object, no markdown fences, in the exact shape:\n"
-        '{"boxes": [[x1, y1, x2, y2], null]}\n'
-        "- One entry per numbered value, in the same order; use null when a "
-        "value is not visible in the image.\n"
-        "- [x1, y1, x2, y2] is the value's bounding box: top-left corner "
-        "(x1, y1), bottom-right corner (x2, y2), as percentages of the image "
-        "width and height, each number between 0 and 100.\n"
-        f"Values:\n{numbered}"
-    )
-
-
-def build_locate_agent(*, model: Any) -> Agent:
-    """Fresh locate agent: plain-text output (tool-call-free, see module
-    docstring), deterministic."""
-    return Agent(
-        model,
-        output_type=str,
-        model_settings=ModelSettings(temperature=0),
-    )
 
 
 def _extract_json_object(raw: str) -> Any:
@@ -105,7 +71,7 @@ def parse_box_payload(raw: str, *, count: int) -> list[list[float] | None]:
     """Model output -> order-aligned per-value boxes (None = not found).
 
     Any surprise (unparseable text, wrong shape, wrong arity, invalid
-    entries) degrades to None rather than raising: a failed locate must
+    entries) degrades to None rather than raising: a failed parse must
     never break the review pane.
     """
     parsed = _extract_json_object(raw)
@@ -156,97 +122,41 @@ def normalize_boxes(boxes: list[list[float] | None]) -> list[list[float] | None]
     return out
 
 
-async def locate_in_image(
-    image_bytes: bytes,
-    values: list[str],
-    *,
-    media_type: str = "image/png",
-    model: Any = None,
-    model_ref: str | None = None,
-) -> dict:
-    """One grounding call over a single image. Boxes come back tagged
-    page=None (images have no paging)."""
-    model, model_ref = _resolve_model(model, model_ref)
-    agent = build_locate_agent(model=model)
-    result = await agent.run(
-        [build_locate_prompt(values), BinaryContent(data=image_bytes, media_type=media_type)]
-    )
-    boxes = normalize_boxes(parse_box_payload(result.output, count=len(values)))
-    cost_usd = calculate_glm_cost(result.usage, model_ref=model_ref) if model_ref else 0.0
-    return {
-        "boxes": [{"page": None, "box": b} if b is not None else None for b in boxes],
-        "pages_scanned": 1,
-        "tokens_used": {"input": result.usage.input_tokens, "output": result.usage.output_tokens},
-        "cost_usd": cost_usd,
-    }
+def _normalize(s: str) -> str:
+    """Comparison key: drop all whitespace (including the ideographic
+    space U+3000), fold case, and fold fullwidth ASCII (common in CJK
+    OCR output) to halfwidth."""
+    out = []
+    for ch in s:
+        code = ord(ch)
+        if 0xFF01 <= code <= 0xFF5E:  # fullwidth !..~ block
+            ch = chr(code - 0xFEE0)
+        out.append(ch)
+    return re.sub(r"\s+", "", "".join(out)).lower()
 
 
-async def locate_in_pdf(
-    pdf_bytes: bytes,
-    values: list[str],
-    *,
-    model: Any = None,
-    model_ref: str | None = None,
-) -> dict:
-    """Whole-PDF search: render the pages, scan them one by one asking only
-    for the values not found yet, stop early once everything is located.
-    Found boxes carry their 0-based page index. A page whose call raises is
-    skipped, not fatal."""
-    model, model_ref = _resolve_model(model, model_ref)
-    agent = build_locate_agent(model=model)
-    images = pdf_to_images(pdf_bytes)[:MAX_PDF_PAGES_SCANNED]
+def match_field_boxes(
+    value: str,
+    pages_blocks: list[list[dict[str, Any]] | None],
+) -> dict[str, Any] | None:
+    """Locate `value` in the OCR grounding blocks, locally.
 
-    remaining = list(range(len(values)))
-    found: dict[int, dict] = {}
-    input_tokens = 0
-    output_tokens = 0
-    cost_usd = 0.0
-    pages_scanned = 0
-
-    for page_index, image_bytes in enumerate(images):
-        if not remaining:
-            break
-        pages_scanned += 1
-        try:
-            result = await agent.run(
-                [
-                    build_locate_prompt([values[i] for i in remaining]),
-                    BinaryContent(data=image_bytes, media_type="image/png"),
-                ]
-            )
-        except Exception:
-            logger.exception("grounding failed on page %d", page_index)
+    Exact match after normalization (whitespace removal / case fold /
+    fullwidth fold) — no substring or fuzzy matching (D-028 decision).
+    Returns {"page": <0-based index>, "box": [x1, y1, x2, y2]} for the
+    first hit in page order, else None.
+    """
+    needle = _normalize(value)
+    if not needle:
+        return None
+    for page_index, blocks in enumerate(pages_blocks):
+        if not blocks:
             continue
-        page_boxes = normalize_boxes(parse_box_payload(result.output, count=len(remaining)))
-        for local_index, box in zip(remaining, page_boxes):
-            if box is not None:
-                found[local_index] = {"page": page_index, "box": box}
-        remaining = [i for i in remaining if i not in found]
-        input_tokens += result.usage.input_tokens
-        output_tokens += result.usage.output_tokens
-        if model_ref is not None:
-            cost_usd += calculate_glm_cost(result.usage, model_ref=model_ref)
-
-    return {
-        "boxes": [found.get(i) for i in range(len(values))],
-        "pages_scanned": pages_scanned,
-        "tokens_used": {"input": input_tokens, "output": output_tokens},
-        "cost_usd": cost_usd,
-    }
-
-
-async def locate_fields(
-    file_bytes: bytes,
-    media_type: str,
-    values: list[str],
-    *,
-    model: Any = None,
-    model_ref: str | None = None,
-) -> dict:
-    """Dispatch by media type: images are grounded in place, PDFs get the
-    page-by-page search."""
-    if media_type == "application/pdf":
-        return await locate_in_pdf(file_bytes, values, model=model, model_ref=model_ref)
-    return await locate_in_image(
-        file_bytes, values, media_type=media_type, model=model, model_ref=model_ref
-    )
+        for block in blocks:
+            text = block.get("text")
+            if not isinstance(text, str) or _normalize(text) != needle:
+                continue
+            box = block.get("box")
+            if isinstance(box, list) and len(box) == 4:
+                return {"page": page_index, "box": box}
+    return None

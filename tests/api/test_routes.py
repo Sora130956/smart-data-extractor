@@ -12,7 +12,6 @@ from smart_data_extractor.api import create_app
 from smart_data_extractor.api.routes import (
     get_batch_fn,
     get_extract_fn,
-    get_locate_fields_fn,
     get_parse_image_fn,
     get_parse_pdf_fn,
     get_schema_infer_fn,
@@ -683,144 +682,43 @@ async def test_parse_pdf_page_images_default_to_none_for_old_parsers(app, client
     assert resp.json().get("pages_images") is None
 
 
-# --- /locate_fields (issue #4: ground values in the original file) ---
-
-
-def _make_fake_locate_fields(fail_with: Exception | None = None):
-    calls = []
-
-    async def fake_locate_fields(file_bytes, media_type, values, *, model=None, model_ref=None):
-        calls.append({"file_bytes": file_bytes, "media_type": media_type, "values": values})
-        if fail_with is not None:
-            raise fail_with
+async def test_parse_pdf_carries_grounding_blocks(app, client):
+    """Issue #4 (D-028): the parse response includes per-page OCR grounding
+    blocks so the review pane can match field values locally and overlay
+    highlight boxes — no second locate call."""
+    async def fake_with_blocks(pdf_bytes, *, model=None, model_ref=None):
         return {
-            "boxes": [{"page": None, "box": [10, 20, 30, 40]}, None],
-            "pages_scanned": 1,
-            "tokens_used": {"input": 40, "output": 8},
+            "text": "Invoice\nINV-001",
+            "pages": ["Invoice\nINV-001"],
+            "pages_blocks": [[{"text": "Invoice", "box": [10, 10, 40, 15]}]],
+            "pages_failed": [],
+            "pages_images": ["<b64-p1>"],
+            "tokens_used": {"input": 100, "output": 20},
             "cost_usd": 0.0,
         }
 
-    return fake_locate_fields, calls
-
-
-async def test_locate_fields_happy_path_image(app, client):
-    fake, calls = _make_fake_locate_fields()
-    app.dependency_overrides[get_locate_fields_fn] = lambda: fake
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake_with_blocks
 
     resp = await client.post(
-        "/locate_fields",
-        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
-        data={"values": ["Acme Corp", "missing"]},
-    )
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["boxes"] == [{"page": None, "box": [10, 20, 30, 40]}, None]
-    assert body["pages_scanned"] == 1
-    assert body["tokens_used"] == {"input": 40, "output": 8}
-    assert body["cost_usd"] == 0.0
-    assert body["cost_cny"] == 0.0
-    assert calls[0]["file_bytes"] == b"\x89PNG fake bytes"
-    assert calls[0]["media_type"] == "image/png"
-    assert calls[0]["values"] == ["Acme Corp", "missing"]
-
-
-async def test_locate_fields_accepts_pdf(app, client):
-    """Whole-PDF locate: the media type reaches the core unchanged."""
-    fake, calls = _make_fake_locate_fields()
-    app.dependency_overrides[get_locate_fields_fn] = lambda: fake
-
-    resp = await client.post(
-        "/locate_fields",
+        "/parse_pdf",
         files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
-        data={"values": ["Acme Corp"]},
     )
 
     assert resp.status_code == 200
-    assert calls[0]["media_type"] == "application/pdf"
-    assert calls[0]["file_bytes"] == b"%PDF-1.4 fake bytes"
+    assert resp.json()["pages_blocks"] == [[{"text": "Invoice", "box": [10, 10, 40, 15]}]]
 
 
-async def test_locate_fields_strips_empty_values(app, client):
-    """Blank entries are dropped before the vision call; nothing left -> 422."""
-    fake, calls = _make_fake_locate_fields()
-    app.dependency_overrides[get_locate_fields_fn] = lambda: fake
+async def test_parse_pdf_grounding_blocks_default_to_none_for_old_parsers(app, client):
+    """Backward-compatible contract: a parser without grounding blocks still
+    yields a valid response (the field is optional)."""
+    fake, _ = _make_fake_parse_pdf()
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
 
     resp = await client.post(
-        "/locate_fields",
-        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
-        data={"values": ["Acme Corp", "  ", ""]},
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
     )
 
     assert resp.status_code == 200
-    assert calls[0]["values"] == ["Acme Corp"]
+    assert resp.json().get("pages_blocks") is None
 
-
-async def test_locate_fields_rejects_no_values(client):
-    resp = await client.post(
-        "/locate_fields",
-        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
-        data={"values": ["   "]},
-    )
-    assert resp.status_code == 422
-
-
-async def test_locate_fields_rejects_too_many_values(app, client):
-    """One grounding call stays sane: more than MAX_VALUES is a 422, and the
-    vision model is never called."""
-    fake, calls = _make_fake_locate_fields()
-    app.dependency_overrides[get_locate_fields_fn] = lambda: fake
-
-    resp = await client.post(
-        "/locate_fields",
-        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
-        data={"values": [f"v{i}" for i in range(21)]},
-    )
-
-    assert resp.status_code == 422
-    assert calls == []
-
-
-async def test_locate_fields_rejects_unsupported_content_type(client):
-    resp = await client.post(
-        "/locate_fields",
-        files={"file": ("doc.txt", b"plain", "text/plain")},
-        data={"values": ["Acme Corp"]},
-    )
-    assert resp.status_code == 422
-
-
-async def test_locate_fields_value_error_becomes_400(app, client):
-    fake, _ = _make_fake_locate_fields(fail_with=ValueError("broken file"))
-    app.dependency_overrides[get_locate_fields_fn] = lambda: fake
-
-    resp = await client.post(
-        "/locate_fields",
-        files={"file": ("scan.png", b"\x89PNG fake bytes", "image/png")},
-        data={"values": ["Acme Corp"]},
-    )
-
-    assert resp.status_code == 400
-    assert "broken file" in resp.json()["detail"]
-
-
-async def test_locate_fields_is_quota_guarded(app, client):
-    """D-019: the grounding call spends quota like every other billable
-    endpoint — the second request within the limit is a structured 429."""
-    from smart_data_extractor.api.quota import DailyQuota
-    from smart_data_extractor.api.routes import get_quota
-
-    quota = DailyQuota(per_ip_limit=1, global_limit=100)
-    app.dependency_overrides[get_quota] = lambda: quota
-    fake, calls = _make_fake_locate_fields()
-    app.dependency_overrides[get_locate_fields_fn] = lambda: fake
-
-    files = {"file": ("scan.png", b"\x89PNG fake bytes", "image/png")}
-    data = {"values": ["Acme Corp"]}
-
-    assert (await client.post("/locate_fields", files=files, data=data)).status_code == 200
-    blocked = await client.post("/locate_fields", files=files, data=data)
-    assert blocked.status_code == 429
-    assert blocked.json()["detail"]["code"] == "quota_per_ip"
-    # The vision model was only invoked for the allowed request.
-    assert len(calls) == 1

@@ -1,4 +1,4 @@
-"""PDF / image -> GLM vision OCR.
+"""PDF / image -> GLM vision OCR with native grounding (issue #4, D-028).
 
 One Source = one Result: a whole PDF is OCR'd page by page and the
 resulting text is concatenated into a single text blob, matching the
@@ -6,9 +6,17 @@ existing plain-text ingestion flow (PasteTextInput -> /batch_extract).
 An image file skips the page rendering entirely — its bytes are a
 single "page".
 
+Each OCR call asks the vision model for *grounding blocks*: the text
+lines/phrases of the page plus their bounding boxes (0-100 percentages).
+The blocks ride along in ``pages_blocks`` so the review pane can match
+extracted field values locally and overlay highlight boxes (D-028: this
+replaces D-027's second /locate_fields vision call — one call carries
+text *and* coordinates).
+
 Per-page failures are tolerated: a page whose OCR run raises is skipped
 (its index recorded in ``pages_failed``) rather than failing the whole
-document.
+document. Weak models that answer with plain prose instead of JSON keep
+their text (``pages`` stays populated) — that page just has no blocks.
 """
 
 import base64
@@ -24,10 +32,23 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RunUsage
 
 from smart_data_extractor.config import get_settings
+from smart_data_extractor.extraction.locate import (
+    _extract_json_object,
+    _is_valid_box,
+    normalize_boxes,
+)
 
 logger = logging.getLogger(__name__)
 
-OCR_PROMPT = "Extract all text from this image verbatim. Output only the text, no commentary."
+OCR_PROMPT = (
+    "Extract all text from this image verbatim, one block per line or "
+    "short phrase, in reading order.\n"
+    "Return ONLY a JSON object, no markdown fences, in the exact shape:\n"
+    '{"blocks": [{"text": "the text", "box": [x1, y1, x2, y2]}]}\n'
+    "- box is the block's bounding box: top-left corner (x1, y1), "
+    "bottom-right corner (x2, y2), as percentages of the image width and "
+    "height, each number between 0 and 100."
+)
 
 # Zhipu GLM vision model pricing, in CNY per 1M tokens: (input, output).
 # glm-4v-flash is free; glm-4.5v is tiered by input token count.
@@ -92,10 +113,52 @@ def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
     return images
 
 
-async def _ocr_page(agent: Agent, image_bytes: bytes, media_type: str = "image/png") -> tuple[str, RunUsage]:
-    """Run OCR on a single page image."""
+def _parse_grounding(raw: str) -> tuple[str, list[dict[str, Any]] | None]:
+    """Model output -> (page_text, blocks).
+
+    Grounding output is a JSON object ``{"blocks": [{"text", "box"}]}``:
+    the page text is the blocks' texts joined with newlines, and each
+    block carries a normalized 0-100 box (GLM natively emits 0-1000 —
+    normalize_boxes rescales any convention). Blocks with a missing or
+    garbled box keep their text in the page text but are dropped from
+    the coordinate list.
+
+    Anything unparseable (weak models may still answer with plain prose)
+    degrades to ``(raw, None)`` — the text survives, the page just has
+    no coordinates.
+    """
+    parsed = _extract_json_object(raw)
+    entries = parsed.get("blocks") if isinstance(parsed, dict) else None
+    if not isinstance(entries, list):
+        return raw, None
+
+    texts: list[str] = []
+    boxes: list[list[float] | None] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("text"), str):
+            continue
+        texts.append(entry["text"])
+        box = entry.get("box")
+        boxes.append([float(c) for c in box] if _is_valid_box(box) else None)
+    if not texts:
+        return raw, None
+
+    normalized = normalize_boxes(boxes)
+    blocks = [
+        {"text": text, "box": box}
+        for text, box in zip(texts, normalized)
+        if box is not None
+    ]
+    return "\n".join(texts), blocks
+
+
+async def _ocr_page(
+    agent: Agent, image_bytes: bytes, media_type: str = "image/png"
+) -> tuple[str, list[dict[str, Any]] | None, RunUsage]:
+    """Run OCR on a single page image; returns (text, grounding blocks, usage)."""
     result = await agent.run([OCR_PROMPT, BinaryContent(data=image_bytes, media_type=media_type)])
-    return result.output, result.usage
+    text, blocks = _parse_grounding(result.output)
+    return text, blocks, result.usage
 
 
 async def _ocr_images(
@@ -110,12 +173,19 @@ async def _ocr_images(
 
     include_images (issue #4, D-027): also return each page's PNG bytes
     base64-encoded, aligned with `pages` — the review pane previews PDF
-    pages as images so locate boxes can be overlaid on them.
+    pages as images so grounding boxes can be overlaid on them.
+
+    pages_blocks (issue #4, D-028): per-page OCR grounding blocks
+    ({"text", "box"} lists, boxes normalized to 0-100), aligned with
+    `pages` — the review pane matches extracted values against them
+    locally. None marks a page without coordinate info (failed page or
+    unparseable grounding output).
     """
     agent = build_ocr_agent(model=model)
 
     # Per-image OCR text aligned to the original order; None marks a failure.
     pages: list[str | None] = [None] * len(images)
+    pages_blocks: list[list[dict[str, Any]] | None] = [None] * len(images)
     pages_failed: list[int] = []
     input_tokens = 0
     output_tokens = 0
@@ -123,13 +193,14 @@ async def _ocr_images(
 
     for index, image_bytes in enumerate(images):
         try:
-            text, usage = await _ocr_page(agent, image_bytes, media_type)
+            text, blocks, usage = await _ocr_page(agent, image_bytes, media_type)
         except Exception:
             logger.exception("OCR failed on page %d", index)
             pages_failed.append(index)
             continue
 
         pages[index] = text
+        pages_blocks[index] = blocks
         input_tokens += usage.input_tokens
         output_tokens += usage.output_tokens
         if model_ref is not None:
@@ -138,6 +209,7 @@ async def _ocr_images(
     return {
         "text": "\n\n".join(t for t in pages if t is not None),
         "pages": pages,
+        "pages_blocks": pages_blocks,
         "pages_failed": pages_failed,
         "pages_images": (
             [base64.b64encode(img).decode("ascii") for img in images] if include_images else None
@@ -166,6 +238,9 @@ async def parse_pdf(
 
     Returns a dict with:
         text: concatenated text of successfully OCR'd pages, joined by "\\n\\n".
+        pages_blocks: per-page grounding blocks ({"text", "box"}), aligned
+            with `pages` (issue #4, D-028) — None marks a page without
+            coordinate info.
         pages_images: per-page rendered PNGs (base64) for the review-pane
             preview (issue #4, D-027); aligned with `pages`.
         pages_failed: 0-based indices of pages whose OCR run raised.
