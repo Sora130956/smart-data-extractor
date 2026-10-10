@@ -91,4 +91,41 @@ describe('useBatchExtract', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe('Unknown preset');
   });
+
+  it('threads per-text page images into the adapted sources (D-027)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            data: { name: 'Acme', name_confidence: 0.9 },
+            tokens_used: { input: 10, output: 5 },
+            cost_usd: 0.0001, cost_cny: 0.000725,
+            error: null,
+          },
+        ],
+        total_cost_usd: 0.0001, total_cost_cny: 0.000725, cost_cny: 0.000725,
+        total_tokens: { input: 10, output: 5 },
+        succeeded: 1,
+        failed: 0,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useBatchExtract(), { wrapper });
+
+    result.current.mutate({
+      texts: ['pdf text'],
+      preset: 'invoice',
+      fileUrls: ['blob:pdf'],
+      fileTypes: ['pdf'],
+      pageImages: [['aGk=', 'Ynk=']],
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const source = result.current.data?.[0];
+    expect(source?.type).toBe('pdf');
+    expect(source?.pageImages).toEqual(['aGk=', 'Ynk=']);
+  });
 });

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { locateFields } from '@/api/client';
 import { Button } from '@/components/ui/Button';
-import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource, FieldBox } from '@/types/extraction';
 import {
   CONFIDENCE_LOW,
   confidenceLevel,
@@ -16,6 +17,10 @@ import { findFieldRanges } from '@/utils/textHighlight';
 import { SourcePreviewPane } from './SourcePreviewPane';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
+
+/** Mirrors the backend's MAX_VALUES cap (/locate_fields rejects longer
+ * lists with a 422 — trim client-side so the first open never fails). */
+const MAX_LOCATE_VALUES = 20;
 
 const BADGE: Record<ConfidenceLevel, string> = {
   high: 'bg-success/15 text-success',
@@ -52,9 +57,13 @@ export interface ResultDetailModalProps {
   onClose: () => void;
   /** Reports an inline field edit (review flow). Marks the field reviewed. */
   onFieldUpdate?: (fieldKey: string, newValue: unknown) => void;
+  /** Reports the vision-locate boxes for this source (D-027) so the caller
+   * can cache them on the source — re-opening must not re-bill the model.
+   * Absent (tests / read-only usage) disables the background locate call. */
+  onLocateBoxes?: (boxes: Record<string, FieldBox>) => void;
 }
 
-export function ResultDetailModal({ source, result, label, onClose, onFieldUpdate }: ResultDetailModalProps) {
+export function ResultDetailModal({ source, result, label, onClose, onFieldUpdate, onLocateBoxes }: ResultDetailModalProps) {
   const { t, i18n } = useTranslation();
   const [copied, setCopied] = useState(false);
   // Inline editing: key of the field being edited + its working value.
@@ -63,6 +72,59 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
   // Issue #4: locate request into the review pane; the nonce makes repeated
   // clicks on the same field re-trigger the scroll+flash.
   const [focus, setFocus] = useState<{ field: string; nonce: number } | null>(null);
+  // D-027: the vision-locate request runs in the background while the modal
+  // is open; its boxes are cached on the source via onLocateBoxes.
+  const [locating, setLocating] = useState(false);
+  const locateStartedFor = useRef<string | null>(null);
+
+  // D-027 auto-locate: on first open of a file-backed source, ask the vision
+  // model where each extracted value sits in the original file so the pane
+  // can overlay highlight boxes on the preview. Best-effort by design: any
+  // failure (quota, network, weak model) is swallowed and the pane falls
+  // back to the issue #4 text-highlight view.
+  useEffect(() => {
+    const values = Object.entries(result.data ?? {})
+      .filter(([, v]) => v != null && typeof v !== 'object')
+      .map(([key, v]) => ({ key, text: String(v) }))
+      .slice(0, MAX_LOCATE_VALUES);
+    if (
+      source.fieldBoxes != null || // already located (even if nothing was found)
+      onLocateBoxes == null ||
+      source.sourceFileUrl == null ||
+      (source.type !== 'pdf' && source.type !== 'image') ||
+      values.length === 0 ||
+      locateStartedFor.current === source.id
+    ) {
+      return;
+    }
+    locateStartedFor.current = source.id;
+    let cancelled = false;
+    setLocating(true);
+    void (async () => {
+      try {
+        const blob = await fetch(source.sourceFileUrl as string).then((r) => r.blob());
+        const type =
+          blob.type || (source.type === 'pdf' ? 'application/pdf' : 'image/png');
+        const file = new File([blob], source.name, { type });
+        const response = await locateFields(file, values.map((v) => v.text));
+        const boxes: Record<string, FieldBox> = {};
+        values.forEach(({ key }, i) => {
+          const box = response.boxes[i];
+          if (box != null) boxes[key] = box;
+        });
+        if (!cancelled) onLocateBoxes(boxes);
+      } catch {
+        // Silent: the review pane degrades to the text-highlight view.
+      } finally {
+        if (!cancelled) setLocating(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // The ref guard makes re-runs (new result objects from edits) harmless.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.id, source.fieldBoxes, source.sourceFileUrl, source.type, result.data, onLocateBoxes]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -103,6 +165,9 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
       ),
     [result.reviewedFields],
   );
+  // D-027: vision-locate boxes cached on the source (Record may be empty —
+  // located but nothing found; undefined = not located yet).
+  const boxes = source.fieldBoxes ?? {};
 
   function startEdit(key: string, value: unknown) {
     setEditing(key);
@@ -293,7 +358,7 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
                         </span>
                       ) : null}
                     </div>
-                    {ranges[key] ? (
+                    {ranges[key] || boxes[key] ? (
                       <button
                         type="button"
                         aria-label={t('resultDetail.locateField', { field: fieldLabel })}
@@ -377,6 +442,8 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
             reviewFields={reviewFieldSet}
             reviewedFields={reviewedFieldSet}
             focus={focus}
+            boxes={boxes}
+            locating={locating}
           />
         </aside>
       </div>

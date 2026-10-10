@@ -408,4 +408,68 @@ describe('adaptBatchExtractResponse', () => {
     expect(sources[1].type).toBe('image');
     expect(sources[2].type).toBe('text');
   });
+
+  it('attaches per-text page images onto the matching source (D-027)', () => {
+    const response: BatchExtractResponse = {
+      results: [1, 2].map((n) => ({
+        data: { [`f${n}`]: n, [`f${n}_confidence`]: 1 },
+        tokens_used: { input: 1, output: 1 },
+        cost_usd: 0, cost_cny: 0,
+        error: null,
+      })),
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 2, output: 2 },
+      succeeded: 2,
+      failed: 0,
+    };
+
+    const sources = adaptBatchExtractResponse(
+      response,
+      ['pdf page', 'pasted'],
+      undefined,
+      undefined,
+      undefined,
+      ['blob:pdf', undefined],
+      undefined,
+      undefined,
+      ['pdf', undefined],
+      [['aGk=', 'Ynk='], undefined],
+    );
+
+    expect(sources[0].pageImages).toEqual(['aGk=', 'Ynk=']);
+    // Text sources never carry page images: the key stays absent.
+    expect(sources[1]).not.toHaveProperty('pageImages');
+  });
+
+  it('keeps pageImages absent when an empty array is submitted', () => {
+    const response: BatchExtractResponse = {
+      results: [
+        {
+          data: { a: 1, a_confidence: 1 },
+          tokens_used: { input: 1, output: 1 },
+          cost_usd: 0, cost_cny: 0,
+          error: null,
+        },
+      ],
+      total_cost_usd: 0, total_cost_cny: 0,
+      total_tokens: { input: 1, output: 1 },
+      succeeded: 1,
+      failed: 0,
+    };
+
+    const [source] = adaptBatchExtractResponse(
+      response,
+      ['pdf page'],
+      undefined,
+      undefined,
+      undefined,
+      ['blob:pdf'],
+      undefined,
+      undefined,
+      ['pdf'],
+      [],
+    );
+
+    expect(source).not.toHaveProperty('pageImages');
+  });
 });

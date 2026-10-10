@@ -180,7 +180,11 @@
     "preview": {
       "file": "Original File",
       "text": "Extracted Text",
-      "noSource": "No source preview available"
+      "noSource": "No source preview available",
+      "pageOf": "Page {{page}} / {{total}}",
+      "prevPage": "Previous page",
+      "nextPage": "Next page",
+      "locating": "Locating fields…"
     },
     "editField": "Edit {{field}}",
     "reviewed": "Reviewed",

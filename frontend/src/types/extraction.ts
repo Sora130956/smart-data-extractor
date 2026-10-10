@@ -4,6 +4,14 @@
 export type SourceType = 'pdf' | 'image' | 'text';
 export type ResultStatus = 'success' | 'failed';
 
+/** Where an extracted value sits in the original file (D-027): a
+ * normalized 0-100 bounding box, plus the 0-based page index it was found
+ * on (null = single-image sources, which have no paging). */
+export interface FieldBox {
+  page: number | null;
+  box: [number, number, number, number];
+}
+
 export interface ExtractionResult {
   sourceId: string;
   /** Human-facing position inside the source: "Page 1" | "Item 2". */
@@ -59,6 +67,16 @@ export interface ExtractionSource {
    * extracted values against it to highlight where they came from. Unlike
    * `meta` (a 60-char preview) it is never clipped. */
   sourceText?: string;
+  /** Per-page base64 PNG renders of the original PDF (D-027) — the review
+   * pane overlays locate boxes on these page images instead of an iframe.
+   * Session-scoped like `sourceFileUrl`; stripped from persisted history
+   * (heavy base64 payloads would blow the localStorage quota). */
+  pageImages?: string[];
+  /** field_name -> where its value sits in the original file (D-027),
+   * cached from the /locate_fields call so re-opening the detail modal
+   * does not re-bill the vision model. Session-scoped: restored history
+   * entries have no file to render boxes on, so it is not persisted. */
+  fieldBoxes?: Record<string, FieldBox>;
   results: ExtractionResult[];
   stats: {
     succeeded: number;

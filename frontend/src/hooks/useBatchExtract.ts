@@ -24,6 +24,9 @@ export interface BatchExtractInput {
   /** Upload kind of each fileUrl ('pdf' | 'image'), aligned by index —
    * the review pane (issue #4) picks its preview strategy from it. */
   fileTypes?: Array<'pdf' | 'image' | undefined>;
+  /** Per-text base64 page renders for pdf uploads (D-027), aligned by
+   * index — the review pane overlays locate boxes on these page images. */
+  pageImages?: Array<string[] | undefined>;
   /** field_name -> user-configured minimum confidence, snapshotted onto each
    * source so review flags survive later schema edits (issue #2). */
   reviewThresholds?: Record<string, number>;
@@ -34,9 +37,9 @@ export interface BatchExtractInput {
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, fileTypes, reviewThresholds, allowEmptyFields }) => {
+    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, fileTypes, pageImages, reviewThresholds, allowEmptyFields }) => {
       const response = await batchExtract({ texts, preset, schema, instructions, lang });
-      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields, fileTypes);
+      return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields, fileTypes, pageImages);
     },
   });
 }

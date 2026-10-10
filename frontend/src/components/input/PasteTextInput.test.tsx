@@ -118,8 +118,30 @@ describe('PasteTextInput', () => {
     const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf'));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', undefined));
     expect(parsePdf).toHaveBeenCalledWith(file);
+  });
+
+  it('passes all page renders to onAdd for a whole-document pdf (D-027)', async () => {
+    useUiStore.setState({ pdfSplitMode: 'whole' });
+    vi.mocked(parsePdf).mockResolvedValue({
+      text: 'OCR extracted text',
+      pages: ['OCR extracted text'],
+      pages_failed: [],
+      pages_images: ['aGk=', 'Ynk='],
+      tokens_used: { input: 10, output: 5 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile('scan.pdf', 'ignored', 'application/pdf')] } });
+
+    await waitFor(() =>
+      expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', ['aGk=', 'Ynk=']),
+    );
   });
 
   it('adds one source per pdf page when pdfSplitMode is pages', async () => {
@@ -140,9 +162,32 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
-    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url', 'pdf');
-    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url', 'pdf');
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url', 'pdf', undefined);
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url', 'pdf', undefined);
     expect(onAdd).not.toHaveBeenCalledWith(expect.stringContaining('P2'), expect.anything());
+  });
+
+  it('passes only that page render with each per-page source in pages split mode (D-027)', async () => {
+    useUiStore.setState({ pdfSplitMode: 'pages' });
+    vi.mocked(parsePdf).mockResolvedValue({
+      text: 'page one\n\npage three',
+      pages: ['page one', null, 'page three'],
+      pages_failed: [1],
+      pages_images: ['aGk=', 'Ynk=', 'Y3k='],
+      tokens_used: { input: 30, output: 15 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile('records.pdf', 'ignored', 'application/pdf')] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
+    // Each per-page source sees a single-image array of ITS page render.
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url', 'pdf', ['aGk=']);
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url', 'pdf', ['Y3k=']);
   });
 
   it('shows an error and does not call onAdd when pdf parsing fails', async () => {
@@ -222,7 +267,7 @@ describe('PasteTextInput', () => {
     expect(status.querySelector('.animate-spin')).not.toBeNull();
 
     resolvePdf();
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf'));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', undefined));
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

@@ -1,12 +1,16 @@
 // Issue #4 review pane: shows the original file / extraction text beside
 // the field list so reviewers can compare in place instead of opening a
-// new tab. Matched field values are highlighted in the text view — warning
-// color for fields that need review, success for reviewed ones — and a
-// locate click from the field list scrolls to the match and flashes it.
+// new tab. D-027: the file view renders the original as page images with
+// the locate boxes overlaid directly on them — warning color for fields
+// that need review, success for reviewed ones — so a reviewer verifies a
+// low-confidence value against the source image at a glance. A locate
+// click jumps to the box's page and flashes it; PDFs without page renders
+// (legacy data) fall back to the iframe embed, and the text view keeps the
+// issue #4 inline highlights as the no-vision fallback.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import type { ExtractionSource } from '@/types/extraction';
+import type { ExtractionSource, FieldBox } from '@/types/extraction';
 import type { FieldRange } from '@/utils/textHighlight';
 
 const FLASH_MS = 1800;
@@ -26,6 +30,11 @@ export interface SourcePreviewPaneProps {
   /** Locate request from the field list; a fresh nonce re-triggers the
    * scroll+flash (re-clicking the same field must work). */
   focus: { field: string; nonce: number } | null;
+  /** field -> where its value sits in the original file (D-027), from
+   * /locate_fields via the detail modal. Drives the file-view overlays. */
+  boxes: Record<string, FieldBox>;
+  /** True while the modal's background /locate_fields call is running. */
+  locating?: boolean;
 }
 
 export function SourcePreviewPane({
@@ -34,6 +43,8 @@ export function SourcePreviewPane({
   reviewFields,
   reviewedFields,
   focus,
+  boxes,
+  locating = false,
 }: SourcePreviewPaneProps) {
   const { t } = useTranslation();
   const hasFile = source.sourceFileUrl != null;
@@ -42,14 +53,43 @@ export function SourcePreviewPane({
   const [activeField, setActiveField] = useState<string | null>(null);
   const textRef = useRef<HTMLDivElement | null>(null);
 
-  // Locate click: switch to the text view and flash the field's match.
+  // Pages shown in the file view: the backend's per-page renders for pdfs
+  // (base64 -> data url), or the image blob url as a single page.
+  const pages = useMemo<string[]>(() => {
+    if (source.type === 'pdf') {
+      return (source.pageImages ?? []).map((b64) => `data:image/png;base64,${b64}`);
+    }
+    if (source.type === 'image' && source.sourceFileUrl != null) {
+      return [source.sourceFileUrl];
+    }
+    return [];
+  }, [source.type, source.pageImages, source.sourceFileUrl]);
+
+  const [pageIndex, setPageIndex] = useState(0);
+  // Stay in range when a rerender shrinks the page list.
+  const safeIndex = Math.min(pageIndex, Math.max(pages.length - 1, 0));
+
+  // Locate click: prefer the vision box (jump to its page on the file view
+  // and flash it); fall back to the text-view highlight when there is none.
   useEffect(() => {
-    if (focus == null || ranges[focus.field] == null) return;
-    setTab('text');
-    setActiveField(focus.field);
+    if (focus == null) return;
+    const box = boxes[focus.field];
+    if (box != null) {
+      setTab('file');
+      if (box.page != null && pages.length > 0) {
+        setPageIndex(Math.min(Math.max(box.page, 0), pages.length - 1));
+      }
+      setActiveField(focus.field);
+    } else if (ranges[focus.field] != null) {
+      setTab('text');
+      setActiveField(focus.field);
+    } else {
+      return;
+    }
     const timer = setTimeout(() => setActiveField(null), FLASH_MS);
     return () => clearTimeout(timer);
-    // ranges is recomputed per result; matching on the nonce is enough here.
+    // ranges/boxes are recomputed per result; matching on the nonce is
+    // enough here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.field, focus?.nonce]);
 
@@ -91,6 +131,14 @@ export function SourcePreviewPane({
     return `${base} bg-brand/15`;
   }
 
+  function boxClass(field: string): string {
+    const base = 'pointer-events-none absolute rounded-xs';
+    if (field === activeField) return `${base} bg-warning/40 ring-2 ring-warning animate-pulse`;
+    if (reviewedFields.has(field)) return `${base} bg-success/20 ring-2 ring-success/70`;
+    if (reviewFields.has(field)) return `${base} bg-warning/25 ring-2 ring-warning/70`;
+    return `${base} bg-brand/15 ring-2 ring-brand/60`;
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
@@ -118,6 +166,15 @@ export function SourcePreviewPane({
             {t('resultDetail.preview.text')}
           </button>
         ) : null}
+        {tab === 'file' && locating ? (
+          <span className="flex items-center gap-1.5 text-caption text-text-muted">
+            <span
+              className="inline-block h-3 w-3 flex-none animate-spin rounded-full border-2 border-border border-t-brand"
+              aria-hidden
+            />
+            {t('resultDetail.preview.locating')}
+          </span>
+        ) : null}
         <div className="flex-1" />
         {hasFile ? (
           <a
@@ -132,24 +189,74 @@ export function SourcePreviewPane({
       </div>
 
       {tab === 'file' && hasFile ? (
-        <div
-          role="region"
-          aria-label={t('resultDetail.preview.file')}
-          className="min-h-0 flex-1 overflow-auto bg-surface-muted p-2"
-        >
-          {source.type === 'image' ? (
-            <img
-              src={source.sourceFileUrl}
-              alt={source.name}
-              className="mx-auto max-w-full rounded-token border border-border bg-surface"
-            />
-          ) : (
-            <iframe
-              title={source.name}
-              src={source.sourceFileUrl}
-              className="h-full min-h-[420px] w-full rounded-token border border-border bg-surface"
-            />
-          )}
+        <div className="flex min-h-0 flex-1 flex-col">
+          {pages.length > 1 ? (
+            <div className="flex items-center justify-center gap-3 border-b border-border px-3 py-1.5 text-caption text-text-muted">
+              <button
+                type="button"
+                aria-label={t('resultDetail.preview.prevPage')}
+                disabled={safeIndex === 0}
+                onClick={() => setPageIndex(safeIndex - 1)}
+                className="rounded-token px-1.5 disabled:opacity-30 hover:bg-surface-muted"
+              >
+                ‹
+              </button>
+              <span className="tnum">
+                {t('resultDetail.preview.pageOf', { page: safeIndex + 1, total: pages.length })}
+              </span>
+              <button
+                type="button"
+                aria-label={t('resultDetail.preview.nextPage')}
+                disabled={safeIndex === pages.length - 1}
+                onClick={() => setPageIndex(safeIndex + 1)}
+                className="rounded-token px-1.5 disabled:opacity-30 hover:bg-surface-muted"
+              >
+                ›
+              </button>
+            </div>
+          ) : null}
+          <div
+            role="region"
+            aria-label={t('resultDetail.preview.file')}
+            className="min-h-0 flex-1 overflow-auto bg-surface-muted p-2"
+          >
+            {pages.length > 0 ? (
+              <div className="relative mx-auto w-fit max-w-full">
+                <img
+                  src={pages[safeIndex]}
+                  alt={source.name}
+                  className="max-w-full rounded-token border border-border bg-surface"
+                />
+                {Object.entries(boxes)
+                  .filter(([, box]) => (box.page ?? 0) === safeIndex)
+                  .map(([field, box]) => (
+                    <div
+                      key={field}
+                      data-field={field}
+                      className={boxClass(field)}
+                      style={{
+                        left: `${box.box[0]}%`,
+                        top: `${box.box[1]}%`,
+                        width: `${box.box[2] - box.box[0]}%`,
+                        height: `${box.box[3] - box.box[1]}%`,
+                      }}
+                    />
+                  ))}
+              </div>
+            ) : source.type === 'image' ? (
+              <img
+                src={source.sourceFileUrl}
+                alt={source.name}
+                className="mx-auto max-w-full rounded-token border border-border bg-surface"
+              />
+            ) : (
+              <iframe
+                title={source.name}
+                src={source.sourceFileUrl}
+                className="h-full min-h-[420px] w-full rounded-token border border-border bg-surface"
+              />
+            )}
+          </div>
         </div>
       ) : null}
 

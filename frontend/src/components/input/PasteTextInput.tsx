@@ -22,11 +22,21 @@ export interface StagedText {
   /** Upload kind for fileUrl ('pdf' | 'image'); undefined for plain text —
    * the review pane (issue #4) picks its preview strategy from it. */
   fileType?: 'pdf' | 'image';
+  /** Per-page base64 renders for pdf uploads (D-027): the whole document in
+   * "whole" mode, or just this source's page in "pages" split mode. The
+   * review pane overlays locate boxes on these instead of an iframe. */
+  pageImages?: string[];
 }
 
 interface PasteTextInputProps {
   staged: StagedText[];
-  onAdd: (name: string, text: string, fileUrl?: string, fileType?: 'pdf' | 'image') => void;
+  onAdd: (
+    name: string,
+    text: string,
+    fileUrl?: string,
+    fileType?: 'pdf' | 'image',
+    pageImages?: string[],
+  ) => void;
   onRemove: (id: string) => void;
 }
 
@@ -65,10 +75,14 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
             if (pdfSplitMode === 'pages') {
               // Failed pages come back as null; index+1 is the original page number.
               result.pages.forEach((page, i) => {
-                if (page !== null) onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf');
+                if (page === null) return;
+                // One single-image array per source: just this page's render.
+                const render = result.pages_images?.[i];
+                const pageImages = render ? [render] : undefined;
+                onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages);
               });
             } else {
-              onAdd(file.name, result.text, fileUrl, 'pdf');
+              onAdd(file.name, result.text, fileUrl, 'pdf', result.pages_images ?? undefined);
             }
           } catch (err) {
             const quota = quotaErrorCode(err);

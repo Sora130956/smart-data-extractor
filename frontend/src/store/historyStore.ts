@@ -51,11 +51,12 @@ export const useHistoryStore = create<HistoryState>((set) => ({
         id: crypto.randomUUID(),
         savedAt: new Date().toISOString(),
         presetLabel,
-        // Issue #4: blob URLs are session-scoped — after a reload they are
-        // dead and would render a broken file preview. The full sourceText
-        // (also snapshotted on the source) keeps the text preview working
-        // for restored batches; the live on-screen sources keep their URL.
-        sources: sources.map(({ sourceFileUrl: _dropped, ...rest }) => rest),
+        // Session-scoped file data is stripped before persisting (D-026/D-027):
+        // blob URLs die on reload, and the base64 page renders / locate boxes
+        // are heavy or unrenderable without the live file — localStorage only
+        // keeps the text snapshot (sourceText) that still renders after a
+        // restore. The live on-screen sources keep everything.
+        sources: sources.map(({ sourceFileUrl: _url, pageImages: _pages, fieldBoxes: _boxes, ...rest }) => rest),
       };
       const entries = [entry, ...state.entries].slice(0, HISTORY_LIMIT);
       persist(entries);

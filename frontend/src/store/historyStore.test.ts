@@ -177,4 +177,29 @@ describe('historyStore actions', () => {
 
     expect(useHistoryStore.getState().entries).toEqual(before);
   });
+
+  it('addEntry strips session-scoped file data (blob url, page images, boxes) before persisting', () => {
+    const { addEntry } = useHistoryStore.getState();
+    const source: ExtractionSource = {
+      ...makeSource('s1'),
+      type: 'pdf',
+      sourceFileUrl: 'blob:mock-url',
+      pageImages: ['aGk=', 'Ynk='],
+      fieldBoxes: { vendor: { page: 0, box: [1, 2, 3, 4] } },
+    };
+
+    addEntry([source], 'Invoice');
+
+    // Both the in-memory entry and the persisted copy are stripped: page
+    // renders are heavy base64 payloads that would blow the localStorage
+    // quota, and blob urls are dead after a reload (D-026/D-027).
+    const persisted = useHistoryStore.getState().entries[0].sources[0];
+    expect(persisted).not.toHaveProperty('sourceFileUrl');
+    expect(persisted).not.toHaveProperty('pageImages');
+    expect(persisted).not.toHaveProperty('fieldBoxes');
+    const stored = readStored()[0].sources[0];
+    expect(stored).not.toHaveProperty('sourceFileUrl');
+    expect(stored).not.toHaveProperty('pageImages');
+    expect(stored).not.toHaveProperty('fieldBoxes');
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   batchExtractResponseSchema,
+  locateFieldsResponseSchema,
   parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
@@ -255,5 +256,89 @@ describe('parsePdfResponseSchema', () => {
     };
 
     expect(() => parsePdfResponseSchema.parse(payload)).toThrow();
+  });
+
+  it('parses per-page base64 renders when present (D-027)', () => {
+    const payload = {
+      text: 'page one',
+      pages: ['page one'],
+      pages_failed: [],
+      pages_images: ['aGk=', 'Ynk='],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages_images).toEqual(['aGk=', 'Ynk=']);
+  });
+
+  it('tolerates a missing pages_images key (older backends)', () => {
+    const payload = {
+      text: 'page one',
+      pages: ['page one'],
+      pages_failed: [],
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages_images).toBeUndefined();
+  });
+
+  it('tolerates an explicit null pages_images (image parse keeps it unset)', () => {
+    const payload = {
+      text: 'image OCR text',
+      pages: ['image OCR text'],
+      pages_failed: [],
+      pages_images: null,
+      tokens_used: { input: 0, output: 0 },
+      cost_usd: 0,
+      cost_cny: 0,
+    };
+
+    const parsed = parsePdfResponseSchema.parse(payload);
+    expect(parsed.pages_images).toBeNull();
+  });
+});
+
+describe('locateFieldsResponseSchema', () => {
+  const payload = {
+    boxes: [
+      { page: 0, box: [10, 20, 30, 40] },
+      null,
+      { page: null, box: [5, 5, 6, 6] },
+    ],
+    pages_scanned: 2,
+    tokens_used: { input: 100, output: 20 },
+    cost_usd: 0.001,
+    cost_cny: 0.00725,
+  };
+
+  it('parses an order-aligned box list mixing found, missing and unpaged entries', () => {
+    const parsed = locateFieldsResponseSchema.parse(payload);
+    expect(parsed.boxes).toHaveLength(3);
+    expect(parsed.boxes[0]).toEqual({ page: 0, box: [10, 20, 30, 40] });
+    expect(parsed.boxes[1]).toBeNull();
+    expect(parsed.boxes[2]).toEqual({ page: null, box: [5, 5, 6, 6] });
+    expect(parsed.pages_scanned).toBe(2);
+  });
+
+  it('rejects a box that is not a 4-number tuple', () => {
+    expect(() =>
+      locateFieldsResponseSchema.parse({ ...payload, boxes: [{ page: 0, box: [1, 2, 3] }] }),
+    ).toThrow();
+  });
+
+  it('rejects a payload missing boxes', () => {
+    expect(() =>
+      locateFieldsResponseSchema.parse({
+        pages_scanned: 1,
+        tokens_used: { input: 0, output: 0 },
+        cost_usd: 0,
+        cost_cny: 0,
+      }),
+    ).toThrow();
   });
 });

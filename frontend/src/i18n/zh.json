@@ -180,7 +180,11 @@
     "preview": {
       "file": "原文件",
       "text": "提取文本",
-      "noSource": "无可预览的原文"
+      "noSource": "无可预览的原文",
+      "pageOf": "第 {{page}} / {{total}} 页",
+      "prevPage": "上一页",
+      "nextPage": "下一页",
+      "locating": "正在定位字段…"
     },
     "editField": "编辑{{field}}",
     "reviewed": "已复核",
