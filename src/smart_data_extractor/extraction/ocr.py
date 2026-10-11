@@ -4,10 +4,13 @@ One Source = one Result: the whole file (PDF bytes or a single image)
 is sent to Zhipu's dedicated ``glm-ocr`` model in ONE call
 (``POST {glm_base_url}/layout_parsing``), which natively parses every
 page and returns ``layout_details`` — page-grouped layout elements
-with labels (text/table/formula/image) and 0-1 normalized bounding
-boxes. Elements labeled text/table become the grounding blocks the
-review pane matches extracted values against locally (the D-028 flow,
-now fed by a purpose-built parser instead of a prompted vision model).
+with labels (text/table/formula/image) and bounding boxes. Despite the
+docs calling bbox_2d 0-1 normalized, it can arrive as pixel coordinates;
+``data_info.pages[].width/height`` (D-032) is used to rescale precisely
+regardless of which convention the response actually used. Elements
+labeled text/table become the grounding blocks the review pane matches
+extracted values against locally (the D-028 flow, now fed by a
+purpose-built parser instead of a prompted vision model).
 
 pdf_to_images() is kept solely to render the preview images the
 review pane overlays boxes on (D-027); it is decoupled from the OCR
@@ -60,9 +63,13 @@ def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
 async def _call_glm_ocr(
     file_bytes: bytes,
     *,
+    media_type: str,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
-    """POST the raw file (base64) to Zhipu's layout_parsing endpoint.
+    """POST the file to Zhipu's layout_parsing endpoint as a base64 data URI.
+
+    The API rejects a bare base64 string (400) — ``file`` must be either
+    a URL or a ``data:<mime>;base64,...`` data URI.
 
     ``http_client`` is an injection seam for tests (mock transport, no
     network). Raises on network errors and non-2xx responses — an
@@ -70,9 +77,10 @@ async def _call_glm_ocr(
     """
     settings = get_settings()
     url = settings.glm_base_url.rstrip("/") + "/layout_parsing"
+    encoded = base64.b64encode(file_bytes).decode("ascii")
     payload = {
         "model": settings.glm_model,
-        "file": base64.b64encode(file_bytes).decode("ascii"),
+        "file": f"data:{media_type};base64,{encoded}",
     }
     headers = {"Authorization": f"Bearer {settings.glm_api_key}"}
 
@@ -86,13 +94,20 @@ async def _call_glm_ocr(
     return response.json()
 
 
-def _extract_text_blocks(page_details: Any) -> list[dict[str, Any]]:
+def _extract_text_blocks(
+    page_details: Any,
+    *,
+    width: float | None = None,
+    height: float | None = None,
+) -> list[dict[str, Any]]:
     """One page's layout elements -> grounding blocks.
 
     Keeps text/table elements, strips HTML tags from table content
-    (D-031 decisions 8-9), and rescales bbox_2d's 0-1 normalized
-    coordinates to the 0-100 convention shared with the review pane
-    (normalize_boxes). Elements with a garbled box are dropped.
+    (D-031 decisions 8-9), and rescales bbox_2d to the 0-100 convention
+    shared with the review pane (normalize_boxes). ``width``/``height``,
+    when known (data_info.pages[], D-032), make that rescale precise —
+    glm-ocr can return pixel coordinates despite the docs calling bbox_2d
+    0-1 normalized. Elements with a garbled box are dropped.
     """
     if not isinstance(page_details, list):
         return []
@@ -109,7 +124,7 @@ def _extract_text_blocks(page_details: Any) -> list[dict[str, Any]]:
         box = item.get("bbox_2d")
         boxes.append([float(c) for c in box] if _is_valid_box(box) else None)
         texts.append(content)
-    normalized = normalize_boxes(boxes)
+    normalized = normalize_boxes(boxes, width=width, height=height)
     return [
         {"text": text, "box": box}
         for text, box in zip(texts, normalized)
@@ -123,16 +138,25 @@ def _build_result(data: dict[str, Any], images: list[bytes] | None) -> dict[str,
     ``layout_details[i]`` maps 1:1 to ``pages[i]``/``pages_blocks[i]``
     (index = page number - 1): the frontend's per-page split relies on
     that alignment, so page count and order are taken verbatim from the
-    response.
+    response. Each page's true pixel width/height, when present in
+    ``data_info.pages[]`` (D-032), is passed through to precisely rescale
+    that page's bbox_2d coordinates.
     """
     layout_details = data.get("layout_details")
     layout_details = layout_details if isinstance(layout_details, list) else []
+    data_info = data.get("data_info") if isinstance(data.get("data_info"), dict) else {}
+    pages_info = data_info.get("pages")
+    pages_info = pages_info if isinstance(pages_info, list) else []
 
     pages: list[str | None] = []
     pages_blocks: list[list[dict[str, Any]] | None] = []
     pages_failed: list[int] = []
     for index, page_details in enumerate(layout_details):
-        blocks = _extract_text_blocks(page_details)
+        page_info = pages_info[index] if index < len(pages_info) else {}
+        page_info = page_info if isinstance(page_info, dict) else {}
+        blocks = _extract_text_blocks(
+            page_details, width=page_info.get("width"), height=page_info.get("height")
+        )
         if not blocks:
             pages.append(None)
             pages_blocks.append(None)
@@ -171,7 +195,9 @@ async def parse_pdf(
     rendered per-page PNGs ride along in ``pages_images`` for the
     review-pane preview (D-027), aligned with ``pages``.
     """
-    data = await _call_glm_ocr(pdf_bytes, http_client=http_client)
+    data = await _call_glm_ocr(
+        pdf_bytes, media_type="application/pdf", http_client=http_client
+    )
     return _build_result(data, pdf_to_images(pdf_bytes))
 
 
@@ -183,13 +209,12 @@ async def parse_image(
 ) -> dict[str, Any]:
     """OCR a single image file into a single text blob via glm-ocr.
 
-    The image bytes are sent as-is in one call (the endpoint sniffs the
-    format; ``media_type`` is accepted for signature compatibility and
-    unused). One image = one "page", so the result shape matches
-    ``parse_pdf``; no preview images are returned (the frontend already
-    holds the original image bytes).
+    The image bytes are sent as a ``media_type`` data URI in one call.
+    One image = one "page", so the result shape matches ``parse_pdf``;
+    no preview images are returned (the frontend already holds the
+    original image bytes).
     """
-    data = await _call_glm_ocr(image_bytes, http_client=http_client)
+    data = await _call_glm_ocr(image_bytes, media_type=media_type, http_client=http_client)
     return _build_result(data, None)
 
 

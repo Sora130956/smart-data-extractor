@@ -10,7 +10,7 @@
 
 智谱提供了专用的文档解析模型 `glm-ocr`（独立的 `layout_parsing` REST 接口），具备原生版面解析能力：
 
-- 直接接收 PDF/图片原始文件（最多100页），一次调用返回所有页的结构化版面元素（`layout_details`，按页分组的二维数组），每个元素含 `label`（`text`/`table`/`formula`/`image`）、`bbox_2d`（0-1归一化坐标）、`content`
+- 直接接收 PDF/图片原始文件（最多100页），一次调用返回所有页的结构化版面元素（`layout_details`，按页分组的二维数组），每个元素含 `label`（`text`/`table`/`formula`/`image`）、`bbox_2d`（文档声称 0-1 归一化坐标，但实测可能是像素坐标——不能机械信任，见 D-032）、`content`
 - 定价仅 0.2 元/百万 token（输入输出同价），远低于 `glm-4.5v` 的阶梯价
 - 用户已购买小额资源包用于验证
 
@@ -58,7 +58,7 @@ parse_pdf(pdf_bytes) / parse_image(image_bytes, media_type)
 | 7 | 失败语义 | API 调用（HTTP/网络层）失败 → 整份报错，抛异常给上层；API 调用成功但某页 `layout_details` 缺失/空 → 该页标记进 `pages_failed`，其余页正常返回 |
 | 8 | label 过滤 | 保留 `text` + `table`，暂不处理 `image`/`formula` |
 | 9 | table 内容处理 | `content`（HTML格式）去标签取纯文本，参与全文拼接和字段匹配 |
-| 10 | 坐标转换 | 扩展 `normalize_boxes()`（[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py#L90-L124)）新增一档：坐标全部 ≤1.0 时判定为 0-1 归一化，×100 后复用现有裁剪/交换逻辑 |
+| 10 | 坐标转换 | 扩展 `normalize_boxes()`（[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py#L90-L131)）新增一档：坐标全部 ≤1.0 时判定为 0-1 归一化，×100 后复用现有裁剪/交换逻辑；**后续 D-032 发现实测坐标可能是像素，改为用 `data_info.pages[].width/height` 分轴精确换算，猜测档位仅作无宽高信息时的 fallback** |
 | 11 | 计费 | 新建 `calculate_glm_ocr_cost()`，按固定单价 0.2 元/百万 token（`usage.prompt_tokens + usage.completion_tokens`）计算，不复用阶梯价逻辑 |
 | 12 | 可选请求参数 | 仅传 `model` + `file`（及PDF场景可选的 `start_page_id`/`end_page_id`），不传 `request_id`/`user_id`/`return_crop_images`/`need_layout_visualization` |
 | 13 | `config.py` | `glm_model` 默认值改为 `"glm-ocr"`；`glm_base_url` 保持基址不变，由调用代码拼接 `/layout_parsing` 路径 |

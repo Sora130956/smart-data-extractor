@@ -87,33 +87,44 @@ def parse_box_payload(raw: str, *, count: int) -> list[list[float] | None]:
     return out
 
 
-def normalize_boxes(boxes: list[list[float] | None]) -> list[list[float] | None]:
-    """Scale-tolerant cleanup: detect the response's coordinate scale from
+def normalize_boxes(
+    boxes: list[list[float] | None],
+    *,
+    width: float | None = None,
+    height: float | None = None,
+) -> list[list[float] | None]:
+    """Scale-tolerant cleanup: when the page's true pixel width/height are
+    known (D-032), divide each axis by its own true dimension — precise even
+    for non-square pages, where a single guessed scale skews one axis.
+    Otherwise fall back to detecting the response's coordinate scale from
     the largest coordinate (0-100 percentages / 0-1000 GLM grounding /
-    pixel-like), normalize to 0-100, swap inverted corners, clamp, and drop
-    degenerate zero-area boxes."""
+    pixel-like). Either way: normalize to 0-100, swap inverted corners,
+    clamp, and drop degenerate zero-area boxes."""
     valid_max = max((max(b) for b in boxes if b is not None), default=None)
     if valid_max is None:
         return boxes
     if valid_max <= 1.0:
-        # glm-ocr bbox_2d: 0-1 normalized coordinates (D-031).
-        scale = 0.01
+        # Already normalized (0-1, D-031): never re-divide by pixel dims.
+        x_scale = y_scale = 0.01
+    elif width and height:
+        x_scale, y_scale = width / 100.0, height / 100.0
     elif valid_max <= 150:
         # 0-100 percentages, tolerating modest overshoot slop (e.g. a 105).
-        scale = 1.0
+        x_scale = y_scale = 1.0
     elif valid_max <= 1000:
         # GLM-4.5V grounding natively emits 0-1000 relative coordinates.
-        scale = 10.0
+        x_scale = y_scale = 10.0
     else:
         # Pixel-like: normalize by the largest coordinate seen.
-        scale = valid_max / 100.0
+        x_scale = y_scale = valid_max / 100.0
 
     out: list[list[float] | None] = []
     for b in boxes:
         if b is None:
             out.append(None)
             continue
-        x1, y1, x2, y2 = (c / scale for c in b)
+        bx1, by1, bx2, by2 = b
+        x1, y1, x2, y2 = bx1 / x_scale, by1 / y_scale, bx2 / x_scale, by2 / y_scale
         if x2 < x1:
             x1, x2 = x2, x1
         if y2 < y1:

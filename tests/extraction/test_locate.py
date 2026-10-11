@@ -93,6 +93,30 @@ def test_normalize_boxes_drops_degenerate_boxes():
     assert normalize_boxes([[10, 10, 40, 10]]) == [None]
 
 
+def test_normalize_boxes_uses_real_width_height_for_pixel_coordinates():
+    """When the page's true pixel width/height are known (data_info,
+    D-032), each axis is divided by its own true dimension — correct even
+    for non-square pages where a single guessed scale skews one axis
+    (the real-world highlight-box-too-high-up bug)."""
+    boxes = [[100, 20, 400, 180]]
+    assert normalize_boxes(boxes, width=500, height=200) == [[20.0, 10.0, 80.0, 90.0]]
+
+
+def test_normalize_boxes_treats_sub_1_coordinates_as_pre_normalized_even_with_dimensions():
+    """bbox_2d coordinates <= 1.0 are already normalized per the documented
+    contract; real width/height must not re-divide them."""
+    boxes = [[0.1, 0.2, 0.5, 0.7]]
+    assert normalize_boxes(boxes, width=500, height=200) == [[10.0, 20.0, 50.0, 70.0]]
+
+
+def test_normalize_boxes_falls_back_to_heuristic_without_dimensions():
+    """No real width/height (e.g. legacy vision-model grounding, or a page
+    whose dimensions are unknown) keeps the old scale-guessing behavior."""
+    boxes = [[100, 200, 300, 400]]
+    assert normalize_boxes(boxes) == [[10, 20, 30, 40]]
+    assert normalize_boxes(boxes, width=0, height=0) == [[10, 20, 30, 40]]
+
+
 # --- _normalize (comparison folding) ---
 
 

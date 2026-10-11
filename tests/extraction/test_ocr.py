@@ -42,15 +42,25 @@ def _element(label: str, content: str, bbox: list[float]) -> dict:
     }
 
 
-def _glm_ocr_payload(pages_layout: list, *, prompt_tokens=100, completion_tokens=50) -> dict:
-    """A glm-ocr layout_parsing response shaped like the official docs."""
+def _glm_ocr_payload(
+    pages_layout: list, *, prompt_tokens=100, completion_tokens=50, pages_dims=None
+) -> dict:
+    """A glm-ocr layout_parsing response shaped like the official docs.
+
+    ``pages_dims``, when given, is a list of ``(width, height)`` tuples
+    filling ``data_info.pages[]`` (D-032: the true pixel dimensions used
+    to precisely rescale pixel bbox_2d coordinates).
+    """
+    pages_info = (
+        [{"width": w, "height": h} for w, h in pages_dims] if pages_dims else []
+    )
     return {
         "id": "resp-1",
         "created": 1_700_000_000,
         "model": "glm-ocr",
         "md_results": ["# page"] * len(pages_layout),
         "layout_details": pages_layout,
-        "data_info": {"num_pages": len(pages_layout), "pages": []},
+        "data_info": {"num_pages": len(pages_layout), "pages": pages_info},
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -124,6 +134,15 @@ def test_extract_text_blocks_tolerates_non_list_input():
     assert _extract_text_blocks("garbage") == []
 
 
+def test_extract_text_blocks_uses_real_width_height_for_pixel_bboxes():
+    """Pixel bbox_2d + the page's real width/height (D-032) normalize
+    precisely per axis — fixes the highlight-box-too-high-up bug on
+    non-square pages, where a single guessed scale skews one axis."""
+    page = [_element("text", "v", [100, 20, 400, 180])]
+    blocks = _extract_text_blocks(page, width=500, height=200)
+    assert blocks == [{"text": "v", "box": [20.0, 10.0, 80.0, 90.0]}]
+
+
 # --- parse_pdf ---
 
 
@@ -162,6 +181,24 @@ async def test_parse_pdf_happy_path_multi_page(fake_openai_env):
     assert result["cost_usd"] == pytest.approx(calculate_glm_ocr_cost(payload["usage"]))
 
 
+async def test_parse_pdf_rescales_pixel_bboxes_using_data_info_page_dimensions(
+    monkeypatch, fake_openai_env
+):
+    """glm-ocr can return pixel bbox_2d despite the docs calling it 0-1
+    normalized; data_info.pages[].width/height (D-032) is the reliable
+    source for precise per-axis rescaling, fixing the real-world bug
+    where a single guessed scale skewed the box on a non-square page."""
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    payload = _glm_ocr_payload(
+        [[_element("text", "v", [100, 20, 400, 180])]],
+        pages_dims=[(500, 200)],
+    )
+
+    result = await parse_pdf(b"fake-pdf-bytes", http_client=_mock_client(payload))
+
+    assert result["pages_blocks"] == [[{"text": "v", "box": [20.0, 10.0, 80.0, 90.0]}]]
+
+
 async def test_parse_pdf_request_shape_follows_config(monkeypatch, fake_openai_env):
     """The call hits {glm_base_url}/layout_parsing with the configured model,
     a base64 file payload and the Bearer api key (D-031 decisions 6/12/13)."""
@@ -179,7 +216,7 @@ async def test_parse_pdf_request_shape_follows_config(monkeypatch, fake_openai_e
     assert request.headers["Authorization"] == "Bearer test-glm-key"
     body = json.loads(request.content)
     assert body["model"] == "glm-ocr"
-    assert body["file"] == base64.b64encode(b"fake-pdf-bytes").decode("ascii")
+    assert body["file"] == f"data:application/pdf;base64,{base64.b64encode(b'fake-pdf-bytes').decode('ascii')}"
     assert set(body) == {"model", "file"}  # only the required params
 
 
@@ -265,7 +302,7 @@ async def test_parse_image_ocrs_bytes_directly(fake_openai_env):
     assert result["pages_failed"] == []
     assert result["pages_images"] is None
     body = json.loads(captured["request"].content)
-    assert body["file"] == base64.b64encode(b"jpeg-bytes").decode("ascii")
+    assert body["file"] == f"data:image/jpeg;base64,{base64.b64encode(b'jpeg-bytes').decode('ascii')}"
 
 
 # --- calculate_glm_ocr_cost ---

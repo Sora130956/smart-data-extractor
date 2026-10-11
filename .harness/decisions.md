@@ -719,3 +719,24 @@
   - 文档：README.md / render.yaml（`GLM_API_KEY` 计价描述）、state.md（D-031 条目）
   - 验证：TDD 先红后绿；全量 `uv run pytest -q` 252 passed, 2 skipped（skip 为既有真实 API 集成测试），无回归
   - 遗留开放问题：（a）`daily_quota_per_ip`/`daily_quota_global` 数值是否放宽（glm-ocr 单价远低于 glm-4.5v）；（b）真实 API 验证响应结构——用户已购小额资源包，待实测确认 `layout_details` 实际形态与文档一致后锁定解析细节；（c）`md_results`（每页 markdown）当前未使用，`pages[i]` 由 blocks 拼接，若实测 md 质量更好可再评估切换
+
+---
+
+## D-032：`normalize_boxes()` 用页面真实像素宽高分轴精确换算，替代「猜测尺度」启发式
+
+- **日期**：2026-10-11
+- **状态**：已接受
+- **来源**：真实环境排查「高亮框位置偏上」bug，发现 D-031 遗留开放问题 (b) 的实测结果——glm-ocr 实际返回像素坐标，而非文档声称的 0-1 归一化
+- **背景**：
+  - D-031 实现的 `normalize_boxes()` 靠坐标数值大小猜测尺度档位（≤1.0 视为 0-1 归一化、≤150 视为百分比、≤1000 视为 GLM 0-1000 grounding、否则按最大值猜测像素），对非正方形页面用单一猜测尺度统一压缩 x/y 两轴，导致矮宽页面的框整体偏上/偏右
+  - 核实 Z.AI 官方文档确认 `layout_parsing` 响应在两处提供页面真实宽高：`layout_details[*].height/width`（元素级冗余字段）、`data_info.pages[].width/height`（页面级必填字段）
+- **决策**：
+  1. `normalize_boxes()` 新增可选关键字参数 `width`/`height`；坐标 >1.0 且 `width`/`height` 均为 truthy 时，x 轴除以 `width/100`、y 轴除以 `height/100` 精确换算；坐标 ≤1.0 时仍视为已归一化永不重新除；无宽高时 fallback 到原猜测尺度启发式（保持向后兼容，不破坏无宽高信息的调用方）
+  2. `_extract_text_blocks()` 新增同名参数透传给 `normalize_boxes()`；`_build_result()` 从 `data_info.pages[]` 按 index 对齐取每页 `width`/`height`，逐页传入
+  3. 清理 `ocr.py` 中两处临时诊断 `print(f"[DEBUG ...")` 日志，以及前端 `ResultDetailModal.tsx`/`SourcePreviewPane.tsx` 中排查用的 `console.log('[DEBUG ...')`
+  4. 更正 `ocr.py` 模块 docstring 中「bbox_2d 为 0-1 归一化」的不准确描述
+- **理由**：分轴精确换算消除了"猜测一个全局尺度"在非正方形页面上必然产生的系统性偏移；真实宽高本就是响应自带的必填字段，不需要额外请求成本
+- **影响**：
+  - 代码：[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py#L90-L131)（`normalize_boxes` 签名+逻辑）、[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（`_extract_text_blocks`/`_build_result` 透传宽高、docstring 更正、删诊断日志）、前端 `ResultDetailModal.tsx`/`SourcePreviewPane.tsx`（删诊断日志）
+  - 测试：[test_locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_locate.py)（+3 用例）、[test_ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_ocr.py)（+2 用例，含 `pages_dims` 测试 fixture 扩展）
+  - 验证：TDD 先红后绿；后端全量 `uv run pytest` 257 passed, 2 skipped；前端 `npm run test` 303 passed（1 个既有失败经 `git stash` 核实为主干既有问题，与本次改动无关）、`npm run typecheck` 无错、`npm run build` 成功

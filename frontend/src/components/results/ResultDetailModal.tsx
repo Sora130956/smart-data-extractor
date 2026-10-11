@@ -110,7 +110,6 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
     () => matchFieldBoxes(result.data, source.pagesBlocks),
     [result.data, source.pagesBlocks],
   );
-
   function startEdit(key: string, value: unknown) {
     setEditing(key);
     setDraft(value == null ? '' : String(value));
