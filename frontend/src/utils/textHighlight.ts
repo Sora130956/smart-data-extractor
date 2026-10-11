@@ -5,9 +5,10 @@
 // value as a substring of the source, tolerant of case and whitespace
 // differences (OCR output frequently re-flows line breaks and spacing).
 //
-// D-028 companion: matchFieldBoxes below grounds values against the OCR
-// grounding blocks instead (exact match after normalization). It must stay
-// semantically identical to the backend's locate.match_field_boxes — that
+// D-028/D-029 companion: matchFieldBoxes below grounds values against the
+// OCR grounding blocks instead (substring match after normalization, D-029
+// relaxed the original exact-match rule). It must stay semantically
+// identical to the backend's locate.match_field_boxes — that
 // implementation's tests are the anchor for this one.
 
 import type { FieldBox, OcrBlock } from '@/types/extraction';
@@ -113,12 +114,12 @@ function foldForMatch(s: string): string {
   return out;
 }
 
-/** D-028: match each scalar field value of `data` against the source's
- * per-page OCR grounding blocks. Normalized exact match only — no
- * substring or fuzzy matching (a value inside a longer line does not
- * hit); the first hit in page order wins. Returns field -> {page, box};
- * unmatched fields are simply absent. Pure and cheap: safe to call in a
- * useMemo on every modal open. */
+/** D-028/D-029: match each scalar field value of `data` against the source's
+ * per-page OCR grounding blocks. Normalized substring match — a value that
+ * is the whole block text or contained within it (e.g. a label prefix the
+ * OCR kept in the same block) hits; the first hit in page order wins.
+ * Returns field -> {page, box}; unmatched fields are simply absent. Pure
+ * and cheap: safe to call in a useMemo on every modal open. */
 export function matchFieldBoxes(
   data: Record<string, unknown> | null | undefined,
   pagesBlocks: Array<OcrBlock[] | null | undefined> | undefined,
@@ -135,7 +136,7 @@ export function matchFieldBoxes(
     const needle = foldForMatch(String(value));
     if (needle === '') continue;
     for (let page = 0; page < pages.length; page += 1) {
-      const hit = pages[page].find(({ text }) => text === needle);
+      const hit = pages[page].find(({ text }) => text.includes(needle));
       if (hit != null) {
         boxes[field] = { page, box: hit.block.box };
         break;

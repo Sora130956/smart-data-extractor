@@ -130,13 +130,13 @@ describe('matchFieldBoxes (D-028 local grounding match)', () => {
     expect(boxes).toEqual({ vendor: { page: 0, box: [5, 5, 50, 15] } });
   });
 
-  it('does not match substrings or blocks that merely contain the value', () => {
+  it('matches a value that is a substring of a block (label prefix/suffix, D-029)', () => {
     const boxes = matchFieldBoxes(
       { invoice_number: 'INV-2024-001' },
       [[blocks('Invoice No: INV-2024-001', [10, 20, 30, 40])]],
     );
 
-    expect(boxes).toEqual({});
+    expect(boxes).toEqual({ invoice_number: { page: 0, box: [10, 20, 30, 40] } });
   });
 
   it('skips nullish, object, and empty-string values', () => {

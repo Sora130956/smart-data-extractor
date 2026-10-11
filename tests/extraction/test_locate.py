@@ -69,6 +69,13 @@ def test_normalize_boxes_rescales_0_1000_convention():
     assert normalize_boxes(boxes) == [[10, 20, 30, 40], None]
 
 
+def test_normalize_boxes_rescales_0_1_convention():
+    """glm-ocr bbox_2d coordinates are 0-1 normalized (D-031); when every
+    coordinate is <= 1.0 the response is scaled up to percentages."""
+    boxes = [[0.1, 0.2, 0.5, 0.7], None, [0.0, 0.0, 1.0, 1.0]]
+    assert normalize_boxes(boxes) == [[10.0, 20.0, 50.0, 70.0], None, [0.0, 0.0, 100.0, 100.0]]
+
+
 def test_normalize_boxes_rescales_pixel_like_coordinates():
     """Anything beyond 1000 is treated as pixel-ish and scaled by its max."""
     boxes = [[0, 0, 2000, 1000]]
@@ -139,11 +146,11 @@ def test_match_field_boxes_folds_case_spaces_and_fullwidth():
     assert match_field_boxes("abc-123", pages) == {"page": 0, "box": [1, 2, 3, 4]}
 
 
-def test_match_field_boxes_is_exact_not_substring():
-    """D-028 decision: normalized exact match only — a value inside a
-    longer block does not hit (no substring or fuzzy matching)."""
+def test_match_field_boxes_matches_substring_of_a_block():
+    """D-029 decision: a value that is a substring of a block's text (e.g.
+    a label prefix the OCR kept in the same block) still hits."""
     pages = [[{"text": "Invoice Number: INV-001", "box": [1, 2, 3, 4]}]]
-    assert match_field_boxes("INV-001", pages) is None
+    assert match_field_boxes("INV-001", pages) == {"page": 0, "box": [1, 2, 3, 4]}
 
 
 def test_match_field_boxes_missing_value_returns_none():

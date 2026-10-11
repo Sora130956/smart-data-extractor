@@ -12,10 +12,10 @@ What remains here:
   JSON-box parsing and scale-tolerant cleanup, shared with the OCR
   grounding parser. ocr.py imports them, so this module MUST stay
   dependency-free (no imports from ocr.py — that would be a cycle).
-- match_field_boxes: the local exact-match lookup that turns
+- match_field_boxes: the local substring-match lookup that turns
   "value -> where is it" into {"page", "box"} without any LLM. It is
   the semantic reference implementation; the frontend's TS port must
-  behave identically (normalized exact match, first hit wins).
+  behave identically (normalized substring match, first hit wins).
 
 Robustness against weak/quirky vision models (unchanged in spirit from
 D-027): coordinate-scale tolerance — GLM-4.5V grounding natively emits
@@ -24,10 +24,12 @@ so any response scale (0-100 / 0-1000 / pixel-like) is normalized to
 0-100; inverted corners are swapped, out-of-range values clamped,
 degenerate zero-area boxes dropped.
 
-Match policy (D-028 decision): normalize (whitespace removal, case
-folding, fullwidth->halfwidth) then compare for exact equality — no
-substring or fuzzy matching. A miss returns None; the caller simply
-shows no box.
+Match policy (D-028 decision, relaxed by D-029): normalize (whitespace
+removal, case folding, fullwidth->halfwidth) then check whether the
+value is a substring of the block text (a block's label prefix/suffix
+no longer blocks a hit) — still no fuzzy matching, and a value split
+across two or more blocks still misses. A miss returns None; the
+caller simply shows no box.
 """
 
 import json
@@ -93,7 +95,10 @@ def normalize_boxes(boxes: list[list[float] | None]) -> list[list[float] | None]
     valid_max = max((max(b) for b in boxes if b is not None), default=None)
     if valid_max is None:
         return boxes
-    if valid_max <= 150:
+    if valid_max <= 1.0:
+        # glm-ocr bbox_2d: 0-1 normalized coordinates (D-031).
+        scale = 0.01
+    elif valid_max <= 150:
         # 0-100 percentages, tolerating modest overshoot slop (e.g. a 105).
         scale = 1.0
     elif valid_max <= 1000:
@@ -141,10 +146,10 @@ def match_field_boxes(
 ) -> dict[str, Any] | None:
     """Locate `value` in the OCR grounding blocks, locally.
 
-    Exact match after normalization (whitespace removal / case fold /
-    fullwidth fold) — no substring or fuzzy matching (D-028 decision).
-    Returns {"page": <0-based index>, "box": [x1, y1, x2, y2]} for the
-    first hit in page order, else None.
+    Substring match after normalization (whitespace removal / case fold /
+    fullwidth fold) — no fuzzy matching, D-029 decision. Returns
+    {"page": <0-based index>, "box": [x1, y1, x2, y2]} for the first hit
+    in page order, else None.
     """
     needle = _normalize(value)
     if not needle:
@@ -154,7 +159,7 @@ def match_field_boxes(
             continue
         for block in blocks:
             text = block.get("text")
-            if not isinstance(text, str) or _normalize(text) != needle:
+            if not isinstance(text, str) or needle not in _normalize(text):
                 continue
             box = block.get("box")
             if isinstance(box, list) and len(box) == 4:
