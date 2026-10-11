@@ -820,5 +820,34 @@ describe('ResultDetailModal', () => {
       // The text view stays hidden — the box on the image is the target.
       expect(screen.queryByRole('region', { name: 'Extracted Text' })).not.toBeInTheDocument();
     });
+
+    it('editing a grounded field shows its box, and it stays up until the edit ends', async () => {
+      const user = userEvent.setup();
+      render(
+        <ResultDetailModal
+          source={makeFileSource({ pageImages: ['aGk='] })}
+          result={{ ...editableResult, data: { ...editableResult.data, vendor: 'Acme Corp' } }}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={() => {}}
+        />,
+      );
+
+      const filePane = screen.getByRole('region', { name: 'Original File' });
+      expect(filePane.querySelector('[data-field="vendor"]')).toBeNull();
+
+      await user.click(screen.getByRole('button', { name: 'Edit Vendor' }));
+
+      // The box shows up while editing — unlike a locate click, it does not
+      // flash/fade, and it is not colored like a warning just because it's
+      // being edited.
+      const overlay = filePane.querySelector('[data-field="vendor"]');
+      expect(overlay).not.toBeNull();
+      expect(overlay?.className).not.toContain('animate-pulse');
+
+      await user.type(screen.getByDisplayValue('Acme Corp'), '{Escape}');
+
+      expect(filePane.querySelector('[data-field="vendor"]')).toBeNull();
+    });
   });
 });

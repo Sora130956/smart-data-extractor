@@ -30,6 +30,7 @@ function renderPane(overrides: Record<string, unknown> = {}) {
     reviewFields: new Set<string>(),
     reviewedFields: new Set<string>(),
     focus: null,
+    editingField: null,
     boxes: {},
     ...overrides,
   };
@@ -64,25 +65,39 @@ describe('SourcePreviewPane file view (D-027)', () => {
     expect(screen.queryByText('Page 1 / 1')).not.toBeInTheDocument();
   });
 
-  it('overlays locate boxes on the current page, colored by review state', () => {
-    const { container } = renderPane({
+  it('overlays only the active field box on the current page, colored by review state', () => {
+    const boxes = {
+      vendor: { page: 0, box: [10, 20, 30, 40] },
+      invoice_number: { page: 0, box: [5, 5, 6, 6] },
+    };
+
+    // Only the field being edited/located gets a box — not every match.
+    const vendorRender = renderPane({
       source: { ...base, pageImages: ['aGk='] },
-      boxes: {
-        vendor: { page: 0, box: [10, 20, 30, 40] },
-        invoice_number: { page: 0, box: [5, 5, 6, 6] },
-      },
+      boxes,
       reviewFields: new Set(['vendor']),
       reviewedFields: new Set(['invoice_number']),
+      editingField: 'vendor',
     });
-
-    const vendorBox = container.querySelector('[data-field="vendor"]');
+    const vendorBox = vendorRender.container.querySelector('[data-field="vendor"]');
     expect(vendorBox).not.toBeNull();
     expect(vendorBox).toHaveStyle({ left: '10%', top: '20%', width: '20%', height: '20%' });
     // A field needing review gets the warning color.
     expect(vendorBox?.className).toContain('warning');
+    expect(vendorRender.container.querySelector('[data-field="invoice_number"]')).toBeNull();
+    vendorRender.unmount();
+
+    const invoiceRender = renderPane({
+      source: { ...base, pageImages: ['aGk='] },
+      boxes,
+      reviewFields: new Set(['vendor']),
+      reviewedFields: new Set(['invoice_number']),
+      editingField: 'invoice_number',
+    });
     // A reviewed field gets the success color.
-    const invoiceBox = container.querySelector('[data-field="invoice_number"]');
+    const invoiceBox = invoiceRender.container.querySelector('[data-field="invoice_number"]');
     expect(invoiceBox?.className).toContain('success');
+    expect(invoiceRender.container.querySelector('[data-field="vendor"]')).toBeNull();
   });
 
   it('shows a pager for multi-page pdfs and switches pages', () => {
@@ -106,6 +121,7 @@ describe('SourcePreviewPane file view (D-027)', () => {
     const { container } = renderPane({
       source: { ...base, pageImages: ['aGk=', 'Ynk='] },
       boxes: { vendor: { page: 1, box: [10, 20, 30, 40] } },
+      editingField: 'vendor',
     });
 
     // Page 1: the vendor box lives on page 2, nothing is overlaid here.

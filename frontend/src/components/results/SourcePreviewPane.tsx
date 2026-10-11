@@ -31,6 +31,9 @@ export interface SourcePreviewPaneProps {
   /** Locate request from the field list; a fresh nonce re-triggers the
    * scroll+flash (re-clicking the same field must work). */
   focus: { field: string; nonce: number } | null;
+  /** Field currently being edited, if any — its box/highlight stays shown
+   * for the duration of the edit instead of flashing and fading. */
+  editingField: string | null;
   /** field -> where its value sits in the original file (D-028), matched
    * locally from the OCR grounding blocks. Drives the file-view overlays. */
   boxes: Record<string, FieldBox>;
@@ -42,13 +45,19 @@ export function SourcePreviewPane({
   reviewFields,
   reviewedFields,
   focus,
+  editingField,
   boxes,
 }: SourcePreviewPaneProps) {
   const { t } = useTranslation();
   const hasFile = source.sourceFileUrl != null;
   const hasText = source.sourceText != null && source.sourceText.length > 0;
   const [tab, setTab] = useState<Tab>(hasFile ? 'file' : 'text');
-  const [activeField, setActiveField] = useState<string | null>(null);
+  // The locate flash fades on its own timer; an in-progress edit takes
+  // priority and stays shown for as long as the field is being edited. Only
+  // one field's box/highlight is ever shown at a time (not every matched
+  // field) so the preview reflects what the user is looking at right now.
+  const [flashField, setFlashField] = useState<string | null>(null);
+  const activeField = editingField ?? flashField;
   const textRef = useRef<HTMLDivElement | null>(null);
 
   // Pages shown in the file view: the backend's per-page renders for pdfs
@@ -77,25 +86,40 @@ export function SourcePreviewPane({
       if (pages.length > 0) {
         setPageIndex(Math.min(Math.max(box.page, 0), pages.length - 1));
       }
-      setActiveField(focus.field);
+      setFlashField(focus.field);
     } else if (ranges[focus.field] != null) {
       setTab('text');
-      setActiveField(focus.field);
+      setFlashField(focus.field);
     } else {
       return;
     }
-    const timer = setTimeout(() => setActiveField(null), FLASH_MS);
+    const timer = setTimeout(() => setFlashField(null), FLASH_MS);
     return () => clearTimeout(timer);
     // ranges/boxes are recomputed per result; matching on the nonce is
     // enough here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.field, focus?.nonce]);
 
+  // Starting an edit switches to whichever view holds the field (unlike a
+  // locate click, it does not force a page jump — the user may already be
+  // looking at a different page on purpose). The highlight stays up for as
+  // long as the field is being edited (editingField going back to null
+  // clears it via the activeField fallback above).
+  useEffect(() => {
+    if (editingField == null) return;
+    if (boxes[editingField] != null) {
+      setTab('file');
+    } else if (ranges[editingField] != null) {
+      setTab('text');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingField]);
+
   // Once the text view is showing the active match, bring it into view.
   useEffect(() => {
     if (tab !== 'text' || activeField == null) return;
     const el = textRef.current?.querySelector<HTMLElement>(`[data-field="${activeField}"]`);
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   }, [tab, activeField]);
 
   const segments = useMemo<Segment[]>(() => {
@@ -121,9 +145,13 @@ export function SourcePreviewPane({
     );
   }
 
+  // A locate flash always pulses in warning color regardless of review state
+  // (it's a "look here" cue, not a status). An in-progress edit instead keeps
+  // the field's normal review-state color so it doesn't look like a warning
+  // just because it's being edited.
   function markClass(field: string): string {
     const base = 'rounded-xs px-0.5';
-    if (field === activeField) return `${base} bg-warning/45 animate-pulse`;
+    if (field === flashField) return `${base} bg-warning/45 animate-pulse`;
     if (reviewedFields.has(field)) return `${base} bg-success/25`;
     if (reviewFields.has(field)) return `${base} bg-warning/25 ring-1 ring-warning/70`;
     return `${base} bg-brand/15`;
@@ -131,7 +159,7 @@ export function SourcePreviewPane({
 
   function boxClass(field: string): string {
     const base = 'pointer-events-none absolute rounded-xs';
-    if (field === activeField) return `${base} bg-warning/40 ring-2 ring-warning animate-pulse`;
+    if (field === flashField) return `${base} bg-warning/40 ring-2 ring-warning animate-pulse`;
     if (reviewedFields.has(field)) return `${base} bg-success/20 ring-2 ring-success/70`;
     if (reviewFields.has(field)) return `${base} bg-warning/25 ring-2 ring-warning/70`;
     return `${base} bg-brand/15 ring-2 ring-brand/60`;
@@ -216,21 +244,20 @@ export function SourcePreviewPane({
                   alt={source.name}
                   className="max-w-full rounded-token border border-border bg-surface"
                 />
-                {Object.entries(boxes)
-                  .filter(([, box]) => box.page === safeIndex)
-                  .map(([field, box]) => (
-                    <div
-                      key={field}
-                      data-field={field}
-                      className={boxClass(field)}
-                      style={{
-                        left: `${box.box[0]}%`,
-                        top: `${box.box[1]}%`,
-                        width: `${box.box[2] - box.box[0]}%`,
-                        height: `${box.box[3] - box.box[1]}%`,
-                      }}
-                    />
-                  ))}
+                {activeField != null &&
+                boxes[activeField] != null &&
+                boxes[activeField].page === safeIndex ? (
+                  <div
+                    data-field={activeField}
+                    className={boxClass(activeField)}
+                    style={{
+                      left: `${boxes[activeField].box[0]}%`,
+                      top: `${boxes[activeField].box[1]}%`,
+                      width: `${boxes[activeField].box[2] - boxes[activeField].box[0]}%`,
+                      height: `${boxes[activeField].box[3] - boxes[activeField].box[1]}%`,
+                    }}
+                  />
+                ) : null}
               </div>
             ) : source.type === 'image' ? (
               <img

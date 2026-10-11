@@ -384,6 +384,7 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
             reviewFields={reviewFieldSet}
             reviewedFields={reviewedFieldSet}
             focus={focus}
+            editingField={editing}
             boxes={boxes}
           />
         </aside>
