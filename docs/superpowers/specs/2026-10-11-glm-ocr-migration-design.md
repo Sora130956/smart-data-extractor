@@ -2,7 +2,7 @@
 
 - **日期**：2026-10-11
 - **状态**：待审查
-- **关联决策**：延续 [D-030](file:///d:/freelancer/workspace/code/portfolio/.harness/decisions.md#L667)（默认模型切到 `glm-4.5v`），本次是架构级替换，预计记为 D-031
+- **关联决策**：延续 [D-030](file:///d:/freelancer/workspace/code/smart-data-extractor/.harness/decisions.md#L667)（默认模型切到 `glm-4.5v`），本次是架构级替换，预计记为 D-031
 
 ## 背景
 
@@ -58,7 +58,7 @@ parse_pdf(pdf_bytes) / parse_image(image_bytes, media_type)
 | 7 | 失败语义 | API 调用（HTTP/网络层）失败 → 整份报错，抛异常给上层；API 调用成功但某页 `layout_details` 缺失/空 → 该页标记进 `pages_failed`，其余页正常返回 |
 | 8 | label 过滤 | 保留 `text` + `table`，暂不处理 `image`/`formula` |
 | 9 | table 内容处理 | `content`（HTML格式）去标签取纯文本，参与全文拼接和字段匹配 |
-| 10 | 坐标转换 | 扩展 `normalize_boxes()`（[locate.py](file:///d:/freelancer/workspace/code/portfolio/src/smart_data_extractor/extraction/locate.py#L90-L124)）新增一档：坐标全部 ≤1.0 时判定为 0-1 归一化，×100 后复用现有裁剪/交换逻辑 |
+| 10 | 坐标转换 | 扩展 `normalize_boxes()`（[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py#L90-L124)）新增一档：坐标全部 ≤1.0 时判定为 0-1 归一化，×100 后复用现有裁剪/交换逻辑 |
 | 11 | 计费 | 新建 `calculate_glm_ocr_cost()`，按固定单价 0.2 元/百万 token（`usage.prompt_tokens + usage.completion_tokens`）计算，不复用阶梯价逻辑 |
 | 12 | 可选请求参数 | 仅传 `model` + `file`（及PDF场景可选的 `start_page_id`/`end_page_id`），不传 `request_id`/`user_id`/`return_crop_images`/`need_layout_visualization` |
 | 13 | `config.py` | `glm_model` 默认值改为 `"glm-ocr"`；`glm_base_url` 保持基址不变，由调用代码拼接 `/layout_parsing` 路径 |
@@ -67,7 +67,7 @@ parse_pdf(pdf_bytes) / parse_image(image_bytes, media_type)
 
 ## 兼容性硬约束
 
-前端"整份一条/每页一条"切换功能（[SettingsModal.tsx](file:///d:/freelancer/workspace/code/portfolio/frontend/src/components/settings/SettingsModal.tsx)、[PasteTextInput.tsx](file:///d:/freelancer/workspace/code/portfolio/frontend/src/components/input/PasteTextInput.tsx#L80-100)）完全依赖 `pages`/`pages_images`/`pages_blocks` 三个数组按页对齐（index 对应页码-1）。新实现必须保证 `layout_details[i]` 正确映射为 `pages[i]`/`pages_blocks[i]`，顺序和页数严格对齐，否则"每页一条"会错位。这是本次迁移中唯一不可破坏的下游契约；[schemas.py](file:///d:/freelancer/workspace/code/portfolio/src/smart_data_extractor/api/schemas.py#L165-182) 的 `ParsePdfResponse` 字段定义不变。
+前端"整份一条/每页一条"切换功能（[SettingsModal.tsx](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/components/settings/SettingsModal.tsx)、[PasteTextInput.tsx](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/components/input/PasteTextInput.tsx#L80-100)）完全依赖 `pages`/`pages_images`/`pages_blocks` 三个数组按页对齐（index 对应页码-1）。新实现必须保证 `layout_details[i]` 正确映射为 `pages[i]`/`pages_blocks[i]`，顺序和页数严格对齐，否则"每页一条"会错位。这是本次迁移中唯一不可破坏的下游契约；[schemas.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/api/schemas.py#L165-182) 的 `ParsePdfResponse` 字段定义不变。
 
 ## 数据流细节
 
@@ -95,7 +95,7 @@ _extract_text_blocks(layout_details_for_page: list[dict]) -> list[OcrBlock]:
 - `tokens_used` = `usage.total_tokens`
 - `cost_usd` = `calculate_glm_ocr_cost(usage)`
 
-**错误处理**：httpx 请求异常（网络错误、超时、非2xx状态码）直接向上抛出，由 API 层现有的异常处理（[routes.py](file:///d:/freelancer/workspace/code/portfolio/src/smart_data_extractor/api/routes.py#L237-271) 的 `try/except ValueError`）捕获转为 HTTP 错误响应。
+**错误处理**：httpx 请求异常（网络错误、超时、非2xx状态码）直接向上抛出，由 API 层现有的异常处理（[routes.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/api/routes.py#L237-271) 的 `try/except ValueError`）捕获转为 HTTP 错误响应。
 
 ## 测试
 
@@ -112,8 +112,8 @@ _extract_text_blocks(layout_details_for_page: list[dict]) -> list[OcrBlock]:
 
 ## 影响范围
 
-- 代码：[ocr.py](file:///d:/freelancer/workspace/code/portfolio/src/smart_data_extractor/extraction/ocr.py)（大改）、[locate.py](file:///d:/freelancer/workspace/code/portfolio/src/smart_data_extractor/extraction/locate.py)（`normalize_boxes` 扩展）、[config.py](file:///d:/freelancer/workspace/code/portfolio/src/smart_data_extractor/config.py)（默认值）
-- 测试：[test_ocr.py](file:///d:/freelancer/workspace/code/portfolio/tests/extraction/test_ocr.py)（大改）、[test_config.py](file:///d:/freelancer/workspace/code/portfolio/tests/test_config.py)
+- 代码：[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（大改）、[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py)（`normalize_boxes` 扩展）、[config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/config.py)（默认值）
+- 测试：[test_ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_ocr.py)（大改）、[test_config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/test_config.py)
 - 文档：README.md、render.yaml（计价说明同步更新）、decisions.md（追加 D-031）、state.md
 - 前端：不涉及改动（契约不变）
 

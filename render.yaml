@@ -19,7 +19,10 @@ services:
       # a placeholder avoids a startup ValidationError.
       - key: OPENAI_API_KEY
         value: "placeholder-not-used"
-      # Optional: enables PDF/image OCR via free glm-4v-flash.
+      # Optional: enables PDF/image OCR via glm-ocr (dedicated
+      # layout_parsing endpoint, flat 0.2 CNY per 1M tokens; see
+      # .harness/decisions.md D-031). Combine with the quota guard
+      # below to cap OCR spend.
       - key: GLM_API_KEY
         sync: false
       # DEMO-STAGE quota guard (D-019): caps the daily LLM bill. Replace

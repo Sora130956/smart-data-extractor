@@ -20,9 +20,10 @@ class Settings(BaseSettings):
     # Display-currency conversion (approximate static rate, override via env).
     usd_to_cny: float = 7.25
     database_url: str = "sqlite:///./smart_data_extractor.db"
-    # GLM (Zhipu) vision model, used for OCR-based PDF parsing.
+    # GLM (Zhipu) document parsing model, used for OCR-based PDF/image
+    # parsing via the dedicated layout_parsing endpoint (D-031).
     glm_api_key: str | None = None
-    glm_model: str = "glm-4v-flash"
+    glm_model: str = "glm-ocr"
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
     # DEMO-STAGE quota guard (D-019): caps the daily LLM bill before any
     # public promotion. A limit <= 0 disables that layer. Replace with

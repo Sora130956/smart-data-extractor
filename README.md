@@ -91,7 +91,7 @@ All endpoints are also reachable under the `/api` prefix (used by the frontend).
 | `MODEL` | no | Pydantic-AI model ref; default `openai:gpt-4o-mini`. This project runs `deepseek:deepseek-chat` (uses `DEEPSEEK_API_KEY`) |
 | `OPENAI_API_KEY` | yes* | *Required by config schema; a placeholder value works when using DeepSeek |
 | `DEEPSEEK_API_KEY` | DeepSeek setups | API key for `deepseek:*` models |
-| `GLM_API_KEY` | optional | Enables PDF/image OCR via free `glm-4v-flash` |
+| `GLM_API_KEY` | optional | Enables PDF/image OCR via `glm-ocr` dedicated layout-parsing endpoint (flat 0.2 CNY per 1M tokens — see `.harness/decisions.md` D-031) |
 | `MAX_CONCURRENCY` | no | Global concurrency cap (default 5) |
 | `DATABASE_URL` | no | SQLAlchemy URL (default local SQLite) |
 | `DAILY_QUOTA_PER_IP` | no | DEMO-STAGE guard: requests per visitor IP per UTC day (default 50, 0 disables) |

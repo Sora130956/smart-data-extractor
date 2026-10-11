@@ -135,11 +135,11 @@ def test_settings_glm_api_key_override(monkeypatch):
 
 
 def test_settings_glm_model_default(monkeypatch):
-    """Test glm_model defaults to glm-4v-flash."""
+    """Test glm_model defaults to glm-ocr (dedicated layout_parsing model, see D-031)."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("GLM_MODEL", raising=False)
     get_settings.cache_clear()
-    assert get_settings().glm_model == "glm-4v-flash"
+    assert get_settings().glm_model == "glm-ocr"
 
 
 def test_settings_glm_model_override(monkeypatch):

@@ -640,3 +640,82 @@
   - 后端：`extraction/ocr.py`（prompt + 解析扩展）、`extraction/locate.py`（大幅重写）、`api/schemas.py`（`ParsePdfResponse`/`ParseImageResponse` 加 `pages_blocks`，删 `LocateBox`/`LocateFieldsResponse`）、`api/routes.py`（删 `/locate_fields` 路由 + DI seam）、`extraction/__init__.py`（删 `locate_fields` 导出）
   - 前端：`types/extraction.ts`（`ExtractionSource.pagesBlocks` 替代 `fieldBoxes` 持久化字段）、`api/schemas.ts`/`client.ts`（扩展 parse 响应 schema，删 locate 相关）、`ResultDetailModal.tsx`（移除自动定位 `useEffect`/`locating` state，改 `useMemo` 本地同步计算）、`SourcePreviewPane.tsx`（移除 `locating` 提示 UI，`boxes` 渲染逻辑不变）
   - 待验证：TDD 先红后绿 + 突变自证，全量 pytest/vitest/tsc/build
+
+## D-029：画框匹配放宽为子串匹配，修正 D-028 的精确匹配条款
+
+- **日期**：2026-10-11
+- **状态**：已接受
+- **来源**：用户 bug 分析报告——结果详情页点击定位，部分字段（如"职位"）能画出 OCR 原图高亮框，但大多数字段（如电话号码）只能跳转到提取文本高亮，画不出框
+- **背景**：
+  - D-028 引入的 `matchFieldBoxes`（前端）/`match_field_boxes`（后端）要求字段值与某个 OCR grounding block 归一化后**完全相等**才算命中；而文本视图用的 `findFieldRanges`/`findFieldRange` 走的是子串搜索（`normalize().indexOf()`），容忍度更高
+  - 两套匹配逻辑容忍度不一致：`ResultDetailModal.tsx` 里 `boxes[key] || ranges[key]` 任一命中即显示定位入口，框匹配失败会静默退回文本高亮，不报错但也画不出框——这是现象的直接成因
+  - 实际 OCR block 常见形态是整段文本（含标签前缀/后缀，如 `电话: 18168058911/...`）落在同一个 block 里，字段值只是该 block 文本的子串，精确匹配因此落空
+  - 另一类更难的情形是字段值跨越两个及以上独立 block（如被从中间断开的电话号码），子串匹配无法解决，需要跨 block 合并或前缀探测+回溯等更复杂的方案（讨论后认为误判画错框的风险高于不画框，暂不处理）
+- **决策**：
+  1. 将 `matchFieldBoxes`（前端 `textHighlight.ts`）与 `match_field_boxes`（后端 `locate.py`）的命中判断从精确匹配改为**子串匹配**：前端 `text === needle` → `text.includes(needle)`；后端 `_normalize(text) != needle` 的否定分支 → `needle not in _normalize(text)`
+  2. 范围限定为 D-028 原决策中"块带多余前缀/后缀，值仍在单一 block 内"的场景；跨 block 场景（字段值被拆分到多个 block）不在本次范围内，留待观察真实数据出现频率后再评估（候选方案：跨 block 合并后子串匹配，或前缀唯一性探测+逐段回溯定位——后者复杂度高、OCR 噪声下误判画错框的风险大，优先级靠后）
+  3. 两侧实现保持语义对称：均先对 block 文本和字段值做既有的归一化（去空格/大小写折叠/全半角统一），再做子串判断；判断范围不变（仍是"第一个命中的 block"，page 顺序优先）
+- **理由**：
+  - 子串匹配与 `findFieldRanges` 的容忍度对齐，消除两套逻辑"同一数据表现不同"的割裂体验，且改动面小（仅一行判断逻辑 + 对应测试断言），风险低、收益明确
+  - 跨 block 场景需要定义"相邻可拼接"规则、分隔符/胶水字符处理、命中后框坐标取并集，且后端要同步实现一遍，维护成本和测试面显著上升；画错的框比退回文本高亮体验更差，在没有真实样本验证出现频率之前不值得为此设计，属于过度设计风险
+- **影响**：
+  - 前端：[textHighlight.ts](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/utils/textHighlight.ts)（`matchFieldBoxes` 判断逻辑 + 头部注释/docstring 同步提及 D-029）、[textHighlight.test.ts](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/utils/textHighlight.test.ts)（新增子串命中用例，反转原"不支持子串"断言）
+  - 后端：[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py)（`match_field_boxes` 判断逻辑 + 模块 docstring/函数 docstring 同步更新）、[test_locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_locate.py)（新增子串命中用例）
+  - 验证：TDD 先红后绿 + 突变自证（两侧均临时还原精确匹配逻辑，确认新增用例变红且失败信息符合预期，再还原回子串匹配确认恢复全绿）；前端 vitest 16/16 passed，后端 pytest 24/24 passed
+  - 不涉及方案 B（跨 block 合并）与方案 C（前缀唯一性探测+回溯），均未实施
+
+## D-030：默认 OCR 模型由 `glm-4v-flash` 切换为 `glm-4.5v`，修正 grounding 坐标不可信问题
+
+- **日期**：2026-10-11
+- **状态**：已接受
+- **来源**：用户报告新 bug——结果详情页画框从"电话"字段开始逐渐往下偏移，到"地址"字段偏到图片底部空白处；按 `systematic-debugging` 流程排查
+- **背景**：
+  - 根因已 100% 确证：默认 OCR 模型 `glm-4v-flash` 并未对文本块做真实视觉 grounding，而是按文本块的阅读顺序机械生成等差数列式的"编造坐标"（坐标随块序号线性递增，与图片中实际文字位置无关）
+  - D-029 的子串匹配放宽解决的是"匹配判断过严导致本应命中的 block 判断为不命中"，而本次 bug 的根因在更上游：即使匹配命中了正确的 block，该 block 自带的坐标本身就是伪造的，画出来的框自然是错的
+  - 讨论后提出三个候选方案：
+    - 方案 1：更换为 `glm-4.5v`，该模型提供真实视觉 grounding，从根源解决坐标不可信问题
+    - 方案 2：保留免费的 `glm-4v-flash`，额外加一层"可疑坐标检测"（如识别等差数列模式）在渲染前跳过画框，退回文本高亮——治标不治本，且检测规则本身可能有误判
+    - 方案 3：方案 1 + 方案 2 结合，作为双重保险
+  - 用户选定方案 1
+- **决策**：
+  1. 将 [config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/config.py) 中 `Settings.glm_model` 的默认值从 `glm-4v-flash` 改为 `glm-4.5v`（仍可通过环境变量 `GLM_MODEL` 覆盖）
+  2. 不修改 [ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py) 的价格表逻辑（`_GLM_FREE_MODELS`/`_GLM_4_5V_TIERS`），代码原生已支持两种模型的计费路径，仅需切换默认值
+  3. 不实施方案 2 的"可疑坐标检测跳过渲染"兜底逻辑——换模型已从根因解决问题，额外的检测层增加复杂度且无法消除方案 2 本身的误判风险
+- **理由**：
+  - `glm-4v-flash` 是免费模型，但其 grounding 坐标不可信是功能性缺陷，无法通过下游的匹配逻辑调整（如 D-029）弥补；只有换成具备真实视觉定位能力的模型才能真正解决画框偏移问题
+  - `glm-4.5v` 按 token 量阶梯计费（32K 以下：2/6 CNY per 1M input/output tokens；32K 以上：4/12 CNY），结合既有的 `daily_quota_per_ip`/`daily_quota_global` 配额护栏（D-019）可控制整体 OCR 支出
+- **影响**：
+  - 代码：[config.py:25](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/config.py#L25)（默认值变更）、[test_config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/test_config.py)（`test_settings_glm_model_default` 断言同步更新）
+  - 文档：[README.md](file:///d:/freelancer/workspace/code/smart-data-extractor/README.md)（环境变量说明表中 `GLM_API_KEY` 描述由"free glm-4v-flash"改为"paid glm-4.5v，引用本 ADR"）、[render.yaml](file:///d:/freelancer/workspace/code/smart-data-extractor/render.yaml)（部署配置注释同步更新，并提示配合配额护栏控制支出）
+  - 验证：TDD 先红后绿（先改测试断言确认 RED，再改实现代码确认 GREEN）；全量回归 `uv run pytest -v` 结果 260 passed, 2 skipped（2 个 skip 为真实 API 集成测试，默认跳过），无回归
+  - 遗留开放问题（未在本次处理）：（a）是否需要调整 `daily_quota_per_ip`/`daily_quota_global` 的具体数值以适配付费模型成本，待与用户进一步确认；（b）切换后尚未用真实模型调用验证画框坐标确实恢复正常，待确定验证方式（用户手动测试，或复用诊断脚本）
+
+## D-031：OCR 由 `glm-4.5v` 视觉模型整体替换为专用 `glm-ocr` 版面解析模型
+
+- **日期**：2026-10-11
+- **状态**：已接受
+- **来源**：用户查看智谱 GLM-OCR 官方文档后拍板「这个模型应该更合适吧 直接换吧 我买了个小资源包先试试」；按 `brainstorming` 技能完成 15 条关键决策过审，设计规格见 [2026-10-11-glm-ocr-migration-design.md](file:///d:/freelancer/workspace/code/smart-data-extractor/docs/superpowers/specs/2026-10-11-glm-ocr-migration-design.md)
+- **背景**：
+  - D-030 的 `glm-4.5v` 路线 = pydantic-ai `Agent` + `OpenAIChatModel` + 手写 `OCR_PROMPT`（要求输出 JSON blocks）+ PyMuPDF 逐页渲染 PNG 逐页调用，链路长且依赖模型服从 JSON 格式
+  - 智谱提供专用文档解析模型 `glm-ocr`（独立 `POST /api/paas/v4/layout_parsing` 接口）：原生接收 PDF/图片（≤100页），一次调用返回按页分组的 `layout_details`（`label`/`bbox_2d` 0-1归一化/`content`），定价 0.2 元/百万 token 输入输出同价，远低于 `glm-4.5v` 阶梯价
+  - 核实确认：glm-ocr 响应**不含**置信度字段（文档中带 `probability` 参数的 `/files/ocr` 是另一款手写 OCR 工具，计费与接口完全不同，与本方案无关）
+- **决策**（15 条全表见设计规格，要点）：
+  1. **完全替换**，不保留 `glm-4.5v` 回退路径
+  2. 调用架构：放弃 pydantic-ai Agent 抽象，`httpx` 直调 REST（`ocr.py` 新增 `_call_glm_ocr()`，PDF 与图片共用）
+  3. PDF 传输：整份原始字节 base64 一次调用（利用原生多页解析），删除逐页渲染循环；`pdf_to_images()` 保留**仅**生成 `pages_images` 前端预览底图，不复用 `layout_visualization`（带标注框非干净原图）
+  4. 元素过滤：保留 `label ∈ {text, table}`；table 的 HTML `content` 去标签取纯文本；`image`/`formula` 暂不处理
+  5. 坐标：`normalize_boxes()`（[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py)）新增一档——坐标全部 ≤1.0 判为 0-1 归一化，×100 复用现有裁剪/交换/退化丢弃逻辑
+  6. 计费：新增 `calculate_glm_ocr_cost()`，固定单价 0.2 元/百万 token（`prompt_tokens + completion_tokens`），删除 `_GLM_FREE_MODELS`/`_GLM_4_5V_TIERS` 阶梯价表
+  7. 失败语义：HTTP/网络层失败 → 整份抛异常（由 routes 现有异常处理转 4xx/5xx）；调用成功但某页 `layout_details` 缺失/空 → 该页进 `pages_failed`，其余页正常
+  8. 请求参数仅 `model` + `file`；`config.py` 的 `glm_model` 默认改 `"glm-ocr"`，`glm_base_url` 保持基址由代码拼 `/layout_parsing`
+  9. 兼容性硬约束：`layout_details[i]` 严格映射 `pages[i]`/`pages_blocks[i]`（index=页码-1），前端「整份一条/每页一条」切换（`PasteTextInput.tsx` 消费三个按页对齐数组）不受影响；`ParsePdfResponse` 字段不变
+  10. 测试 mock 由 `httpx2.MockTransport`（openai/pydantic-ai 链路）改为 `httpx.MockTransport`
+- **理由**：
+  - 专用模型原生返回版面结构 + 真实 bbox，消除「prompt 要求 JSON + 模型不服从」的脆弱环节；整份一次调用降低时延与调用次数；单价降一个数量级
+  - 预览图与 OCR 调用解耦后，`pages_images` 不受 API 返回形态影响，前端叠框链路（D-027/D-028）零改动
+- **影响**：
+  - 代码：[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（全量重写：删 `OCR_PROMPT`/`GlmChatModel`/`build_glm_model`/`build_ocr_agent`/`_parse_grounding`/`_ocr_page`/`_ocr_images`，增 `_call_glm_ocr`/`_extract_text_blocks`/`_build_result`/`calculate_glm_ocr_cost`）、[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py)（`normalize_boxes` +0-1 档）、[config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/config.py)（默认 `glm-ocr`）
+  - 测试：[test_ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_ocr.py)（全量重写，20 用例）、[test_locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_locate.py)（+0-1 档用例）、[test_config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/test_config.py)（默认值断言）
+  - 文档：README.md / render.yaml（`GLM_API_KEY` 计价描述）、state.md（D-031 条目）
+  - 验证：TDD 先红后绿；全量 `uv run pytest -q` 252 passed, 2 skipped（skip 为既有真实 API 集成测试），无回归
+  - 遗留开放问题：（a）`daily_quota_per_ip`/`daily_quota_global` 数值是否放宽（glm-ocr 单价远低于 glm-4.5v）；（b）真实 API 验证响应结构——用户已购小额资源包，待实测确认 `layout_details` 实际形态与文档一致后锁定解析细节；（c）`md_results`（每页 markdown）当前未使用，`pages[i]` 由 blocks 拼接，若实测 md 质量更好可再评估切换

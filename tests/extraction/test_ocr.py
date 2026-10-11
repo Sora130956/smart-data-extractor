@@ -1,35 +1,22 @@
-"""Tests for extraction.ocr: PDF -> page images -> GLM vision OCR with
-native grounding blocks (issue #4, D-028). Offline: TestModel or a faked
-GLM transport (MockTransport), never a real network call."""
+"""Tests for extraction.ocr: PDF/image -> Zhipu glm-ocr layout parsing
+(D-031). Offline: httpx.MockTransport, never a real network call."""
 
+import base64
 import json
 
 import fitz
+import httpx
 import pytest
-from httpx2 import AsyncClient as Httpx2AsyncClient
-from httpx2 import MockTransport
-from httpx2 import Response as Httpx2Response
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.models.test import TestModel
-from pydantic_ai.usage import RunUsage
 
 import smart_data_extractor.extraction.ocr as ocr_module
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction.ocr import (
-    _parse_grounding,
-    build_glm_model,
-    build_ocr_agent,
-    calculate_glm_cost,
+    _extract_text_blocks,
+    calculate_glm_ocr_cost,
     parse_image,
     parse_pdf,
     pdf_to_images,
 )
-
-
-@pytest.fixture
-def test_model() -> TestModel:
-    """Offline model, function-scoped to avoid cross-test state."""
-    return TestModel()
 
 
 def _make_pdf_bytes(num_pages: int) -> bytes:
@@ -43,49 +30,53 @@ def _make_pdf_bytes(num_pages: int) -> bytes:
     return data
 
 
-# --- build_ocr_agent ---
+def _element(label: str, content: str, bbox: list[float]) -> dict:
+    """One glm-ocr layout_details element."""
+    return {
+        "index": 0,
+        "label": label,
+        "bbox_2d": bbox,
+        "content": content,
+        "height": 800,
+        "width": 600,
+    }
 
 
-def test_build_ocr_agent_creates_fresh_instances():
-    """Uncached builder: one page = one agent.run, no caching benefit."""
-    m = TestModel()
-    assert build_ocr_agent(model=m) is not build_ocr_agent(model=m)
+def _glm_ocr_payload(pages_layout: list, *, prompt_tokens=100, completion_tokens=50) -> dict:
+    """A glm-ocr layout_parsing response shaped like the official docs."""
+    return {
+        "id": "resp-1",
+        "created": 1_700_000_000,
+        "model": "glm-ocr",
+        "md_results": ["# page"] * len(pages_layout),
+        "layout_details": pages_layout,
+        "data_info": {"num_pages": len(pages_layout), "pages": []},
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+        "request_id": "req-1",
+    }
 
 
-def test_build_ocr_agent_outputs_plain_text_deterministically():
-    """OCR output is plain text (no schema) and deterministic (temperature=0)."""
-    agent = build_ocr_agent(model=TestModel())
-    assert agent.output_type is str
-    assert agent.model_settings.get("temperature") == 0
+def _mock_client(payload, *, status_code=200, captured=None):
+    """An httpx.AsyncClient on a mock transport (injection seam for tests)."""
 
+    def transport(request: httpx.Request) -> httpx.Response:
+        if captured is not None:
+            captured["request"] = request
+        return httpx.Response(status_code, json=payload)
 
-# --- build_glm_model ---
-
-
-def test_build_glm_model_uses_configured_model_name(monkeypatch, fake_openai_env):
-    """The constructed model reports the configured GLM model name."""
-    monkeypatch.setenv("GLM_API_KEY", "test-glm-key")
-    get_settings.cache_clear()
-    model = build_glm_model()
-    assert isinstance(model, OpenAIChatModel)
-    assert model.model_name == get_settings().glm_model
-
-
-def test_build_glm_model_uses_configured_base_url(monkeypatch, fake_openai_env):
-    """The constructed model points at the configured GLM base url."""
-    monkeypatch.setenv("GLM_API_KEY", "test-glm-key")
-    get_settings.cache_clear()
-    model = build_glm_model()
-    assert model.base_url.rstrip("/") == get_settings().glm_base_url.rstrip("/")
+    return httpx.AsyncClient(transport=httpx.MockTransport(transport))
 
 
 # --- pdf_to_images ---
 
 
 def test_pdf_to_images_returns_one_png_per_page():
-    """Each PDF page renders to exactly one PNG image."""
-    pdf_bytes = _make_pdf_bytes(2)
-    images = pdf_to_images(pdf_bytes)
+    """Each PDF page renders to exactly one PNG image (preview only, D-031)."""
+    images = pdf_to_images(_make_pdf_bytes(2))
     assert len(images) == 2
     for img in images:
         assert isinstance(img, bytes)
@@ -98,337 +89,205 @@ def test_pdf_to_images_single_page():
     assert len(images) == 1
 
 
-# --- _parse_grounding (D-028: OCR-native block parsing) ---
+# --- _extract_text_blocks (D-031: layout element filtering) ---
 
 
-def test_parse_grounding_happy_path_joins_block_texts():
-    raw = json.dumps(
-        {
-            "blocks": [
-                {"text": "Invoice Number", "box": [10, 10, 40, 15]},
-                {"text": "INV-001", "box": [10, 20, 30, 25]},
-            ]
-        }
-    )
-    text, blocks = _parse_grounding(raw)
-    assert text == "Invoice Number\nINV-001"
-    assert blocks == [
-        {"text": "Invoice Number", "box": [10, 10, 40, 15]},
-        {"text": "INV-001", "box": [10, 20, 30, 25]},
+def test_extract_text_blocks_keeps_text_and_table_drops_other_labels():
+    """Only text/table elements carry extractable content; image/formula
+    elements are filtered out (D-031 decision 8)."""
+    page = [
+        _element("text", "Invoice Number", [0.1, 0.1, 0.4, 0.2]),
+        _element("image", "(a photo)", [0.5, 0.5, 0.6, 0.6]),
+        _element("formula", "E=mc^2", [0.1, 0.3, 0.2, 0.4]),
+        _element("table", "<td>100</td>", [0.1, 0.5, 0.8, 0.7]),
     ]
+    blocks = _extract_text_blocks(page)
+    assert [b["text"] for b in blocks] == ["Invoice Number", "100"]
 
 
-def test_parse_grounding_rescales_0_1000_boxes():
-    """GLM-4.5V grounding natively emits 0-1000 coordinates: boxes are
-    normalized to 0-100 percentages."""
-    raw = json.dumps({"blocks": [{"text": "v", "box": [100, 200, 300, 400]}]})
-    _, blocks = _parse_grounding(raw)
-    assert blocks == [{"text": "v", "box": [10, 20, 30, 40]}]
+def test_extract_text_blocks_strips_html_from_table_content():
+    """Table content arrives as HTML; tags are stripped (D-031 decision 9)."""
+    page = [_element("table", "<table><tr><td>Qty: 3</td><td>Price: 9</td></tr></table>", [0, 0, 1, 1])]
+    blocks = _extract_text_blocks(page)
+    assert blocks == [{"text": "Qty: 3Price: 9", "box": [0.0, 0.0, 100.0, 100.0]}]
 
 
-def test_parse_grounding_strips_code_fences():
-    raw = '```json\n{"blocks": [{"text": "v", "box": [1, 2, 3, 4]}]}\n```'
-    text, blocks = _parse_grounding(raw)
-    assert text == "v"
-    assert blocks == [{"text": "v", "box": [1, 2, 3, 4]}]
+def test_extract_text_blocks_rescales_0_1_bboxes_to_0_100():
+    """glm-ocr bbox_2d is 0-1 normalized; blocks carry 0-100 percentages."""
+    blocks = _extract_text_blocks([_element("text", "v", [0.1, 0.2, 0.5, 0.7])])
+    assert blocks == [{"text": "v", "box": [10.0, 20.0, 50.0, 70.0]}]
 
 
-def test_parse_grounding_plain_text_degrades_to_raw_text():
-    """Weak models may answer with prose instead of JSON: the text survives
-    (backwards compatible), the page just has no blocks."""
-    text, blocks = _parse_grounding("just some plain text")
-    assert text == "just some plain text"
-    assert blocks is None
-
-
-def test_parse_grounding_drops_blocks_with_invalid_boxes():
-    """Blocks whose box is missing/garbled keep their text in the page text
-    but are dropped from the coordinate list (box=None marks them)."""
-    raw = json.dumps(
-        {
-            "blocks": [
-                {"text": "ok", "box": [1, 2, 3, 4]},
-                {"text": "no box"},
-                {"text": "bad box", "box": [1, 2, 3]},
-                "not even a dict",
-            ]
-        }
-    )
-    text, blocks = _parse_grounding(raw)
-    assert text == "ok\nno box\nbad box"
-    assert blocks == [{"text": "ok", "box": [1, 2, 3, 4]}]
-
-
-def test_parse_grounding_empty_blocks_degrades_to_raw():
-    """A blocks list with no usable entries is treated as unparseable."""
-    raw = json.dumps({"blocks": []})
-    text, blocks = _parse_grounding(raw)
-    assert text == raw
-    assert blocks is None
+def test_extract_text_blocks_tolerates_non_list_input():
+    """A missing/garbled page entry degrades to no blocks, not a crash."""
+    assert _extract_text_blocks(None) == []
+    assert _extract_text_blocks("garbage") == []
 
 
 # --- parse_pdf ---
 
 
-async def test_parse_pdf_builds_glm_model_when_model_omitted(monkeypatch, fake_openai_env):
-    """Production default path: no model passed -> a real GLM model is built and used."""
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"page1"])
+async def test_parse_pdf_happy_path_multi_page(fake_openai_env):
+    """Whole-PDF single call: pages/pages_blocks/pages_images stay aligned
+    (the frontend's per-page split depends on it, see design doc)."""
+    pdf_bytes = _make_pdf_bytes(2)
+    payload = _glm_ocr_payload(
+        [
+            [_element("text", "Page one text", [0.1, 0.1, 0.9, 0.2])],
+            [
+                _element("text", "Page two line", [0.1, 0.3, 0.9, 0.4]),
+                _element("table", "<td>Total 42</td>", [0.1, 0.5, 0.9, 0.7]),
+            ],
+        ],
+        prompt_tokens=10_000,
+        completion_tokens=5_000,
+    )
 
-    sentinel_model = TestModel(custom_output_text="OCR TEXT")
-    build_calls = []
+    result = await parse_pdf(pdf_bytes, http_client=_mock_client(payload))
 
-    def fake_build_glm_model():
-        build_calls.append(True)
-        return sentinel_model
+    assert result["text"] == "Page one text\n\nPage two line\nTotal 42"
+    assert result["pages"] == ["Page one text", "Page two line\nTotal 42"]
+    assert result["pages_blocks"] == [
+        [{"text": "Page one text", "box": [10.0, 10.0, 90.0, 20.0]}],
+        [
+            {"text": "Page two line", "box": [10.0, 30.0, 90.0, 40.0]},
+            {"text": "Total 42", "box": [10.0, 50.0, 90.0, 70.0]},
+        ],
+    ]
+    assert result["pages_failed"] == []
+    # Preview images stay aligned with pages and decode to PNGs.
+    assert len(result["pages_images"]) == 2
+    assert base64.b64decode(result["pages_images"][0]).startswith(b"\x89PNG")
+    assert result["tokens_used"] == {"input": 10_000, "output": 5_000}
+    assert result["cost_usd"] == pytest.approx(calculate_glm_ocr_cost(payload["usage"]))
 
-    monkeypatch.setattr(ocr_module, "build_glm_model", fake_build_glm_model)
+
+async def test_parse_pdf_request_shape_follows_config(monkeypatch, fake_openai_env):
+    """The call hits {glm_base_url}/layout_parsing with the configured model,
+    a base64 file payload and the Bearer api key (D-031 decisions 6/12/13)."""
+    monkeypatch.setenv("GLM_API_KEY", "test-glm-key")
+    monkeypatch.setenv("GLM_MODEL", "glm-ocr")
+    get_settings.cache_clear()
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "OCR TEXT", [0.1, 0.1, 0.5, 0.2])]])
+
+    await parse_pdf(b"fake-pdf-bytes", http_client=_mock_client(payload, captured=captured))
+
+    request = captured["request"]
+    assert str(request.url) == get_settings().glm_base_url.rstrip("/") + "/layout_parsing"
+    assert request.headers["Authorization"] == "Bearer test-glm-key"
+    body = json.loads(request.content)
+    assert body["model"] == "glm-ocr"
+    assert body["file"] == base64.b64encode(b"fake-pdf-bytes").decode("ascii")
+    assert set(body) == {"model", "file"}  # only the required params
+
+
+async def test_parse_pdf_marks_pages_with_missing_layout_as_failed(monkeypatch, fake_openai_env):
+    """A successful call with a missing/empty page entry skips that page
+    (pages_failed), the rest of the document survives (D-031 decision 7)."""
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1", b"i2", b"i3"])
+    payload = _glm_ocr_payload(
+        [None, [], [_element("text", "third page", [0.1, 0.1, 0.5, 0.2])]]
+    )
+    result = await parse_pdf(b"fake-pdf-bytes", http_client=_mock_client(payload))
+
+    assert result["pages"] == [None, None, "third page"]
+    assert result["pages_blocks"] == [None, None, [{"text": "third page", "box": [10.0, 10.0, 50.0, 20.0]}]]
+    assert result["pages_failed"] == [0, 1]
+    assert result["text"] == "third page"
+    # The single call still succeeded: usage and cost are reported.
+    assert result["tokens_used"] == {"input": 100, "output": 50}
+    assert result["cost_usd"] > 0.0
+
+
+async def test_parse_pdf_all_pages_empty_returns_empty_text(monkeypatch, fake_openai_env):
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1", b"i2"])
+    payload = _glm_ocr_payload([[], []])
+
+    result = await parse_pdf(b"fake-pdf-bytes", http_client=_mock_client(payload))
+
+    assert result["text"] == ""
+    assert result["pages"] == [None, None]
+    assert result["pages_failed"] == [0, 1]
+
+
+async def test_parse_pdf_raises_on_http_error_status(fake_openai_env):
+    """An API-level failure (non-2xx) fails the whole document (decision 7)."""
+    client = _mock_client({"error": {"message": "bad file"}}, status_code=400)
+    with pytest.raises(httpx.HTTPStatusError):
+        await parse_pdf(b"fake-pdf-bytes", http_client=client)
+
+
+async def test_parse_pdf_raises_on_network_error(fake_openai_env):
+    def transport(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no network")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    with pytest.raises(httpx.ConnectError):
+        await parse_pdf(b"fake-pdf-bytes", http_client=client)
+
+
+async def test_parse_pdf_omitted_client_builds_default_settings_client(
+    monkeypatch, fake_openai_env
+):
+    """Production default path: no http_client -> built from settings, and
+    the request still follows config (URL/model/key)."""
+    monkeypatch.setenv("GLM_API_KEY", "prod-key")
+    get_settings.cache_clear()
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "OCR TEXT", [0.1, 0.1, 0.5, 0.2])]])
+    client = _mock_client(payload, captured=captured)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
 
     result = await parse_pdf(b"fake-pdf-bytes")
 
-    assert build_calls == [True]
-    assert result["text"] == "OCR TEXT"
-    # Plain-text model output degrades: no blocks for the page.
-    assert result["pages_blocks"] == [None]
-
-
-async def test_parse_pdf_defaults_model_ref_to_settings_glm_model(monkeypatch, fake_openai_env):
-    """Production default path: cost calculation uses settings.glm_model, not skipped."""
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"page1"])
-    monkeypatch.setattr(ocr_module, "build_glm_model", lambda: TestModel())
-
-    calls = []
-
-    def fake_calculate_glm_cost(usage, *, model_ref):
-        calls.append(model_ref)
-        return 0.0
-
-    monkeypatch.setattr(ocr_module, "calculate_glm_cost", fake_calculate_glm_cost)
-
-    await parse_pdf(b"fake-pdf-bytes")
-
-    assert calls == [get_settings().glm_model]
-
-
-async def test_parse_pdf_tolerates_glm_response_missing_object_field(
-    monkeypatch, fake_openai_env
-):
-    """Regression: Zhipu GLM's endpoint omits the `object` field from its
-    OpenAI-compatible responses; parsing must succeed anyway instead of
-    failing every page with UnexpectedModelBehavior."""
-    monkeypatch.setenv("GLM_API_KEY", "test-glm-key")
-    get_settings.cache_clear()
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"page1"])
-
-    glm_payload = {
-        "id": "resp-1",
-        "choices": [
-            {
-                "index": 0,
-                "finish_reason": "stop",
-                "message": {
-                    "role": "assistant",
-                    "content": json.dumps(
-                        {"blocks": [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]}
-                    ),
-                },
-            }
-        ],
-        "created": 1_700_000_000,
-        "model": "glm-4v-flash",
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-    }
-    assert "object" not in glm_payload  # the GLM quirk under test
-
-    def fake_glm_transport(request):
-        return Httpx2Response(200, json=glm_payload)
-
-    http_client = Httpx2AsyncClient(transport=MockTransport(fake_glm_transport))
-    model = build_glm_model(http_client=http_client)
-
-    result = await parse_pdf(b"fake-pdf-bytes", model=model)
-
-    assert result["pages_failed"] == []
-    assert result["text"] == "OCR TEXT"
-    assert result["pages_blocks"] == [[{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]]
-    assert result["tokens_used"] == {"input": 10, "output": 5}
-
-
-async def test_parse_pdf_concatenates_page_text(monkeypatch, test_model):
-    """Multi-page OCR output joins into one text blob, one Source = one Result."""
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"page1", b"page2"])
-    grounding = json.dumps({"blocks": [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]})
-    model = TestModel(custom_output_text=grounding)
-
-    result = await parse_pdf(b"fake-pdf-bytes", model=model)
-
-    assert result["text"] == "OCR TEXT\n\nOCR TEXT"
-    assert result["pages"] == ["OCR TEXT", "OCR TEXT"]
-    assert result["pages_blocks"] == [
-        [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}],
-        [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}],
-    ]
-    assert result["pages_failed"] == []
-
-
-async def test_parse_pdf_reports_tokens_and_cost(monkeypatch, test_model, fake_openai_env):
-    """Each parse reports token usage and a non-negative USD cost."""
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"page-bytes"])
-
-    result = await parse_pdf(b"fake-pdf-bytes", model=test_model, model_ref="glm-4v-flash")
-
-    tokens = result["tokens_used"]
-    assert isinstance(tokens["input"], int) and tokens["input"] > 0
-    assert isinstance(tokens["output"], int) and tokens["output"] > 0
-    assert isinstance(result["cost_usd"], float)
-    # glm-4v-flash is free.
-    assert result["cost_usd"] == 0.0
-
-
-async def test_parse_pdf_skips_failed_pages(monkeypatch, test_model):
-    """A page whose OCR run raises is skipped, not fatal to the whole document."""
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"p1", b"p2", b"p3"])
-
-    async def fake_ocr_page(agent, image_bytes, media_type="image/png"):
-        if image_bytes == b"p2":
-            raise RuntimeError("boom")
-        name = f"text-for-{image_bytes.decode()}"
-        return name, [{"text": name, "box": [1, 2, 3, 4]}], RunUsage(input_tokens=10, output_tokens=5)
-
-    monkeypatch.setattr(ocr_module, "_ocr_page", fake_ocr_page)
-
-    result = await parse_pdf(b"fake-pdf-bytes", model=test_model)
-
-    assert result["pages_failed"] == [1]
-    assert result["pages"] == ["text-for-p1", None, "text-for-p3"]
-    assert result["pages_blocks"] == [
-        [{"text": "text-for-p1", "box": [1, 2, 3, 4]}],
-        None,
-        [{"text": "text-for-p3", "box": [1, 2, 3, 4]}],
-    ]
-    assert result["text"] == "text-for-p1\n\ntext-for-p3"
-    assert result["tokens_used"] == {"input": 20, "output": 10}
-
-
-async def test_parse_pdf_all_pages_fail_returns_empty_text(monkeypatch, test_model):
-    """Every page failing is tolerated: empty text, all indices recorded, zero cost."""
-    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda pdf_bytes: [b"p1", b"p2"])
-
-    async def always_fails(agent, image_bytes, media_type="image/png"):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(ocr_module, "_ocr_page", always_fails)
-
-    result = await parse_pdf(b"fake-pdf-bytes", model=test_model)
-
-    assert result["text"] == ""
-    assert result["pages_failed"] == [0, 1]
-    assert result["pages_blocks"] == [None, None]
-    assert result["tokens_used"] == {"input": 0, "output": 0}
-    assert result["cost_usd"] == 0.0
+    assert result["pages"] == ["OCR TEXT"]
+    body = json.loads(captured["request"].content)
+    assert body["model"] == "glm-ocr"
 
 
 # --- parse_image ---
 
 
-async def test_parse_image_ocrs_bytes_directly_with_media_type(monkeypatch, test_model):
-    """An image is OCR'd as-is: no PDF page rendering, one source = one page,
-    and the caller's media_type reaches the OCR call."""
-    # If parse_image tried to route through pdf_to_images, this would explode.
-    def must_not_render(pdf_bytes):
-        raise AssertionError("parse_image must not render PDF pages")
+async def test_parse_image_ocrs_bytes_directly(fake_openai_env):
+    """An image is sent as-is in one call: one source = one page, no PDF
+    rendering, no preview images (the frontend holds the original)."""
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "IMG TEXT", [0.2, 0.2, 0.8, 0.8])]])
 
-    monkeypatch.setattr(ocr_module, "pdf_to_images", must_not_render)
+    result = await parse_image(b"jpeg-bytes", media_type="image/jpeg", http_client=_mock_client(payload, captured=captured))
 
-    captured = {}
-
-    async def fake_ocr_page(agent, image_bytes, media_type="image/png"):
-        captured["media_type"] = media_type
-        return "OCR TEXT", [{"text": "OCR TEXT", "box": [10, 10, 50, 20]}], RunUsage(input_tokens=7, output_tokens=3)
-
-    monkeypatch.setattr(ocr_module, "_ocr_page", fake_ocr_page)
-
-    result = await parse_image(b"jpeg-bytes", media_type="image/jpeg", model=test_model)
-
-    assert captured["media_type"] == "image/jpeg"
-    assert result["pages"] == ["OCR TEXT"]
-    assert result["text"] == "OCR TEXT"
-    assert result["pages_blocks"] == [[{"text": "OCR TEXT", "box": [10, 10, 50, 20]}]]
+    assert result["pages"] == ["IMG TEXT"]
+    assert result["text"] == "IMG TEXT"
+    assert result["pages_blocks"] == [[{"text": "IMG TEXT", "box": [20.0, 20.0, 80.0, 80.0]}]]
     assert result["pages_failed"] == []
-    assert result["tokens_used"] == {"input": 7, "output": 3}
+    assert result["pages_images"] is None
+    body = json.loads(captured["request"].content)
+    assert body["file"] == base64.b64encode(b"jpeg-bytes").decode("ascii")
 
 
-async def test_parse_image_builds_glm_model_when_model_omitted(monkeypatch, fake_openai_env):
-    """Production default path: no model passed -> a real GLM model is built and used."""
-    sentinel_model = TestModel(custom_output_text="OCR TEXT")
-    build_calls = []
-
-    def fake_build_glm_model():
-        build_calls.append(True)
-        return sentinel_model
-
-    monkeypatch.setattr(ocr_module, "build_glm_model", fake_build_glm_model)
-
-    result = await parse_image(b"png-bytes", media_type="image/png")
-
-    assert build_calls == [True]
-    assert result["text"] == "OCR TEXT"
-    # Plain-text model output degrades: no blocks for the page.
-    assert result["pages_blocks"] == [None]
+# --- calculate_glm_ocr_cost ---
 
 
-async def test_parse_image_failed_ocr_returns_empty_text(monkeypatch, test_model):
-    """A failing OCR run is tolerated: empty text, failure index recorded, zero cost."""
-
-    async def always_fails(agent, image_bytes, media_type="image/png"):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(ocr_module, "_ocr_page", always_fails)
-
-    result = await parse_image(b"png-bytes", media_type="image/png", model=test_model)
-
-    assert result["text"] == ""
-    assert result["pages"] == [None]
-    assert result["pages_blocks"] == [None]
-    assert result["pages_failed"] == [0]
-    assert result["tokens_used"] == {"input": 0, "output": 0}
-    assert result["cost_usd"] == 0.0
+def test_calculate_glm_ocr_cost_zero_tokens(fake_openai_env):
+    assert calculate_glm_ocr_cost({"prompt_tokens": 0, "completion_tokens": 0}) == 0.0
 
 
-# --- calculate_glm_cost ---
+def test_calculate_glm_ocr_cost_flat_price_matches_zhipu_pricing(fake_openai_env):
+    """glm-ocr: flat 0.2 CNY per 1M tokens (input == output price),
+    converted to USD via settings.usd_to_cny."""
+    usage = {"prompt_tokens": 10_000, "completion_tokens": 5_000}
+    expected_cny = (10_000 + 5_000) / 1_000_000 * 0.2
+    assert calculate_glm_ocr_cost(usage) == pytest.approx(expected_cny / 7.25)
 
 
-def test_calculate_glm_cost_free_for_flash_model(fake_openai_env):
-    """glm-4v-flash is free regardless of token volume."""
-    usage = RunUsage(input_tokens=10_000, output_tokens=5_000)
-    assert calculate_glm_cost(usage, model_ref="glm-4v-flash") == 0.0
+def test_calculate_glm_ocr_cost_scales_with_tokens(fake_openai_env):
+    small = {"prompt_tokens": 1_000, "completion_tokens": 500}
+    large = {"prompt_tokens": 10_000, "completion_tokens": 5_000}
+    assert calculate_glm_ocr_cost(large) > calculate_glm_ocr_cost(small)
 
 
-def test_calculate_glm_cost_zero_tokens(fake_openai_env):
-    """Zero tokens cost zero dollars, even on a paid model."""
-    usage = RunUsage(input_tokens=0, output_tokens=0)
-    assert calculate_glm_cost(usage, model_ref="glm-4.5v") == 0.0
-
-
-def test_calculate_glm_cost_low_tier_matches_zhipu_pricing(fake_openai_env):
-    """Below the 32K-token tier: 2 CNY/1M input, 6 CNY/1M output, converted to USD."""
-    usage = RunUsage(input_tokens=10_000, output_tokens=5_000)
-    cost = calculate_glm_cost(usage, model_ref="glm-4.5v")
-    expected_cny = (10_000 / 1_000_000) * 2.0 + (5_000 / 1_000_000) * 6.0
-    assert cost == pytest.approx(expected_cny / 7.25)
-
-
-def test_calculate_glm_cost_high_tier_matches_zhipu_pricing(fake_openai_env):
-    """At/above the 32K-token tier: 4 CNY/1M input, 12 CNY/1M output."""
-    usage = RunUsage(input_tokens=40_000, output_tokens=0)
-    cost = calculate_glm_cost(usage, model_ref="glm-4.5v")
-    expected_cny = (40_000 / 1_000_000) * 4.0
-    assert cost == pytest.approx(expected_cny / 7.25)
-
-
-def test_calculate_glm_cost_scales_with_tokens(fake_openai_env):
-    """More tokens cost strictly more (monotonicity), on a paid model."""
-    small = RunUsage(input_tokens=1_000, output_tokens=500)
-    large = RunUsage(input_tokens=10_000, output_tokens=5_000)
-    assert calculate_glm_cost(large, model_ref="glm-4.5v") > calculate_glm_cost(
-        small, model_ref="glm-4.5v"
-    )
+def test_calculate_glm_ocr_cost_tolerates_missing_usage_fields(fake_openai_env):
+    assert calculate_glm_ocr_cost({}) == 0.0
