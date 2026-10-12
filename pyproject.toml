@@ -3,6 +3,7 @@ name = "smart-data-extractor"
 version = "0.1.0"
 description = "An LLM-powered toolkit that transforms messy, unstructured text into clean, validated, structured data."
 readme = "README.md"
+license = "AGPL-3.0-or-later"
 authors = [
     { name = "Sora", email = "1309564814@qq.com" }
 ]
