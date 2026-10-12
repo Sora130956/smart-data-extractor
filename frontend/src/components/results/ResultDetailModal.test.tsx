@@ -749,7 +749,7 @@ describe('ResultDetailModal', () => {
       expect(screen.queryByRole('button', { name: /Locate/ })).not.toBeInTheDocument();
     });
 
-    it('ignores blocks whose text only contains the value (exact block match only)', () => {
+    it('matches a value contained in a longer OCR block (D-029 substring rule)', () => {
       render(
         <ResultDetailModal
           source={makeFileSource({
@@ -762,9 +762,11 @@ describe('ResultDetailModal', () => {
         />,
       );
 
-      // The block text must equal the extracted value after normalization —
-      // a surrounding label is not a match (mirrors the backend semantics).
-      expect(screen.queryByRole('button', { name: /Locate/ })).not.toBeInTheDocument();
+      // D-029 relaxed D-028's exact-match rule: a label prefix the OCR kept
+      // in the same block no longer disqualifies the match.
+      expect(
+        screen.getByRole('button', { name: 'Locate Invoice Number in source' }),
+      ).toBeInTheDocument();
     });
 
     it('folds whitespace, case, and fullwidth characters when matching', () => {
