@@ -768,3 +768,21 @@
   - 前端：`utils/fieldName.ts`（新，校验单一真源）+ SchemaEditor（key 列 + 行内校验）+ App.tsx（key 直传 + 提交前拦截）+ types/usePresetSchema（删 needsResolve 基线）+ i18n zh/en（5 词条）；测试 SchemaEditor +7 / App +3 / fieldName +8
   - 兼容性：D-016 快照惯例——改 key 只影响后续提取，旧批次/导出保持旧 key；Excel 列头仍展示名（non-goal）；JSON 导出天然以 field_name 为 key（CRM 诉求直接收益）
   - 验证：TDD 先红后绿（后端 6 红→19 绿；前端 fieldName 模块缺失→8 绿）；突变自证（App key 直传改 `false &&` → 1 红再还原）；后端全量 `uv run pytest -q` 264 passed, 2 skipped；前端 `npm test` 321/322（1 失败为 D-032 已记录的既有失败，`git stash` 复核实为主干既有）+ `tsc -b --noEmit` 0 错误
+
+---
+
+## D-034：导出 Excel 列宽自适应内容（Issue #12）
+
+- **日期**：2026-10-12
+- **状态**：已接受
+- **来源**：[GitHub Issue #12](https://github.com/Sora130956/smart-data-extractor/issues/12)——"导出的Excel样式优化，字段的展示宽度应该自适应，应该刚好能够展示出该字段。"
+- **背景**：`buildWorkbook` 对所有列写死宽度（前 2 列 22、其余 16）：窄内容列（Item/布尔/短字段）大量留白，宽内容列（长供应商名、地址、错误信息）被截断需手动拉宽
+- **决策**：新增纯函数 `autoColumnWidths(sheet)`（`excelExport.ts` 导出，与 `buildExportModel` 同惯例可脱离 ExcelJS 单测）——每列取「表头与全部单元格文本显示宽度的最大值 + 2 padding」，钳制到 [6, 60]；`buildWorkbook` 用它替换写死的 22/16。显示宽度按 ExcelJS 字符单位估算：CJK/全角字符（\u2E80-\u30FF/\u3400-\u4DBF/\u4E00-\u9FFF/\uF900-\uFAFF/\uAC00-\uD7AF/\uFF00-\uFF60/\uFFE0-\uFFE6）计 2，其余计 1；number/boolean 字符串化，null 记 0；padding 2 兼作加粗表头余量
+- **理由**：
+  - 纯函数层不依赖 ExcelJS，单测快且不受 D-019 既有 exceljs 并发 flake 影响
+  - 钳制下限 6 防止单字符列不可读；上限 60 防御病态内容（超长错误串、stringify JSON）撑爆版面——"刚好展示"以 60 字符为界，超出部分 Excel 自动换行仍可读
+  - 备选：读回 `ws.columns` 遍历 cell 对象取宽度 → 放弃，需要 ExcelJS 实例且慢；`ws.getColumn(i).bestFit` → ExcelJS 仅写 bestFit 标志、多数桌面端不按其渲染，不可靠
+- **影响**：
+  - 前端：[excelExport.ts](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/utils/excelExport.ts)（`autoColumnWidths` + `textWidth` + 三个常量，`buildWorkbook` 接线）；测试 [excelExport.test.ts](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/utils/excelExport.test.ts) +6 用例（纯函数 5 + buildWorkbook 集成 1）
+  - 纯前端改动，后端无涉；导出数据内容零变化，仅列宽样式
+  - 验证：TDD 先红（6 失败：autoColumnWidths is not a function）后绿（17/17）；突变自证（CJK 记 1 → 1 红；去钳制 → 3 红，均还原后恢复全绿）；全量 vitest 375 passed（25 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功（exceljs chunk >500kB 提示为既有）
