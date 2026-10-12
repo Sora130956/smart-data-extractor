@@ -153,3 +153,35 @@ export function reviewState(
   }
   return 'reviewed';
 }
+
+/** One reviewable document position in the results list (issue #5): the
+ * result, the source it belongs to, and its index within that source's
+ * (possibly filtered) results. */
+export interface ReviewItem {
+  source: ExtractionSource;
+  result: ExtractionResult;
+  resultIndex: number;
+}
+
+/** Issue #5 — where Ctrl+S ("save and jump to the next document") lands:
+ * the next item that still needs review in display order, wrapping around
+ * once. The current item is never a candidate (Ctrl+S means "done with
+ * this one"), so null means every OTHER item is fine — the caller closes
+ * the modal because the queue is drained. `currentIndex` < 0 (the current
+ * item is not in the list, e.g. it just left the active filter) searches
+ * the whole list from the start. */
+export function nextPendingItem(items: ReadonlyArray<ReviewItem>, currentIndex: number): ReviewItem | null {
+  const n = items.length;
+  if (n === 0) return null;
+  const order: number[] = [];
+  if (currentIndex >= 0 && currentIndex < n) {
+    for (let step = 1; step < n; step++) order.push((currentIndex + step) % n);
+  } else {
+    for (let i = 0; i < n; i++) order.push(i);
+  }
+  for (const idx of order) {
+    const item = items[idx];
+    if (reviewState(item.result, item.source) === 'pending') return item;
+  }
+  return null;
+}

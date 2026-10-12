@@ -3,8 +3,10 @@ import {
   applyFieldEdit,
   buildAllowEmptyFields,
   buildReviewThresholds,
+  nextPendingItem,
   problemFields,
   reviewState,
+  type ReviewItem,
 } from './review';
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 
@@ -302,5 +304,63 @@ describe('reviewState (issue #3 three-state review status)', () => {
     });
     const edited = applyFieldEdit(initial, 'vendor', null);
     expect(reviewState(edited, makeSource())).toBe('reviewed');
+  });
+});
+
+describe('nextPendingItem (issue #5 Ctrl+S jump target)', () => {
+  // Items 0..2 in display order; a healthy one sits between two pending.
+  const pending = (id: string): ExtractionResult =>
+    makeResult({ sourceId: id, confidence: { vendor: 0.6, total: 0.88 } });
+  const healthy = (id: string): ExtractionResult =>
+    makeResult({ sourceId: id, confidence: { vendor: 0.9, total: 0.88 }, avgConfidence: 0.89 });
+
+  function items(results: ExtractionResult[]): ReviewItem[] {
+    return results.map((result, resultIndex) => ({
+      // The snapshots reviewState consumes are all optional on the source.
+      source: { id: result.sourceId, results: [result] } as ExtractionSource,
+      result,
+      resultIndex,
+    }));
+  }
+
+  it('returns the next pending item after the current position', () => {
+    const list = items([pending('a'), healthy('b'), pending('c')]);
+    expect(nextPendingItem(list, 0)?.source.id).toBe('c');
+  });
+
+  it('wraps around to the start when the current item is last', () => {
+    const list = items([pending('a'), healthy('b'), pending('c')]);
+    expect(nextPendingItem(list, 2)?.source.id).toBe('a');
+  });
+
+  it('never returns the current item, even when it is still pending', () => {
+    const list = items([healthy('a'), pending('b')]);
+    expect(nextPendingItem(list, 1)).toBeNull();
+
+    // Same but other items are pending too: it must skip to those.
+    const withOthers = items([pending('a'), pending('b')]);
+    expect(nextPendingItem(withOthers, 1)?.source.id).toBe('a');
+  });
+
+  it('returns null when no other item needs review (queue drained)', () => {
+    expect(nextPendingItem(items([pending('a')]), 0)).toBeNull();
+    expect(nextPendingItem(items([healthy('a'), healthy('b')]), 0)).toBeNull();
+    expect(nextPendingItem([], 0)).toBeNull();
+  });
+
+  it('treats a reviewed item as done, not pending', () => {
+    const reviewed = makeResult({
+      sourceId: 'b',
+      confidence: { vendor: 0.6, total: 0.88 },
+      reviewedFields: { vendor: true },
+    });
+    const list = items([pending('a'), reviewed, pending('c')]);
+    expect(nextPendingItem(list, 0)?.source.id).toBe('c');
+  });
+
+  it('searches the whole list from the start when the current index is unknown', () => {
+    // E.g. the current doc just left the active filter's visible list.
+    const list = items([pending('a'), healthy('b'), pending('c')]);
+    expect(nextPendingItem(list, -1)?.source.id).toBe('a');
   });
 });

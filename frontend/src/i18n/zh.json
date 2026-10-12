@@ -35,7 +35,22 @@
     "groupModel": "模型",
     "defaultModel": "GLM-4.6V（默认）",
     "comingSoon": "即将支持",
-    "modelHint": "此处后续可自选模型"
+    "modelHint": "此处后续可自选模型",
+    "groupShortcuts": "键盘快捷键",
+    "shortcuts": {
+      "nextField": "下一个待复核字段",
+      "prevField": "上一个待复核字段",
+      "saveNext": "保存并跳到下一单据",
+      "cancelEdit": "取消编辑",
+      "recording": "按下新组合键…",
+      "reset": "恢复默认",
+      "rebind": "重新绑定：{{action}}",
+      "error": {
+        "invalid": "不可绑定：字母/数字键需搭配 Ctrl 或 Alt，Enter、方向键等不支持",
+        "reserved": "该组合被浏览器保留，页面无法拦截",
+        "conflict": "该组合已被「{{action}}」占用"
+      }
+    }
   },
   "stats": {
     "sources": "来源数",
@@ -193,6 +208,7 @@
     "editField": "编辑{{field}}",
     "reviewed": "已复核",
     "originalValue": "原始值",
+    "shortcutHint": "{{next}} 下一待复核 · {{prev}} 上一待复核 · {{save}} 保存并下一单据 · {{cancel}} 取消编辑",
     "stats": {
       "inputTokens": "输入 Token",
       "outputTokens": "输出 Token",

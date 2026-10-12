@@ -35,7 +35,22 @@
     "groupModel": "Model",
     "defaultModel": "GLM-4.6V (default)",
     "comingSoon": "Coming soon",
-    "modelHint": "Custom model selection will be available here"
+    "modelHint": "Custom model selection will be available here",
+    "groupShortcuts": "Keyboard Shortcuts",
+    "shortcuts": {
+      "nextField": "Next review field",
+      "prevField": "Previous review field",
+      "saveNext": "Save & jump to next document",
+      "cancelEdit": "Cancel edit",
+      "recording": "Press a new combo…",
+      "reset": "Reset to defaults",
+      "rebind": "Rebind: {{action}}",
+      "error": {
+        "invalid": "Not bindable: letters/digits need Ctrl or Alt; Enter, arrows, etc. are unsupported",
+        "reserved": "Reserved by the browser — the page cannot intercept it",
+        "conflict": "Already used by \"{{action}}\""
+      }
+    }
   },
   "stats": {
     "sources": "Sources",
@@ -193,6 +208,7 @@
     "editField": "Edit {{field}}",
     "reviewed": "Reviewed",
     "originalValue": "Original value",
+    "shortcutHint": "{{next}} next field · {{prev}} previous field · {{save}} save & next document · {{cancel}} cancel edit",
     "stats": {
       "inputTokens": "Input Tokens",
       "outputTokens": "Output Tokens",

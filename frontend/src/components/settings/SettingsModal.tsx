@@ -1,8 +1,22 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useUiStore, type PdfSplitMode } from '@/store/uiStore';
+import {
+  comboFromEvent,
+  formatCombo,
+  validateComboForBinding,
+  type ShortcutAction,
+} from '@/utils/shortcuts';
 
 const SPLIT_MODES: PdfSplitMode[] = ['whole', 'pages'];
+
+/** Issue #5: the four rebindable review shortcuts, in display order. */
+const SHORTCUT_ROWS: Array<{ action: ShortcutAction; labelKey: string }> = [
+  { action: 'nextField', labelKey: 'settings.shortcuts.nextField' },
+  { action: 'prevField', labelKey: 'settings.shortcuts.prevField' },
+  { action: 'saveNext', labelKey: 'settings.shortcuts.saveNext' },
+  { action: 'cancelEdit', labelKey: 'settings.shortcuts.cancelEdit' },
+];
 
 export interface SettingsModalProps {
   open: boolean;
@@ -50,15 +64,66 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const { t } = useTranslation();
   const pdfSplitMode = useUiStore((s) => s.pdfSplitMode);
   const setPdfSplitMode = useUiStore((s) => s.setPdfSplitMode);
+  const shortcuts = useUiStore((s) => s.shortcuts);
+  const setShortcut = useUiStore((s) => s.setShortcut);
+  const resetShortcuts = useUiStore((s) => s.resetShortcuts);
+  // Issue #5: the action whose keycap is waiting for the next key press,
+  // plus the rejection reason of the last attempt (kept so the row stays
+  // in recording mode and the user can simply press a valid combo).
+  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+  const [recordError, setRecordError] = useState<{
+    reason: 'invalid' | 'reserved' | 'conflict';
+    conflictWith?: string;
+  } | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    // While recording, Escape aborts the recording (handled below) — it
+    // must not close the whole settings dialog.
+    if (!open || recording) return;
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [open, onClose]);
+  }, [open, onClose, recording]);
+
+  useEffect(() => {
+    if (!recording) return;
+    // Snapshot for the closure below: `recording` itself is not narrowed
+    // across function boundaries.
+    const action = recording;
+    function handleKey(e: KeyboardEvent) {
+      // Everything the recorder accepts is swallowed here: Tab must not
+      // move focus, Ctrl+S must not open the browser save dialog.
+      e.preventDefault();
+      if (e.key === 'Escape') {
+        setRecording(null);
+        setRecordError(null);
+        return;
+      }
+      const combo = comboFromEvent(e);
+      if (!combo) return; // bare modifier press: keep waiting for the key
+      const formatted = formatCombo(combo);
+      const otherCombos = SHORTCUT_ROWS.filter((row) => row.action !== action).map(
+        (row) => shortcuts[row.action],
+      );
+      const check = validateComboForBinding(combo, otherCombos);
+      if (check === 'ok') {
+        setShortcut(action, formatted);
+        setRecording(null);
+        setRecordError(null);
+      } else if (check === 'conflict') {
+        const conflictWith = SHORTCUT_ROWS.find(
+          (row) => row.action !== action && shortcuts[row.action] === formatted,
+        )?.labelKey;
+        setRecordError({ reason: 'conflict', conflictWith });
+      } else {
+        setRecordError({ reason: check });
+      }
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [recording, shortcuts, setShortcut]);
 
   if (!open) return null;
 
@@ -133,6 +198,62 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 );
               })}
             </div>
+          </section>
+
+          <section className="flex flex-col gap-3 border-t border-border pt-5">
+            <div className="flex items-center justify-between">
+              <div className="text-caption font-medium text-text-muted">
+                {t('settings.groupShortcuts')}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  resetShortcuts();
+                  setRecording(null);
+                  setRecordError(null);
+                }}
+                className="rounded-token px-1.5 py-0.5 text-caption text-text-muted hover:text-brand"
+              >
+                {t('settings.shortcuts.reset')}
+              </button>
+            </div>
+            <div className="flex flex-col overflow-hidden rounded-card border border-border">
+              {SHORTCUT_ROWS.map(({ action, labelKey }, index) => {
+                const isRecording = recording === action;
+                return (
+                  <div
+                    key={action}
+                    className={`flex items-center justify-between gap-3 px-3.5 py-2.5 ${
+                      index > 0 ? 'border-t border-border' : ''
+                    }`}
+                  >
+                    <span className="text-body text-text">{t(labelKey)}</span>
+                    <button
+                      type="button"
+                      aria-label={t('settings.shortcuts.rebind', { action: t(labelKey) })}
+                      onClick={() => {
+                        setRecording(isRecording ? null : action);
+                        setRecordError(null);
+                      }}
+                      className={`min-w-[96px] flex-none rounded-token border px-2 py-1 text-center text-caption ${
+                        isRecording
+                          ? 'animate-pulse border-brand bg-brand/10 text-brand'
+                          : 'border-border bg-surface-muted text-text hover:border-brand hover:text-brand'
+                      }`}
+                    >
+                      {isRecording ? t('settings.shortcuts.recording') : shortcuts[action]}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {recordError ? (
+              <p className="text-caption text-error">
+                {recordError.conflictWith
+                  ? t('settings.shortcuts.error.conflict', { action: t(recordError.conflictWith) })
+                  : t(`settings.shortcuts.error.${recordError.reason}`)}
+              </p>
+            ) : null}
           </section>
 
           <section className="flex flex-col gap-3 border-t border-border pt-5">

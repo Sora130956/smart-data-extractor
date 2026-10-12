@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { ResultDetailModal } from './ResultDetailModal';
 import { exportToExcel } from '@/utils/excelExport';
+import { useUiStore } from '@/store/uiStore';
+import { DEFAULT_SHORTCUTS } from '@/utils/shortcuts';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 
 vi.mock('@/utils/excelExport', () => ({ exportToExcel: vi.fn() }));
@@ -494,6 +496,145 @@ describe('ResultDetailModal', () => {
       expect(onFieldUpdate).not.toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
       expect(screen.getByText('Acme Corp')).toBeInTheDocument();
+    });
+  });
+
+  describe('keyboard review navigation (issue #5)', () => {
+    // Two problem fields in display order: invoice_number (0.5) and
+    // vendor (0.6), both under the 0.85 default threshold. notes is exempt.
+    const twoProblemsResult: ExtractionResult = {
+      ...highConfidenceResult,
+      data: { invoice_number: 'INV-2024-001', vendor: 'Acme Corp', notes: null },
+      confidence: { invoice_number: 0.5, vendor: 0.6, notes: 0.9 },
+      avgConfidence: 0.66,
+    };
+
+    beforeEach(() => {
+      useUiStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS } });
+    });
+
+    function renderReviewModal(overrides: Partial<Parameters<typeof ResultDetailModal>[0]> = {}) {
+      const onFieldUpdate = vi.fn();
+      const onNextItem = vi.fn();
+      render(
+        <ResultDetailModal
+          source={source}
+          result={twoProblemsResult}
+          label="Text 1"
+          onClose={() => {}}
+          onFieldUpdate={onFieldUpdate}
+          onNextItem={onNextItem}
+          {...overrides}
+        />,
+      );
+      return { onFieldUpdate, onNextItem };
+    }
+
+    it('Tab in browse mode starts editing the first problem field', () => {
+      renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 'Tab' });
+
+      expect(screen.getByDisplayValue('INV-2024-001')).toBeInTheDocument();
+      expect(screen.queryByDisplayValue('Acme Corp')).not.toBeInTheDocument();
+    });
+
+    it('Tab while editing commits and moves to the next problem field', () => {
+      const { onFieldUpdate } = renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 'Tab' });
+      fireEvent.change(screen.getByDisplayValue('INV-2024-001'), { target: { value: 'FIXED-1' } });
+      fireEvent.keyDown(window, { key: 'Tab' });
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('invoice_number', 'FIXED-1');
+      // The second problem field is now being edited.
+      expect(screen.getByDisplayValue('Acme Corp')).toBeInTheDocument();
+    });
+
+    it('Shift+Tab goes back to the previous problem field, committing on the way', () => {
+      const { onFieldUpdate } = renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 'Tab' }); // → invoice_number
+      fireEvent.keyDown(window, { key: 'Tab' }); // → vendor
+      fireEvent.keyDown(window, { key: 'Tab', shiftKey: true }); // back → invoice_number
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('vendor', 'Acme Corp');
+      expect(screen.getByDisplayValue('INV-2024-001')).toBeInTheDocument();
+    });
+
+    it('Tab at the last problem field commits and returns to browse mode', () => {
+      const { onFieldUpdate } = renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 'Tab' }); // → invoice_number
+      fireEvent.keyDown(window, { key: 'Tab' }); // → vendor (last)
+      fireEvent.keyDown(window, { key: 'Tab' }); // past the end: commit, no wrap
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('vendor', 'Acme Corp');
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    });
+
+    it('Ctrl+S commits the open edit and jumps to the next document', () => {
+      const { onFieldUpdate, onNextItem } = renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 'Tab' });
+      fireEvent.change(screen.getByDisplayValue('INV-2024-001'), { target: { value: 'FIXED-9' } });
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+
+      expect(onFieldUpdate).toHaveBeenCalledWith('invoice_number', 'FIXED-9');
+      expect(onNextItem).toHaveBeenCalledTimes(1);
+    });
+
+    it('Ctrl+S in browse mode jumps without touching any field', () => {
+      const { onFieldUpdate, onNextItem } = renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+
+      expect(onFieldUpdate).not.toHaveBeenCalled();
+      expect(onNextItem).toHaveBeenCalledTimes(1);
+    });
+
+    it('honors rebound shortcuts from the settings store', () => {
+      useUiStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS, nextField: 'Ctrl+D' } });
+      renderReviewModal();
+
+      // Tab no longer navigates…
+      fireEvent.keyDown(window, { key: 'Tab' });
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+      // …the rebound combo does.
+      fireEvent.keyDown(window, { key: 'd', ctrlKey: true });
+      expect(screen.getByDisplayValue('INV-2024-001')).toBeInTheDocument();
+    });
+
+    it('Cmd+S matches Ctrl+S for mac users', () => {
+      const { onNextItem } = renderReviewModal();
+
+      fireEvent.keyDown(window, { key: 's', metaKey: true });
+
+      expect(onNextItem).toHaveBeenCalledTimes(1);
+    });
+
+    it('does nothing on Tab when the modal is view-only (no update callback)', () => {
+      render(
+        <ResultDetailModal
+          source={source}
+          result={twoProblemsResult}
+          label="Text 1"
+          onClose={() => {}}
+        />,
+      );
+
+      fireEvent.keyDown(window, { key: 'Tab' });
+
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    });
+
+    it('shows the configured combos in the footer hint', () => {
+      renderReviewModal();
+
+      expect(
+        screen.getByText(/Tab next field · Shift\+Tab previous field · Ctrl\+S save & next document/),
+      ).toBeInTheDocument();
     });
   });
 

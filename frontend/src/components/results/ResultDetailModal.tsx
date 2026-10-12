@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
+import { useUiStore } from '@/store/uiStore';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import {
   CONFIDENCE_LOW,
@@ -12,6 +13,7 @@ import { formatCost } from '@/utils/currency';
 import { exportToExcel } from '@/utils/excelExport';
 import { buildExportFilename } from '@/utils/exportFilename';
 import { problemFields, reviewState } from '@/utils/review';
+import { matchesCombo } from '@/utils/shortcuts';
 import { findFieldRanges, matchFieldBoxes } from '@/utils/textHighlight';
 import { SourcePreviewPane } from './SourcePreviewPane';
 
@@ -52,25 +54,62 @@ export interface ResultDetailModalProps {
   onClose: () => void;
   /** Reports an inline field edit (review flow). Marks the field reviewed. */
   onFieldUpdate?: (fieldKey: string, newValue: unknown) => void;
+  /** Issue #5 Ctrl+S: bring up the next document that still needs review
+   * (the caller owns the results list); a no-op closes nothing. */
+  onNextItem?: () => void;
 }
 
-export function ResultDetailModal({ source, result, label, onClose, onFieldUpdate }: ResultDetailModalProps) {
+export function ResultDetailModal({
+  source,
+  result,
+  label,
+  onClose,
+  onFieldUpdate,
+  onNextItem,
+}: ResultDetailModalProps) {
   const { t, i18n } = useTranslation();
+  const shortcuts = useUiStore((s) => s.shortcuts);
   const [copied, setCopied] = useState(false);
   // Inline editing: key of the field being edited + its working value.
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // Issue #5: keyboard cursor — index into `reviewOrder`, -1 before the
+  // first Tab/Shift+Tab press.
+  const [cursor, setCursor] = useState(-1);
   // Issue #4: locate request into the review pane; the nonce makes repeated
   // clicks on the same field re-trigger the scroll+flash.
   const [focus, setFocus] = useState<{ field: string; nonce: number } | null>(null);
 
+  // Issue #5: the review shortcuts, dispatched from one window listener so
+  // they work both in browse mode and while the edit input is focused (its
+  // keydown events bubble up here). Bindable combos never include bare
+  // printable keys (enforced at capture time in the settings), so typing in
+  // the edit input can never trigger navigation. Re-attached on every render
+  // so the handler always closes over the latest state (draft, cursor…).
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (matchesCombo(shortcuts.cancelEdit, e)) {
+        e.preventDefault();
+        // While editing: back to browse mode. Otherwise: close the dialog.
+        if (editing !== null) setEditing(null);
+        else onClose();
+        return;
+      }
+      if (matchesCombo(shortcuts.nextField, e) || matchesCombo(shortcuts.prevField, e)) {
+        const dir = matchesCombo(shortcuts.nextField, e) ? 1 : -1;
+        if (goToProblemField(dir)) e.preventDefault();
+        return;
+      }
+      if (matchesCombo(shortcuts.saveNext, e)) {
+        // Always consumed — the browser's save dialog must not open.
+        e.preventDefault();
+        commitOpenEdit();
+        onNextItem?.();
+      }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  });
 
   const entries = Object.entries(result.data ?? {});
   const nullCount = entries.filter(([, v]) => v === null || v === undefined).length;
@@ -110,9 +149,25 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
     () => matchFieldBoxes(result.data, source.pagesBlocks),
     [result.data, source.pagesBlocks],
   );
+  // Issue #5: keyboard navigation order — the problem fields (below their
+  // threshold ∪ empty-violating) in display order. Already-reviewed fields
+  // stay in the list so Shift+Tab can go back and fix a bad correction;
+  // non-editable values (arrays/objects) have no inline editor and are
+  // skipped. Empty while the modal is view-only.
+  const reviewOrder = useMemo(() => {
+    if (!onFieldUpdate) return [];
+    return Object.entries(result.data ?? {})
+      .filter(([key, value]) => reviewFieldSet.has(key) && isEditableValue(value))
+      .map(([key]) => key);
+  }, [reviewFieldSet, result.data, onFieldUpdate]);
+
   function startEdit(key: string, value: unknown) {
     setEditing(key);
     setDraft(value == null ? '' : String(value));
+    // Issue #5: a manual ✏️ click joins the keyboard flow — the cursor
+    // lands on the clicked field so Tab continues from there.
+    const idx = reviewOrder.indexOf(key);
+    if (idx >= 0) setCursor(idx);
   }
 
   /** Saves the draft: empty means null; numbers stay numeric. */
@@ -125,6 +180,35 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
     }
     onFieldUpdate(key, next);
     setEditing(null);
+  }
+
+  /** Commits the open edit in a value-aware way: boolean checkboxes apply
+   * their change on toggle, so there is no draft to save — just leave
+   * edit mode. (issue #5: shared by Tab and Ctrl+S.) */
+  function commitOpenEdit() {
+    if (editing === null) return;
+    const raw = result.data?.[editing];
+    if (typeof raw === 'boolean') {
+      setEditing(null);
+      return;
+    }
+    commitEdit(editing, raw);
+  }
+
+  /** Issue #5: move the keyboard cursor to the previous/next problem field
+   * and start editing it, committing any open edit first. Returns whether
+   * the key press was consumed — the caller then suppresses the browser's
+   * default Tab focus navigation. Clamps at both ends. */
+  function goToProblemField(dir: 1 | -1): boolean {
+    if (reviewOrder.length === 0) return false;
+    const wasEditing = editing !== null;
+    if (wasEditing) commitOpenEdit();
+    const next = cursor + dir;
+    if (next < 0 || next >= reviewOrder.length) return wasEditing;
+    const key = reviewOrder[next];
+    setCursor(next);
+    startEdit(key, result.data?.[key]);
+    return true;
   }
 
   async function handleCopy() {
@@ -279,11 +363,9 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
                         if (e.key === 'Enter') {
                           e.preventDefault();
                           commitEdit(key, value);
-                        } else if (e.key === 'Escape') {
-                          // Escape cancels the edit, not the whole dialog.
-                          e.stopPropagation();
-                          setEditing(null);
                         }
+                        // Escape / Tab / Shift+Tab / Ctrl+S are handled by
+                        // the window listener (issue #5 shortcuts).
                       }}
                       className="flex-1 rounded-token border border-brand bg-surface px-2 py-1 text-caption outline-none"
                     />
@@ -367,7 +449,20 @@ export function ResultDetailModal({ source, result, label, onClose, onFieldUpdat
         </div>
 
         <div className="mt-3.5 flex items-center gap-2 border-t border-border px-4.5 py-3.5">
-          <div className="flex-1" />
+          {/* Issue #5: discoverability for the review shortcuts, showing the
+              currently configured combos. */}
+          {onFieldUpdate ? (
+            <div className="min-w-0 flex-1 truncate text-caption text-text-muted">
+              {t('resultDetail.shortcutHint', {
+                next: shortcuts.nextField,
+                prev: shortcuts.prevField,
+                save: shortcuts.saveNext,
+                cancel: shortcuts.cancelEdit,
+              })}
+            </div>
+          ) : (
+            <div className="flex-1" />
+          )}
           <Button size="sm" onClick={onClose}>
             {t('resultDetail.close')}
           </Button>

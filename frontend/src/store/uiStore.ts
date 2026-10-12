@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import type { ResultFilter, SavedSchema, SchemaField } from '@/types/extraction';
+import {
+  DEFAULT_SHORTCUTS,
+  formatCombo,
+  parseCombo,
+  type ShortcutAction,
+  type ShortcutMap,
+} from '@/utils/shortcuts';
 
 export type Theme = 'light' | 'dark';
 export type PdfSplitMode = 'whole' | 'pages';
@@ -8,6 +15,7 @@ export const THEME_STORAGE_KEY = 'sde.theme';
 export const PDF_SPLIT_STORAGE_KEY = 'sde.pdfSplitMode';
 export const SAVED_SCHEMAS_STORAGE_KEY = 'sde.savedSchemas';
 export const PRESET_OVERRIDES_STORAGE_KEY = 'sde.presetOverrides';
+export const SHORTCUTS_STORAGE_KEY = 'sde.shortcuts';
 /** Fixed preset id for the "infer schema from text" flow (not a real backend preset). */
 export const SMART_PRESET_ID = 'smart';
 
@@ -57,6 +65,30 @@ function persistPresetOverrides(overrides: PresetOverrides) {
   localStorage.setItem(PRESET_OVERRIDES_STORAGE_KEY, JSON.stringify(overrides));
 }
 
+/** Issue #5: user-configured review shortcuts. Stored values must survive a
+ * parse check; anything malformed (or new action keys missing from older
+ * payloads) falls back to that action's default. */
+export function readInitialShortcuts(): ShortcutMap {
+  const merged: ShortcutMap = { ...DEFAULT_SHORTCUTS };
+  const stored = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
+  if (!stored) return merged;
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return merged;
+    for (const action of Object.keys(DEFAULT_SHORTCUTS) as ShortcutAction[]) {
+      const value = (parsed as Record<string, unknown>)[action];
+      if (typeof value === 'string' && parseCombo(value)) merged[action] = value;
+    }
+  } catch {
+    // malformed JSON: keep the defaults
+  }
+  return merged;
+}
+
+function persistShortcuts(shortcuts: ShortcutMap) {
+  localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(shortcuts));
+}
+
 /** Saved-template label in the current UI language: the matching language's
  * name, falling back to the other one for legacy single-name entries. */
 export function savedSchemaLabel(schema: SavedSchema, isZh: boolean): string {
@@ -85,6 +117,8 @@ interface UiState {
    * backend fields when that preset is selected and are submitted as a
    * custom schema (the backend preset id alone would ignore the edits). */
   presetOverrides: PresetOverrides;
+  /** Issue #5: review-flow keyboard shortcuts, editable in the settings. */
+  shortcuts: ShortcutMap;
   toggleTheme: () => void;
   setPreset: (preset: string) => void;
   setInstructions: (instructions: string) => void;
@@ -98,6 +132,10 @@ interface UiState {
   updateSavedSchema: (id: string, fields: SchemaField[]) => void;
   savePresetOverride: (presetId: string, fields: SchemaField[]) => void;
   clearPresetOverride: (presetId: string) => void;
+  /** Issue #5: rebind one review shortcut. Invalid combos are ignored;
+   * valid ones are canonicalized before storing. */
+  setShortcut: (action: ShortcutAction, combo: string) => void;
+  resetShortcuts: () => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -112,6 +150,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   pdfSplitMode: readInitialPdfSplitMode(),
   savedSchemas: readInitialSavedSchemas(),
   presetOverrides: readInitialPresetOverrides(),
+  shortcuts: readInitialShortcuts(),
 
   toggleTheme: () =>
     set((state) => {
@@ -166,5 +205,18 @@ export const useUiStore = create<UiState>((set, get) => ({
     delete presetOverrides[presetId];
     persistPresetOverrides(presetOverrides);
     set({ presetOverrides });
+  },
+  // Canonicalize on write so stored values always round-trip through
+  // parseCombo and conflict checks can compare strings directly.
+  setShortcut: (action, combo) => {
+    const parsed = parseCombo(combo);
+    if (!parsed) return;
+    const shortcuts = { ...get().shortcuts, [action]: formatCombo(parsed) };
+    persistShortcuts(shortcuts);
+    set({ shortcuts });
+  },
+  resetShortcuts: () => {
+    persistShortcuts({ ...DEFAULT_SHORTCUTS });
+    set({ shortcuts: { ...DEFAULT_SHORTCUTS } });
   },
 }));

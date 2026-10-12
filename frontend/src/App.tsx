@@ -21,6 +21,7 @@ import {
   applyFieldEdit,
   buildAllowEmptyFields,
   buildReviewThresholds,
+  nextPendingItem,
   reviewState,
 } from '@/utils/review';
 import type { ExtractionResult, ExtractionSource, OcrBlock, SchemaField } from '@/types/extraction';
@@ -133,6 +134,20 @@ function AppShell() {
       prev && prev.source.id === sourceId ? { ...prev, result: applyEdit(prev.result) } : prev,
     );
     updateResultField(sourceId, fieldKey, newValue);
+  }
+
+  /** Issue #5 Ctrl+S: save the open edit (the modal commits it first) and
+   * jump to the next pending result in the visible list, wrapping around
+   * once; when no other result needs review the modal simply closes. */
+  function handleNextItem() {
+    if (!selected) return;
+    const items = visibleSources.flatMap((source) =>
+      source.results.map((result, resultIndex) => ({ source, result, resultIndex })),
+    );
+    const currentIdx = items.findIndex(
+      (it) => it.source.id === selected.source.id && it.resultIndex === selected.resultIndex,
+    );
+    setSelected(nextPendingItem(items, currentIdx));
   }
 
   async function handleStart() {
@@ -427,11 +442,14 @@ function AppShell() {
 
       {selected ? (
         <ResultDetailModal
+          // Remount on document switch so edit state resets cleanly (issue #5).
+          key={`${selected.source.id}:${selected.resultIndex}`}
           source={selected.source}
           result={selected.result}
           label={t('paste.itemLabel', { index: selected.resultIndex + 1 })}
           onClose={() => setSelected(null)}
           onFieldUpdate={handleFieldUpdate}
+          onNextItem={handleNextItem}
         />
       ) : null}
 

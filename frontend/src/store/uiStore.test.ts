@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { SchemaField } from '@/types/extraction';
+import { DEFAULT_SHORTCUTS } from '@/utils/shortcuts';
 import {
   PDF_SPLIT_STORAGE_KEY,
   PRESET_OVERRIDES_STORAGE_KEY,
   readInitialPdfSplitMode,
   readInitialPresetOverrides,
   readInitialSavedSchemas,
+  readInitialShortcuts,
   savedSchemaLabel,
   SAVED_SCHEMAS_STORAGE_KEY,
+  SHORTCUTS_STORAGE_KEY,
   useUiStore,
 } from './uiStore';
 
@@ -164,5 +167,68 @@ describe('presetOverrides', () => {
     expect(useUiStore.getState().presetOverrides).toEqual({});
     const persisted = JSON.parse(localStorage.getItem(PRESET_OVERRIDES_STORAGE_KEY) ?? '{}');
     expect(persisted).toEqual({});
+  });
+});
+
+describe('shortcuts (issue #5)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUiStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS } });
+  });
+
+  it('defaults to the issue-specified combos when nothing is stored', () => {
+    expect(readInitialShortcuts()).toEqual({
+      nextField: 'Tab',
+      prevField: 'Shift+Tab',
+      saveNext: 'Ctrl+S',
+      cancelEdit: 'Escape',
+    });
+  });
+
+  it('reads stored overrides and merges them over the defaults', () => {
+    localStorage.setItem(
+      SHORTCUTS_STORAGE_KEY,
+      JSON.stringify({ nextField: 'Ctrl+D' }),
+    );
+
+    expect(readInitialShortcuts()).toEqual({ ...DEFAULT_SHORTCUTS, nextField: 'Ctrl+D' });
+  });
+
+  it('falls back per action on malformed values, bad JSON, or non-objects', () => {
+    localStorage.setItem(
+      SHORTCUTS_STORAGE_KEY,
+      JSON.stringify({ nextField: 'bogus++', prevField: 42, unknown: 'Ctrl+X' }),
+    );
+    expect(readInitialShortcuts()).toEqual({ ...DEFAULT_SHORTCUTS });
+
+    localStorage.setItem(SHORTCUTS_STORAGE_KEY, '{not valid json');
+    expect(readInitialShortcuts()).toEqual({ ...DEFAULT_SHORTCUTS });
+
+    localStorage.setItem(SHORTCUTS_STORAGE_KEY, JSON.stringify(['Tab']));
+    expect(readInitialShortcuts()).toEqual({ ...DEFAULT_SHORTCUTS });
+  });
+
+  it('setShortcut canonicalizes, updates state, and persists the whole map', () => {
+    useUiStore.getState().setShortcut('nextField', 'ctrl+d');
+
+    expect(useUiStore.getState().shortcuts.nextField).toBe('Ctrl+D');
+    const persisted = JSON.parse(localStorage.getItem(SHORTCUTS_STORAGE_KEY) ?? '{}');
+    expect(persisted).toEqual({ ...DEFAULT_SHORTCUTS, nextField: 'Ctrl+D' });
+  });
+
+  it('setShortcut ignores unparseable combos', () => {
+    useUiStore.getState().setShortcut('nextField', 'Ctrl+A+B');
+
+    expect(useUiStore.getState().shortcuts).toEqual({ ...DEFAULT_SHORTCUTS });
+    expect(localStorage.getItem(SHORTCUTS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('resetShortcuts restores and persists the defaults', () => {
+    useUiStore.getState().setShortcut('saveNext', 'Ctrl+Enter');
+    useUiStore.getState().resetShortcuts();
+
+    expect(useUiStore.getState().shortcuts).toEqual({ ...DEFAULT_SHORTCUTS });
+    const persisted = JSON.parse(localStorage.getItem(SHORTCUTS_STORAGE_KEY) ?? '{}');
+    expect(persisted).toEqual({ ...DEFAULT_SHORTCUTS });
   });
 });
