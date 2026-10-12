@@ -247,7 +247,7 @@ export function ResultDetailModal({
       <div
         role="dialog"
         aria-modal="true"
-        className="flex max-h-[90vh] w-full max-w-[1080px] overflow-hidden rounded-card border border-border bg-surface shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-[1400px] overflow-hidden rounded-card border border-border bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Issue #4: two columns — fields on the left, the original file /
@@ -471,7 +471,7 @@ export function ResultDetailModal({
           </Button>
         </div>
         </div>
-        <aside className="hidden w-[400px] flex-none border-l border-border lg:block">
+        <aside className="hidden w-[560px] flex-none border-l border-border lg:block">
           <SourcePreviewPane
             source={source}
             ranges={ranges}

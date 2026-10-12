@@ -163,3 +163,102 @@ describe('SourcePreviewPane file view (D-027)', () => {
     }
   });
 });
+
+describe('SourcePreviewPane zoom + centering (review UX)', () => {
+  /** jsdom has no layout: give the rendered page image a fake fit-width. */
+  function mockImgWidth(container: HTMLElement, width: number) {
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    Object.defineProperty(img, 'offsetWidth', { configurable: true, value: width });
+    return img as HTMLImageElement;
+  }
+
+  it('centers the page image in the pane via flex + auto margins', () => {
+    const { container } = renderPane({ source: { ...base, pageImages: ['aGk='] } });
+
+    const region = screen.getByRole('region', { name: 'Original File' });
+    // Auto-margin centering is overflow-safe: when the (zoomed) image is
+    // larger than the pane the margins collapse to 0 and scrolling works.
+    expect(region.className).toContain('flex');
+    const wrap = container.querySelector('div.relative');
+    expect(wrap?.className).toContain('m-auto');
+  });
+
+  it('zooms the page image with the wheel while the box overlay follows', () => {
+    const { container } = renderPane({
+      source: { ...base, pageImages: ['aGk='] },
+      boxes: { vendor: { page: 0, box: [10, 20, 30, 40] } },
+      editingField: 'vendor',
+    });
+    mockImgWidth(container, 400);
+
+    fireEvent.wheel(screen.getByRole('region', { name: 'Original File' }), { deltaY: -120 });
+
+    const img = container.querySelector('img');
+    expect(img).toHaveStyle({ width: '500px' }); // 400px fit-width x 1.25
+    // The percentage overlay keeps mapping 1:1 onto the enlarged image:
+    // the wrapper must grow past the pane (no max-w-full clamp) and the
+    // box stays rendered on it.
+    const wrap = container.querySelector('div.relative');
+    expect(wrap?.className).not.toContain('max-w-full');
+    expect(container.querySelector('[data-field="vendor"]')).not.toBeNull();
+  });
+
+  it('zooming back to 100% returns to the fit-width rendering', () => {
+    const { container } = renderPane({ source: { ...base, pageImages: ['aGk='] } });
+    mockImgWidth(container, 400);
+    const region = screen.getByRole('region', { name: 'Original File' });
+
+    fireEvent.wheel(region, { deltaY: -120 }); // 125%
+    fireEvent.wheel(region, { deltaY: 120 }); // back to 100%
+
+    const img = container.querySelector('img');
+    // React clears inline styles to style=""; what matters is no width.
+    expect(img?.getAttribute('style') ?? '').not.toContain('width');
+    expect(img?.className).toContain('max-w-full');
+  });
+
+  it('double-click on the image resets the zoom', () => {
+    const { container } = renderPane({ source: { ...base, pageImages: ['aGk='] } });
+    mockImgWidth(container, 400);
+    fireEvent.wheel(screen.getByRole('region', { name: 'Original File' }), { deltaY: -120 });
+
+    fireEvent.dblClick(container.querySelector('img') as HTMLImageElement);
+
+    expect(container.querySelector('img')?.getAttribute('style') ?? '').not.toContain('width');
+  });
+
+  it('switching pages resets the zoom', () => {
+    const { container } = renderPane({ source: { ...base, pageImages: ['aGk=', 'Ynk='] } });
+    mockImgWidth(container, 400);
+    fireEvent.wheel(screen.getByRole('region', { name: 'Original File' }), { deltaY: -120 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    // New page renders at its own fit width, zoom level dropped.
+    expect(container.querySelector('img')?.getAttribute('style') ?? '').not.toContain('width');
+  });
+
+  it('shows the zoom level as a button that resets it', () => {
+    const { container } = renderPane({ source: { ...base, pageImages: ['aGk='] } });
+    mockImgWidth(container, 400);
+
+    expect(screen.queryByText('125%')).not.toBeInTheDocument();
+    fireEvent.wheel(screen.getByRole('region', { name: 'Original File' }), { deltaY: -120 });
+
+    const reset = screen.getByRole('button', { name: 'Reset zoom' });
+    expect(reset).toHaveTextContent('125%');
+    fireEvent.click(reset);
+
+    expect(container.querySelector('img')?.getAttribute('style') ?? '').not.toContain('width');
+    expect(screen.queryByText('125%')).not.toBeInTheDocument();
+  });
+
+  it('the wheel does nothing on the text view (no crash, no zoom ui)', () => {
+    renderPane();
+    fireEvent.click(screen.getByRole('button', { name: 'Extracted Text' }));
+    const region = screen.getByRole('region', { name: 'Extracted Text' });
+    fireEvent.wheel(region, { deltaY: -120 });
+    expect(screen.queryByText('125%')).not.toBeInTheDocument();
+  });
+});

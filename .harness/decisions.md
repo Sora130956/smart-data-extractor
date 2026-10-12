@@ -854,3 +854,20 @@
   - 后端：[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（_normalize_image_orientation + parse_image 接入）、pyproject.toml（+pillow）
   - 验证：TDD 先红（转置 2 用例红）后绿；真实样张 IMG_20261012_171227.jpg 归一化输出 4096×1844 + orientation=1，视觉即浏览器显示方向；全量 uv run pytest -q 281 passed / 2 skipped 无回归；突变自证（orientation=8 加入透传白名单 → 1 红）后还原
   - 注意：修复只影响新解析；历史记录里的旧 boxes 仍是旧坐标，重新解析即恢复
+
+## D-038：详情弹窗预览面板加宽 + 图片居中 + 滚轮缩放（高亮框同步）
+
+- **日期**：2026-10-12
+- **状态**：已接受
+- **来源**：用户反馈——"提取结果面板需要改宽一点，增加面板面积方便对照查看原图，图片应该在面板居中展示；原图能否鼠标滚轮增大减小，高亮框需同步增大减小"
+- **决策**：
+  1. 弹窗 max-w-[1080px]→max-w-[1400px]，右侧 aside w-[400px]→w-[560px]（左栏随 flex-1 从 680 增至 840，两边都更宽松）
+  2. 原文件滚动容器改 lex flex-col + 内容包裹层 m-auto（替代 mx-auto）：垂直水平双居中；auto margin 溢出时归零退化为贴边可滚动，无 justify-center 的溢出裁剪问题
+  3. 滚轮缩放：面板内 wheel（{passive:false} 命令式绑定，React onWheel 是 passive 无法 preventDefault）→ 离散档位 20%~500%（精确往返、档位百分比友好）；zoom 作用于"fit-width 基准"（离开 100% 时捕获一次 img.offsetWidth），zoom≠1 时 img 设像素宽并去掉自身与包裹层的 max-w-full 钳制；百分比高亮框挂在包裹层上随图同步缩放（零额外计算）；双击图片或点工具栏档位按钮（如 125%）重置；换页自动重置（不同页 fit-width 不同）
+- **理由**：
+  - transform: scale 方案被否：不改变布局尺寸，溢出滚动容器不扩展，会裁剪
+  - 百分比 width 相对 w-fit 包裹层是循环依赖；像素宽基准一次捕获最简单可靠
+  - 高亮框本就是包裹层内百分比定位，天然同步——这正是当初选百分比坐标的红利
+- **影响**：
+  - 前端：SourcePreviewPane.tsx（zoom 状态/效果 + 居中 + 工具栏按钮）、ResultDetailModal.tsx（宽度）、zh/en.json（resetZoom）
+  - 验证：TDD 先红（3 失败）后绿 15/15；全量 vitest 389 passed + tsc 0 错误 + build 成功；突变自证 stepZoom 恒返 1 → 2 红后还原

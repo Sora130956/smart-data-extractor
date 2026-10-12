@@ -308,3 +308,8 @@
 - 决策：`ocr.py` 新增 `_normalize_image_orientation`——EXIF Orientation 2-8 时 `ImageOps.exif_transpose` 物理转置像素 + 按原 media_type 重编码（剥离 EXIF）后再传 glm-ocr；无标签/1 原样透传；解码失败原样透传；`parse_image` 接入，新增依赖 Pillow
 - 理由：浏览器 `<img>` 按 EXIF 旋转显示而 glm-ocr 按原始像素返回 bbox，两端坐标系不一致导致高亮框错位；后端物理转置是唯一同时满足坐标对齐且前端零改动的修复点
 - 详见 .harness/decisions.md（验证：TDD 先红后绿 +4 用例；真实样张归一化后 4096×1844/orientation=1 与浏览器显示一致；全量 281 passed / 2 skipped；突变自证 1 红后还原）
+
+### D-038: 详情弹窗预览面板加宽 + 图片居中 + 滚轮缩放
+- 决策：弹窗 max-w 1080→1400、aside 400→560；预览容器 flex flex-col + 包裹层 m-auto 双向居中（溢出安全）；wheel 离散档位缩放 20%~500%（fit-width 基准 + 像素宽 + 解除 max-w-full 钳制），高亮框百分比天然同步，双击/按钮重置、换页重置
+- 理由：对照核验需要更大预览面积；百分比高亮框挂在包裹层上随图缩放零额外计算；transform:scale 不扩展布局会裁剪溢出
+- 详见 .harness/decisions.md（验证：TDD 先红后绿 15/15；全量 vitest 389 passed + tsc 0 + build 成功；突变自证 2 红）

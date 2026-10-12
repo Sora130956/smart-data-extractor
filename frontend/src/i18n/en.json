@@ -208,7 +208,8 @@
       "noSource": "No source preview available",
       "pageOf": "Page {{page}} / {{total}}",
       "prevPage": "Previous page",
-      "nextPage": "Next page"
+      "nextPage": "Next page",
+      "resetZoom": "Reset zoom"
     },
     "editField": "Edit {{field}}",
     "reviewed": "Reviewed",

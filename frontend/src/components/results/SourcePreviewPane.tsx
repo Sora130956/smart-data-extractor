@@ -16,6 +16,16 @@ import type { FieldRange } from '@/utils/textHighlight';
 
 const FLASH_MS = 1800;
 
+// Discrete zoom levels for wheel zoom: exact round-trips (up then down
+// lands back on 100%) and friendly percentages in the toolbar button.
+const ZOOM_LEVELS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+
+function stepZoom(current: number, dir: 1 | -1): number {
+  let idx = ZOOM_LEVELS.findIndex((z) => z >= current - 1e-9);
+  if (idx === -1) idx = ZOOM_LEVELS.length - 1;
+  return ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + dir))];
+}
+
 type Tab = 'file' | 'text';
 
 type Segment = { text: string; field?: string };
@@ -59,6 +69,19 @@ export function SourcePreviewPane({
   const [flashField, setFlashField] = useState<string | null>(null);
   const activeField = editingField ?? flashField;
   const textRef = useRef<HTMLDivElement | null>(null);
+  // Wheel zoom (review UX): zoom multiplies the image's fit-width (its
+  // rendered width at 100%), captured once as the baseline when leaving
+  // 100%. Percentage boxes ride the wrapper, so they scale with it.
+  const [zoom, setZoom] = useState(1);
+  const [baseWidth, setBaseWidth] = useState<number | null>(null);
+  const fileRegionRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const zoomed = zoom !== 1 && baseWidth != null;
+
+  function resetZoom() {
+    setZoom(1);
+    setBaseWidth(null);
+  }
 
   // Pages shown in the file view: the backend's per-page renders for pdfs
   // (base64 -> data url), or the image blob url as a single page.
@@ -75,6 +98,34 @@ export function SourcePreviewPane({
   const [pageIndex, setPageIndex] = useState(0);
   // Stay in range when a rerender shrinks the page list.
   const safeIndex = Math.min(pageIndex, Math.max(pages.length - 1, 0));
+
+  // A page switch drops the zoom: the next page has its own fit-width, and
+  // a stale baseWidth would size it wrong. (Also runs on mount harmlessly.)
+  useEffect(() => {
+    resetZoom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeIndex]);
+
+  // Wheel over the file view zooms the page image instead of scrolling.
+  // Bound imperatively with { passive: false }: React attaches wheel
+  // listeners passively, and the preventDefault needs the non-passive form.
+  useEffect(() => {
+    if (tab !== 'file') return;
+    const el = fileRegionRef.current;
+    if (el == null) return;
+    function onWheel(e: WheelEvent) {
+      if (pages.length === 0) return; // iframe/legacy fallback: nothing to zoom
+      e.preventDefault();
+      const next = stepZoom(zoom, e.deltaY < 0 ? 1 : -1);
+      if (next === zoom) return;
+      if (zoom === 1 && imgRef.current != null) {
+        setBaseWidth(imgRef.current.offsetWidth); // fit-width baseline
+      }
+      setZoom(next);
+    }
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [tab, pages.length, zoom]);
 
   // Locate click: prefer the grounding box (jump to its page on the file view
   // and flash it); fall back to the text-view highlight when there is none.
@@ -193,6 +244,16 @@ export function SourcePreviewPane({
           </button>
         ) : null}
         <div className="flex-1" />
+        {tab === 'file' && zoom !== 1 ? (
+          <button
+            type="button"
+            aria-label={t('resultDetail.preview.resetZoom')}
+            onClick={resetZoom}
+            className="tnum rounded-token border border-border bg-surface px-2 py-1 text-caption font-medium text-text transition-colors hover:bg-surface-muted"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+        ) : null}
         {hasFile ? (
           <a
             href={source.sourceFileUrl}
@@ -235,14 +296,18 @@ export function SourcePreviewPane({
           <div
             role="region"
             aria-label={t('resultDetail.preview.file')}
-            className="min-h-0 flex-1 overflow-auto bg-surface-muted p-2"
+            ref={fileRegionRef}
+            className="flex min-h-0 flex-1 flex-col overflow-auto bg-surface-muted p-2"
           >
             {pages.length > 0 ? (
-              <div className="relative mx-auto w-fit max-w-full">
+              <div className={`relative m-auto w-fit${zoomed ? '' : ' max-w-full'}`}>
                 <img
+                  ref={imgRef}
                   src={pages[safeIndex]}
                   alt={source.name}
-                  className="max-w-full rounded-token border border-border bg-surface"
+                  onDoubleClick={resetZoom}
+                  style={zoomed ? { width: `${Math.round((baseWidth ?? 0) * zoom)}px` } : undefined}
+                  className={`rounded-token border border-border bg-surface${zoomed ? '' : ' max-w-full'}`}
                 />
                 {activeField != null &&
                 boxes[activeField] != null &&
