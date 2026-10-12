@@ -786,3 +786,29 @@
   - 前端：[excelExport.ts](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/utils/excelExport.ts)（`autoColumnWidths` + `textWidth` + 三个常量，`buildWorkbook` 接线）；测试 [excelExport.test.ts](file:///d:/freelancer/workspace/code/smart-data-extractor/frontend/src/utils/excelExport.test.ts) +6 用例（纯函数 5 + buildWorkbook 集成 1）
   - 纯前端改动，后端无涉；导出数据内容零变化，仅列宽样式
   - 验证：TDD 先红（6 失败：autoColumnWidths is not a function）后绿（17/17）；突变自证（CJK 记 1 → 1 红；去钳制 → 3 红，均还原后恢复全绿）；全量 vitest 375 passed（25 files）+ `tsc -b --noEmit` 0 错误 + `vite build` 成功（exceljs chunk >500kB 提示为既有）
+
+---
+
+## D-035：GLM-OCR 429 限流——进程级信号量 + 指数退避重试（Issue #13）
+
+- **日期**：2026-10-12
+- **状态**：已接受
+- **来源**：[GitHub Issue #13](https://github.com/Sora130956/smart-data-extractor/issues/13)——"上传图片、pdf，传给GLM-OCR进行解析时，如果不限流会报错：httpx.HTTPStatusError: Client error '429 Too Many Requests' for url 'https://open.bigmodel.cn/api/paas/v4/layout_parsing'"
+- **背景**：
+  - 前端 PasteTextInput 用 `Promise.all` 对每个上传文件并发发起 `/parse_pdf`/`/parse_image`，后端 `_call_glm_ocr` 裸调 `layout_parsing`，无并发控制无重试
+  - 并发请求数一旦超过智谱账号的并发额度，接口直接 429 → `raise_for_status()` 抛出 → 整份文档解析失败，多文件批量上传几乎必现
+  - 多用户同时使用（单 Render 实例）同样会触发，前端限流治标不治本
+- **决策**：
+  1. 后端单点收口：`ocr.py` 新增进程级 `asyncio.Semaphore`（`_glm_ocr_semaphore`，lru_cache，对齐 D-006 `shared_concurrency_limiter` 惯例），所有 `parse_pdf`/`parse_image` 调用共享，上限取新配置 `Settings.glm_ocr_max_concurrency`（默认 2，env `GLM_OCR_MAX_CONCURRENCY`，`max(1, ...)` 防御非法值）
+  2. 429 重试：`_post_with_retries` 循环最多 `glm_ocr_max_retries` 次重试（默认 3，env `GLM_OCR_MAX_RETRIES`），指数退避 1s/2s/4s；响应带数字型 `Retry-After` 头时优先采用（HTTP-date 形式回退指数退避）
+  3. 信号量按次获取（重试等待期间不占并发槽），避免退避期间队头阻塞其他请求
+  4. 非 429 错误（400/5xx/网络异常）维持 D-031 decision 7 语义：立即抛出、整份文档失败；重试耗尽后最后一次 429 照常抛出
+  5. `_retry_sleep` 为模块级间接缝，测试可记录退避时长而不真实等待
+- **理由（为什么不选备选方案）**：
+  - 备选 A（前端串行上传）→ 放弃：只保护单用户单页签，多用户并发仍 429；且前端无法感知账号额度
+  - 备选 B（引入 tenacity 重试库）→ 放弃：为一个循环引入新依赖，过度工程
+  - 备选 C（信号量跨重试持有）→ 放弃：退避等待占住并发槽会队头阻塞；按次获取让槽位给就绪的请求
+- **影响**：
+  - 后端：[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（`_retry_sleep`/`_glm_ocr_semaphore`/`_backoff_delay`/`_post_with_retries`，`_call_glm_ocr` 重构）；[config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/config.py)（两项新设置）
+  - 路由层零改动：`/parse_pdf`、`/parse_image` 契约不变；默认并发 2 + 重试 3 次最坏增加约 7s 延迟（相对 120s 请求超时可接受）
+  - 验证：TDD 先红（config 4 红 + ocr 3 红，缺属性/缺函数）后绿；新增 9 用例（config 4 + ocr 5：退避重试成功/Retry-After 优先/耗尽抛出/400 不重试/信号量并发峰值==2）；全量 `uv run pytest -q` 273 passed / 2 skipped（基线 264 + 9）无回归；突变自证三连（退避不增长→2 红、重试少一次→1 红、信号量上限失效→1 红）均抓红后还原恢复全绿

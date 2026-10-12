@@ -20,11 +20,21 @@ Per-page failures are tolerated: a page whose layout_details entry is
 missing or empty is skipped (its index recorded in ``pages_failed``).
 API-level failures (network error, non-2xx) raise — the whole call
 failed and the caller surfaces an error.
+
+Rate limiting (issue #13): layout_parsing answers 429 Too Many Requests
+once concurrent calls exceed the account's allowance, which a burst
+upload (the frontend fires one request per file) hits immediately. Two
+guards in ``_post_with_retries``: a process-wide semaphore caps
+in-flight calls (``GLM_OCR_MAX_CONCURRENCY``), and 429 answers are
+retried with backoff (``GLM_OCR_MAX_RETRIES``, a numeric Retry-After
+header wins over the exponential default).
 """
 
+import asyncio
 import base64
 import logging
 import re
+from functools import lru_cache
 from typing import Any
 
 import fitz
@@ -46,6 +56,10 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
 
+# 429 retry/backoff (issue #13): 1s, 2s, 4s... unless Retry-After says more.
+_RETRYABLE_STATUS_CODE = 429
+_RETRY_BASE_DELAY_SECONDS = 1.0
+
 
 def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
     """Render each page of a PDF to a PNG image (preview only, D-031)."""
@@ -60,6 +74,75 @@ def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
     return images
 
 
+async def _retry_sleep(seconds: float) -> None:
+    """Backoff wait between 429 retries.
+
+    An indirection seam (not ``asyncio.sleep`` directly) so tests can
+    observe the waited delays without slowing the suite.
+    """
+    await asyncio.sleep(seconds)
+
+
+@lru_cache(maxsize=1)
+def _glm_ocr_semaphore() -> asyncio.Semaphore:
+    """Process-wide cap on concurrent layout_parsing calls (issue #13).
+
+    Sharing one semaphore across every parse_pdf/parse_image call keeps
+    the backend within the account's concurrency allowance no matter how
+    many files clients upload at once. Mirrors the agent-layer
+    ``shared_concurrency_limiter`` pattern (D-006).
+    """
+    return asyncio.Semaphore(max(1, get_settings().glm_ocr_max_concurrency))
+
+
+def _backoff_delay(response: httpx.Response, attempt: int) -> float:
+    """Wait before the next 429 retry: a numeric Retry-After header wins,
+    otherwise exponential backoff (1s, 2s, 4s, ...)."""
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            pass  # HTTP-date form: fall through to exponential backoff
+    return _RETRY_BASE_DELAY_SECONDS * (2**attempt)
+
+
+async def _post_with_retries(
+    client: httpx.AsyncClient,
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+) -> dict[str, Any]:
+    """One layout_parsing POST, retried with backoff on 429 (issue #13).
+
+    The semaphore is acquired per attempt, so a caller waiting out its
+    backoff does not hold a concurrency slot another request could use.
+    Exhausted retries (still 429) and all other non-2xx answers raise —
+    an API-level failure fails the whole document (D-031 decision 7).
+    """
+    settings = get_settings()
+    max_retries = max(0, settings.glm_ocr_max_retries)
+    semaphore = _glm_ocr_semaphore()
+    response: httpx.Response | None = None
+    for attempt in range(max_retries + 1):
+        async with semaphore:
+            response = await client.post(url, json=payload, headers=headers)
+        if response.status_code != _RETRYABLE_STATUS_CODE:
+            break
+        if attempt == max_retries:
+            break  # retries exhausted: the raise below surfaces the 429
+        delay = _backoff_delay(response, attempt)
+        logger.warning(
+            "glm-ocr layout_parsing rate limited (429), retry %d/%d in %.1fs",
+            attempt + 1,
+            max_retries,
+            delay,
+        )
+        await _retry_sleep(delay)
+    response.raise_for_status()
+    return response.json()
+
+
 async def _call_glm_ocr(
     file_bytes: bytes,
     *,
@@ -72,8 +155,9 @@ async def _call_glm_ocr(
     a URL or a ``data:<mime>;base64,...`` data URI.
 
     ``http_client`` is an injection seam for tests (mock transport, no
-    network). Raises on network errors and non-2xx responses — an
-    API-level failure fails the whole document (D-031 decision 7).
+    network). Raises on network errors and non-2xx responses (after 429
+    retries, see ``_post_with_retries``) — an API-level failure fails
+    the whole document (D-031 decision 7).
     """
     settings = get_settings()
     url = settings.glm_base_url.rstrip("/") + "/layout_parsing"
@@ -86,12 +170,8 @@ async def _call_glm_ocr(
 
     if http_client is None:
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_SECONDS) as client:
-            response = await client.post(url, json=payload, headers=headers)
-    else:
-        response = await http_client.post(url, json=payload, headers=headers)
-
-    response.raise_for_status()
-    return response.json()
+            return await _post_with_retries(client, url, payload, headers)
+    return await _post_with_retries(http_client, url, payload, headers)
 
 
 def _extract_text_blocks(

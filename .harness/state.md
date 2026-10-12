@@ -160,6 +160,8 @@
 - [x] Issue-9（2026-10-12，D-033，字段名（JSON key）用户可编辑）：GitHub Issue #9——用户无法让输出 JSON 的 key 对齐 CRM 字段名。实现（设计规格 `docs/superpowers/specs/2026-10-12-issue9-field-name-editing-design.md`，用户逐节过审）：① SchemaEditor 常驻"字段名"列（展示名列词条改 `schema.displayName`，key 列用 `schema.fieldName`，preset 预填/新增留空自动生成/清空回 null）；② key 优先级修正——App.tsx 用户 key 永远直传（原 `!needsResolve(f)` 门控会在同时改展示名时静默丢弃 key），删 `needsResolve` 与 `originalDisplayName/originalDescription` 基线（types/usePresetSchema 同步清理），编辑展示名不再重掷 key；③ 双侧校验同一套规则（`utils/fieldName.ts` 新建 ↔ 后端 `_validate_identifier` 扩展）：snake_case 正则 + 禁 `_confidence` 后缀/Python 关键字/`model_` 前缀 + schema 内唯一，前端行内红框分文案 + `handleStart` 提交前拦截，后端 `resolve_schema` 对 caller 名 fail-fast 校验（LLM 调用前）+ caller 间查重（修复静默覆盖）→ 400；④ i18n zh/en +5 词条。测试：后端 +7（caller 非法/关键字/model_ 前缀/_confidence/重复/合法直通/生成路径关键字）、前端 +18（SchemaEditor 7 / App 3 / fieldName 8）。验证：TDD 先红后绿、突变自证（key 直传突变→1 红）；后端 264 passed / 2 skipped；前端 321/322（1 失败为 D-032 已记录既有）+ tsc 0 错误。详见 D-033
 - [x] Issue-12（2026-10-12，D-034，导出 Excel 列宽自适应）：GitHub Issue #12——列宽写死（22/16）导致窄列大量留白、宽列被截断。实现：`excelExport.ts` 新增纯函数 `autoColumnWidths(sheet)`（每列 = 表头/单元格显示宽度最大值 + 2 padding，钳制 [6, 60]；CJK/全角计 2 宽度单位，number/boolean 字符串化、null 记 0），`buildWorkbook` 接线替换写死宽度。纯前端改动。TDD 先红（6 失败）后绿（17/17）；突变自证（CJK 记 1 → 1 红；去钳制 → 3 红）；全量 vitest 375 passed（25 files）+ tsc 0 错误 + build 成功。详见 D-034
 - [x] 文档（2026-10-11）：新增 `docs/重要结论和经验/2026-10-11-从程序员到独立开发者的角色转变.md` —— 记录场景驱动开发感悟（展会/沙龙名片与签到表批量入库案例 → 场景真实性决定工具存亡 → 推导出置信度 + 复核交互两核心功能 → 后续规划：一致性采样、键盘快捷键、自定义 schema 对接 CRM），纯文档无代码改动；同日补记"转译型程序员结构性失业"判断；新增 `docs/重要结论和经验/2026-10-11-展会名片入库场景的行业数据验证.md`（名片场景行业数据：80% 线索未跟进、人工链路转化率 0.67%、$250–283/条获客成本、Zoho 四大痛点结构，验证工具存亡逻辑），两文档互相链接；新增 `docs/重要结论和经验/2026-10-11-置信度可靠性-从模型自评到校准化与一致性采样.md`（置信度技术路线学术依据：ConfBench 校准发现/OCR+Image 双模态输入优势/first-token aggregation/M-N 一致性估计/validity ladder 与 fit-val split/ECARB 复核成本指标/N=3 或 5 采样权衡 + 项目落地清单六条），与角色转变文档第四节互链
+- [x] Issue-13（2026-10-12，D-035，GLM-OCR 429 限流）：GitHub Issue #13——上传图片/PDF 传 GLM-OCR 解析时并发超限报 429 Too Many Requests。根因：前端 PasteTextInput `Promise.all` 每文件并发请求 + 后端 `_call_glm_ocr` 无限流无重试。修复（后端单点收口）：`ocr.py` 新增进程级 `asyncio.Semaphore`（`_glm_ocr_semaphore`，对齐 D-006 惯例）+ `_post_with_retries` 429 指数退避重试（1s/2s/4s，数字 `Retry-After` 优先，信号量按次获取）+ `_retry_sleep` 测试间接缝；`config.py` 新增 `glm_ocr_max_concurrency=2`/`glm_ocr_max_retries=3`（env 可调）。TDD 先红后绿：新增 9 用例（config 4 + ocr 5）；全量 273 passed / 2 skipped 无回归；突变自证三连（退避不增长/重试少一次/信号量失效）均抓红再还原
+
 ## 可视化约定（docs/view/）
 
 - `docs/view/day{N}-project-tree.html`（项目理解树）与 `day{N}-dependency-graph.html`（包依赖+调用点图）按天版本化
@@ -290,3 +292,8 @@
 - 决策：`excelExport.ts` 新增纯函数 `autoColumnWidths(sheet)`——每列宽 = 表头/单元格显示宽度最大值 + 2 padding，钳制 [6, 60]；CJK/全角字符计 2 宽度单位、number/boolean 字符串化、null 记 0；`buildWorkbook` 以此替换写死的 22/16
 - 理由：写死列宽窄列留白、宽列截断；纯函数层可脱离 ExcelJS 单测（避开 D-019 exceljs 并发 flake）；上限 60 防御超长错误串/stringify JSON 撑爆版面
 - 详见 `.harness/decisions.md`（验证：TDD 先红 6 失败后绿 17/17；突变自证 CJK 记 1→1 红、去钳制→3 红；全量 vitest 375 passed + tsc 0 错误 + build 成功）
+
+### D-035: GLM-OCR 429 限流——进程级信号量 + 指数退避重试（Issue #13）
+- 决策：ocr.py 进程级 syncio.Semaphore（默认 2，env GLM_OCR_MAX_CONCURRENCY）+ 429 指数退避重试（默认 3 次，1s/2s/4s，数字型 Retry-After 头优先，env GLM_OCR_MAX_RETRIES）；信号量按次获取不占退避等待；非 429 维持立即抛出；路由层零改动
+- 理由：前端 Promise.all 每文件并发请求 + 多用户场景超出智谱账号并发额度必现 429；后端单点收口是唯一能覆盖所有并发来源的层；前端限流/重试库/持锁退避均有明确缺陷
+- 详见 .harness/decisions.md（验证：TDD 先红后绿，新增 9 用例；全量 uv run pytest -q 273 passed / 2 skipped 无回归；突变自证三连均抓红）

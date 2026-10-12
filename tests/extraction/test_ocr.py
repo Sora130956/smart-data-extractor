@@ -1,6 +1,7 @@
 """Tests for extraction.ocr: PDF/image -> Zhipu glm-ocr layout parsing
 (D-031). Offline: httpx.MockTransport, never a real network call."""
 
+import asyncio
 import base64
 import json
 
@@ -328,3 +329,147 @@ def test_calculate_glm_ocr_cost_scales_with_tokens(fake_openai_env):
 
 def test_calculate_glm_ocr_cost_tolerates_missing_usage_fields(fake_openai_env):
     assert calculate_glm_ocr_cost({}) == 0.0
+
+
+# --- 429 rate limiting: semaphore + retry with backoff (issue #13) ---
+
+
+def _patch_sleep(monkeypatch) -> list[float]:
+    """Stub ocr_module._retry_sleep into a recorder (no real waits)."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(ocr_module, "_retry_sleep", fake_sleep)
+    return sleeps
+
+
+async def test_parse_pdf_retries_429_with_backoff_then_succeeds(
+    monkeypatch, fake_openai_env
+):
+    """A 429 from layout_parsing is retried with exponential backoff
+    until an attempt succeeds — burst uploads no longer fail the whole
+    document (issue #13)."""
+    sleeps = _patch_sleep(monkeypatch)
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    requests: list[httpx.Request] = []
+    payload = _glm_ocr_payload([[_element("text", "OK", [0.1, 0.1, 0.5, 0.2])]])
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) < 3:
+            return httpx.Response(
+                429, json={"error": {"code": "1302", "message": "并发超限"}}
+            )
+        return httpx.Response(200, json=payload)
+
+    result = await parse_pdf(
+        b"fake-pdf-bytes",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport)),
+    )
+
+    assert result["pages"] == ["OK"]
+    assert len(requests) == 3  # two 429s then success
+    assert sleeps == [1.0, 2.0]  # exponential backoff between attempts
+
+
+async def test_parse_pdf_honors_numeric_retry_after_header(monkeypatch, fake_openai_env):
+    """A numeric Retry-After on the 429 overrides the exponential default."""
+    sleeps = _patch_sleep(monkeypatch)
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    requests: list[httpx.Request] = []
+    payload = _glm_ocr_payload([[_element("text", "OK", [0.1, 0.1, 0.5, 0.2])]])
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) < 2:
+            return httpx.Response(
+                429,
+                json={"error": {"code": "1302", "message": "rate limited"}},
+                headers={"Retry-After": "7"},
+            )
+        return httpx.Response(200, json=payload)
+
+    result = await parse_pdf(
+        b"fake-pdf-bytes",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport)),
+    )
+
+    assert result["pages"] == ["OK"]
+    assert len(requests) == 2
+    assert sleeps == [7.0]
+
+
+async def test_parse_pdf_raises_429_after_retries_exhausted(
+    monkeypatch, fake_openai_env
+):
+    """Still 429 after glm_ocr_max_retries + 1 attempts -> the last 429
+    surfaces to the caller (the whole document failed, D-031 decision 7)."""
+    monkeypatch.setenv("GLM_OCR_MAX_RETRIES", "2")
+    get_settings.cache_clear()
+    sleeps = _patch_sleep(monkeypatch)
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    requests: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            429, json={"error": {"code": "1302", "message": "并发超限"}}
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await parse_pdf(b"fake-pdf-bytes", http_client=client)
+
+    assert exc_info.value.response.status_code == 429
+    assert len(requests) == 3  # 1 initial + 2 retries
+    assert sleeps == [1.0, 2.0]
+
+
+async def test_parse_pdf_does_not_retry_non_429_errors(fake_openai_env):
+    """Non-429 errors (400 bad file) fail immediately: one attempt, no backoff."""
+    requests: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(400, json={"error": {"message": "bad file"}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    with pytest.raises(httpx.HTTPStatusError):
+        await parse_pdf(b"fake-pdf-bytes", http_client=client)
+
+    assert len(requests) == 1
+
+
+async def test_glm_ocr_semaphore_caps_concurrent_layout_parsing_calls(
+    monkeypatch, fake_openai_env
+):
+    """Concurrent parse calls share one process-wide semaphore sized by
+    GLM_OCR_MAX_CONCURRENCY, keeping in-flight layout_parsing requests
+    within the account's concurrency allowance (issue #13)."""
+    monkeypatch.setenv("GLM_OCR_MAX_CONCURRENCY", "2")
+    get_settings.cache_clear()
+    ocr_module._glm_ocr_semaphore.cache_clear()
+    try:
+        payload = _glm_ocr_payload([[_element("text", "v", [0.1, 0.1, 0.5, 0.2])]])
+        in_flight = 0
+        peak = 0
+
+        async def transport(request: httpx.Request) -> httpx.Response:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)  # hold the slot so overlap is observable
+            in_flight -= 1
+            return httpx.Response(200, json=payload)
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        results = await asyncio.gather(
+            *[parse_image(b"img-bytes", http_client=client) for _ in range(5)]
+        )
+
+        assert all(r["pages"] == ["v"] for r in results)
+        assert peak == 2  # capped at the configured limit, with real overlap
+    finally:
+        ocr_module._glm_ocr_semaphore.cache_clear()

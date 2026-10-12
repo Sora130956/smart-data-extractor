@@ -164,3 +164,36 @@ def test_settings_glm_base_url_override(monkeypatch):
     monkeypatch.setenv("GLM_BASE_URL", "https://example.com/v1/")
     get_settings.cache_clear()
     assert get_settings().glm_base_url == "https://example.com/v1/"
+
+
+def test_settings_glm_ocr_max_concurrency_default(monkeypatch):
+    """glm_ocr_max_concurrency defaults to 2 (issue #13: keep concurrent
+    layout_parsing calls within the account's concurrency allowance)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_OCR_MAX_CONCURRENCY", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().glm_ocr_max_concurrency == 2
+
+
+def test_settings_glm_ocr_max_concurrency_override(monkeypatch):
+    """Test glm_ocr_max_concurrency can be overridden via GLM_OCR_MAX_CONCURRENCY."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_OCR_MAX_CONCURRENCY", "5")
+    get_settings.cache_clear()
+    assert get_settings().glm_ocr_max_concurrency == 5
+
+
+def test_settings_glm_ocr_max_retries_default(monkeypatch):
+    """glm_ocr_max_retries defaults to 3 (429 backoff attempts, issue #13)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_OCR_MAX_RETRIES", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().glm_ocr_max_retries == 3
+
+
+def test_settings_glm_ocr_max_retries_override(monkeypatch):
+    """Test glm_ocr_max_retries can be overridden via GLM_OCR_MAX_RETRIES."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_OCR_MAX_RETRIES", "5")
+    get_settings.cache_clear()
+    assert get_settings().glm_ocr_max_retries == 5
