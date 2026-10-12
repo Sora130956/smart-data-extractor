@@ -133,6 +133,37 @@ export function buildExportModel(sources: ExtractionSource[], t: TFunction): Exp
   };
 }
 
+/** ExcelJS width unit ≈ one default-font character; CJK/fullwidth glyphs
+ * occupy roughly two. Used to auto-fit columns to their content (issue #12). */
+const WIDE_CHAR = /[\u2E80-\u303F\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF\uFF00-\uFF60\uFFE0-\uFFE6]/u;
+
+function textWidth(value: CellValue): number {
+  if (value === null) return 0;
+  let width = 0;
+  for (const ch of String(value)) {
+    width += WIDE_CHAR.test(ch) ? 2 : 1;
+  }
+  return width;
+}
+
+const WIDTH_PADDING = 2; // cell inner margins + bold header slack
+const MIN_COLUMN_WIDTH = 6; // keep short columns readable
+const MAX_COLUMN_WIDTH = 60; // cap runaway content (long errors, stringified JSON)
+
+/** Issue #12: per-column width = widest of header/cells + padding, clamped to
+ * [MIN, MAX]. Pure so it stays unit-testable without ExcelJS. */
+export function autoColumnWidths(sheet: ExportSheet): number[] {
+  const widths = sheet.columns.map((header) => textWidth(header) + WIDTH_PADDING);
+  for (const row of sheet.rows) {
+    row.forEach((cell, i) => {
+      if (i < widths.length) {
+        widths[i] = Math.max(widths[i], textWidth(cell) + WIDTH_PADDING);
+      }
+    });
+  }
+  return widths.map((w) => Math.min(Math.max(w, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH));
+}
+
 export async function buildWorkbook(model: ExportModel): Promise<Workbook> {
   const { Workbook } = await import('exceljs');
   const workbook = new Workbook();
@@ -141,8 +172,9 @@ export async function buildWorkbook(model: ExportModel): Promise<Workbook> {
     ws.addRow(sheet.columns).font = { bold: true };
     for (const row of sheet.rows) ws.addRow(row);
     ws.views = [{ state: 'frozen', ySplit: 1 }];
+    const widths = autoColumnWidths(sheet);
     ws.columns.forEach((column, i) => {
-      column.width = i < 2 ? 22 : 16;
+      column.width = widths[i] ?? MIN_COLUMN_WIDTH;
     });
   }
   return workbook;

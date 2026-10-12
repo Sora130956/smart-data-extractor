@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import i18next from 'i18next';
 import '@/i18n';
 import type { useTranslation } from 'react-i18next';
-import { buildExportModel, buildWorkbook } from './excelExport';
+import { autoColumnWidths, buildExportModel, buildWorkbook } from './excelExport';
+import type { ExportSheet } from './excelExport';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
@@ -240,6 +241,55 @@ describe('buildExportModel with reviewed fields (issue #1)', () => {
   });
 });
 
+// Issue #12: exported columns must fit their content instead of fixed widths.
+describe('autoColumnWidths (issue #12)', () => {
+  it('fits each column to its widest content, header included, plus padding', () => {
+    const sheet: ExportSheet = {
+      name: 'Results',
+      columns: ['Source', 'Item', 'Note'],
+      rows: [
+        ['Invoice A', '1', 'ok'],
+        ['Lead B', '2', 'a longer note'],
+      ],
+    };
+    expect(autoColumnWidths(sheet)).toEqual([11, 6, 15]);
+  });
+
+  it('counts CJK characters as double width, mixed content included', () => {
+    const sheet: ExportSheet = {
+      name: 'S',
+      columns: ['供应商'],
+      rows: [['北京智谱'], ['Acme公司']],
+    };
+    // 供应商=6, 北京智谱=8, Acme公司=4+4=8 -> 8+2=10
+    expect(autoColumnWidths(sheet)).toEqual([10]);
+  });
+
+  it('stringifies numbers/booleans and treats null as empty', () => {
+    const sheet: ExportSheet = {
+      name: 'S',
+      columns: ['N', 'B', 'E'],
+      rows: [[12345.678, true, null]],
+    };
+    // N: max(1, 9)+2=11; B: max(1, 4)+2=6; E: max(1, 0)+2=3 -> clamped to min
+    expect(autoColumnWidths(sheet)).toEqual([11, 6, 6]);
+  });
+
+  it('clamps short columns to a minimum readable width', () => {
+    const sheet: ExportSheet = { name: 'S', columns: ['X'], rows: [['a']] };
+    expect(autoColumnWidths(sheet)).toEqual([6]);
+  });
+
+  it('caps runaway content at a maximum width', () => {
+    const sheet: ExportSheet = {
+      name: 'S',
+      columns: ['Error'],
+      rows: [['x'.repeat(200)]],
+    };
+    expect(autoColumnWidths(sheet)).toEqual([60]);
+  });
+});
+
 describe('buildWorkbook', () => {
   // exceljs buffer writes occasionally exceed the 5s default when the whole
   // suite runs in parallel (known flake, D-019) — give it headroom.
@@ -258,5 +308,15 @@ describe('buildWorkbook', () => {
 
     const buffer = await workbook.xlsx.writeBuffer();
     expect(buffer.byteLength).toBeGreaterThan(0);
+  });
+
+  it('sizes worksheet columns to their content (issue #12)', { timeout: 20000 }, async () => {
+    const model = buildExportModel([labeledSource, bareSource], t);
+    const workbook = await buildWorkbook(model);
+    const results = workbook.getWorksheet('Results')!;
+    const expected = autoColumnWidths(model.results);
+    expect(results.columns.map((c) => c.width)).toEqual(expected);
+    // Sanity: the old fixed layout was 22/16/16... — adaptive must differ.
+    expect(expected).not.toEqual(expected.map(() => 16));
   });
 });
