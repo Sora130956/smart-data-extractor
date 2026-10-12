@@ -5,6 +5,7 @@ call (one Agent run for the whole request, not one per field). When every
 field already has a known name, no call is made at all (zero cost).
 """
 
+import keyword
 import re
 from typing import Any
 
@@ -82,11 +83,22 @@ class _InferredSchema(BaseModel):
     fields: list[_InferredField]
 
 
-def _validate_identifier(name: str) -> None:
+def _validate_identifier(name: str, *, generated: bool = True) -> None:
+    """Reject names that would break ``create_dynamic_model`` or shadow its
+    auto-generated ``<name>_confidence`` twin.
+
+    Applies to both LLM-generated and caller-provided (issue #9 user-edited)
+    names: the label prefix distinguishes the two in error messages.
+    """
+    label = "Generated field name" if generated else "Field name"
     if not _IDENTIFIER_RE.match(name):
-        raise ValueError(f"Generated field name {name!r} is not a valid snake_case identifier")
+        raise ValueError(f"{label} {name!r} is not a valid snake_case identifier")
     if name.endswith("_confidence"):
-        raise ValueError(f"Generated field name {name!r} must not end with '_confidence'")
+        raise ValueError(f"{label} {name!r} must not end with '_confidence'")
+    if keyword.iskeyword(name):
+        raise ValueError(f"{label} {name!r} is a Python keyword")
+    if name.startswith("model_"):
+        raise ValueError(f"{label} {name!r} must not start with 'model_'")
 
 
 def _build_prompt(fields: list[dict[str, Any]], missing_indices: list[int]) -> str:
@@ -120,12 +132,25 @@ async def resolve_schema(
          "tokens_used": {"input": int, "output": int}, "cost_usd": float}
 
     Raises:
-        ValueError: A generated name is not a valid snake_case identifier,
-            collides with another field's name, or uses the reserved
-            "_confidence" suffix.
+        ValueError: A caller-provided or generated name is not a valid
+            snake_case identifier, is a Python keyword, uses the reserved
+            "model_" prefix or "_confidence" suffix, or collides with
+            another field's name.
     """
+    # Issue #9: caller-provided field names (user-edited JSON keys) get the
+    # same identifier checks as generated ones, plus cross-field duplicate
+    # detection — before any LLM call, so invalid requests fail for free.
+    known_names = set()
+    for f in fields:
+        name = f.get("field_name")
+        if name is None:
+            continue
+        _validate_identifier(name, generated=False)
+        if name in known_names:
+            raise ValueError(f"Field name {name!r} conflicts with another field")
+        known_names.add(name)
+
     missing_indices = [i for i, f in enumerate(fields) if f.get("field_name") is None]
-    known_names = {f["field_name"] for f in fields if f.get("field_name") is not None}
 
     generated: dict[int, _FieldNameItem] = {}
     tokens = {"input": 0, "output": 0}

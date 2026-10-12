@@ -135,6 +135,73 @@ async def test_resolve_conflict_with_known_name_raises():
         await resolve_schema(fields, model=model)
 
 
+# --- Issue #9: caller-provided field names (user-editable JSON keys) ---
+
+
+async def test_resolve_caller_invalid_identifier_raises():
+    """A caller-provided field_name that isn't snake_case fails before any LLM call."""
+    fields = [_field("Urgency Level", field_name="Urgency Level"), _field("备注")]
+
+    with pytest.raises(ValueError, match="not a valid snake_case identifier"):
+        await resolve_schema(fields)
+
+
+async def test_resolve_caller_python_keyword_rejected():
+    """A caller-provided Python keyword would break create_model -> rejected."""
+    fields = [_field("类别", field_name="class")]
+
+    with pytest.raises(ValueError, match="Python keyword"):
+        await resolve_schema(fields)
+
+
+async def test_resolve_caller_model_prefix_rejected():
+    """A caller-provided model_ prefix hits pydantic's protected namespace."""
+    fields = [_field("版本", field_name="model_version")]
+
+    with pytest.raises(ValueError, match="model_"):
+        await resolve_schema(fields)
+
+
+async def test_resolve_caller_confidence_suffix_rejected():
+    """A caller-provided _confidence suffix would shadow the auto twin field."""
+    fields = [_field("评分", field_name="score_confidence")]
+
+    with pytest.raises(ValueError, match="_confidence"):
+        await resolve_schema(fields)
+
+
+async def test_resolve_caller_duplicate_names_raise():
+    """Two caller-provided fields sharing a field_name conflict (no silent overwrite)."""
+    fields = [_field("邮箱", field_name="email"), _field("电邮", field_name="email")]
+
+    with pytest.raises(ValueError, match="conflicts"):
+        await resolve_schema(fields)
+
+
+async def test_resolve_caller_name_wins_alongside_generation():
+    """Valid caller names pass through unchanged while missing ones are generated."""
+    fields = [_field("Name", field_name="crm_contact_name"), _field("邮箱")]
+    model = TestModel(
+        custom_output_args={"fields": [{"index": 1, "field_name": "email", "display_name_en": "Email"}]}
+    )
+
+    result = await resolve_schema(fields, model=model)
+
+    assert set(result["schema"]["fields"]) == {"crm_contact_name", "email"}
+    assert result["schema"]["fields"]["crm_contact_name"]["display_name"] == "Name"
+
+
+async def test_resolve_generated_python_keyword_rejected():
+    """The extended identifier check also covers LLM-generated names."""
+    fields = [_field("类别")]
+    model = TestModel(
+        custom_output_args={"fields": [{"index": 0, "field_name": "class", "display_name_en": "Class"}]}
+    )
+
+    with pytest.raises(ValueError, match="Python keyword"):
+        await resolve_schema(fields, model=model)
+
+
 async def test_resolve_missing_generation_raises():
     """If the Agent omits an index, that field's resolution fails."""
     fields = [_field("A"), _field("B")]
