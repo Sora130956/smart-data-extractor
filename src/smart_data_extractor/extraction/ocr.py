@@ -35,10 +35,12 @@ import base64
 import logging
 import re
 from functools import lru_cache
+from io import BytesIO
 from typing import Any
 
 import fitz
 import httpx
+from PIL import Image, ImageOps
 
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction.locate import _is_valid_box, normalize_boxes
@@ -59,6 +61,57 @@ _REQUEST_TIMEOUT_SECONDS = 120.0
 # 429 retry/backoff (issue #13): 1s, 2s, 4s... unless Retry-After says more.
 _RETRYABLE_STATUS_CODE = 429
 _RETRY_BASE_DELAY_SECONDS = 1.0
+
+# EXIF Orientation tag: 1 = upright, 2-8 = rotate/flip to display upright.
+_EXIF_ORIENTATION_TAG = 274
+
+# Upload media types (routes.SUPPORTED_IMAGE_MEDIA_TYPES) -> PIL save format.
+_MEDIA_TYPE_TO_FORMAT = {
+    "image/jpeg": "JPEG",
+    "image/jpg": "JPEG",
+    "image/png": "PNG",
+    "image/bmp": "BMP",
+}
+
+
+def _normalize_image_orientation(image_bytes: bytes, media_type: str) -> bytes:
+    """Physically apply the EXIF orientation to the pixels before OCR.
+
+    Phone photos store portrait/landscape pixels plus an EXIF Orientation
+    tag; browsers honor the tag when displaying (image-orientation:
+    from-image) while glm-ocr grounds its bboxes on the raw stored pixels.
+    A rotated-phone photo therefore produced highlight boxes placed as if
+    the image were still unrotated. Transposing the pixels here (and
+    dropping the tag by re-encoding without EXIF) makes GLM's coordinate
+    frame equal the browser's display frame.
+
+    Images with no orientation tag (or orientation=1) pass through as the
+    exact original bytes — no re-encode, no quality loss. Undecodable
+    bytes also pass through untouched, so the failure mode stays "GLM
+    rejects the file", not a new error from us.
+    """
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            orientation = img.getexif().get(_EXIF_ORIENTATION_TAG)
+            if orientation in (None, 1):
+                return image_bytes
+            transposed = ImageOps.exif_transpose(img)
+            save_format = _MEDIA_TYPE_TO_FORMAT.get(media_type, img.format)
+            if transposed is None or save_format is None:
+                return image_bytes
+            save_kwargs: dict[str, Any] = {}
+            if save_format == "JPEG":
+                save_kwargs["quality"] = 95
+                if img.info.get("icc_profile"):
+                    save_kwargs["icc_profile"] = img.info["icc_profile"]
+            buf = BytesIO()
+            transposed.save(buf, format=save_format, **save_kwargs)
+            return buf.getvalue()
+    except Exception:
+        # Corrupt/unsupported image: hand the original bytes to GLM and let
+        # its error surface (same failure mode as before this normalization).
+        logger.debug("image orientation normalization skipped (undecodable bytes)")
+        return image_bytes
 
 
 def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
@@ -289,11 +342,15 @@ async def parse_image(
 ) -> dict[str, Any]:
     """OCR a single image file into a single text blob via glm-ocr.
 
-    The image bytes are sent as a ``media_type`` data URI in one call.
+    The image bytes are sent as a ``media_type`` data URI in one call,
+    after ``_normalize_image_orientation`` physically applies any EXIF
+    orientation so the grounding bboxes share the browser's display
+    frame (see that function for the misplacement bug this fixes).
     One image = one "page", so the result shape matches ``parse_pdf``;
     no preview images are returned (the frontend already holds the
     original image bytes).
     """
+    image_bytes = _normalize_image_orientation(image_bytes, media_type)
     data = await _call_glm_ocr(image_bytes, media_type=media_type, http_client=http_client)
     return _build_result(data, None)
 

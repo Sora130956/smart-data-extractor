@@ -833,3 +833,24 @@
 - **影响**：
   - 后端：[routes.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/api/routes.py)（`_ocr_http_error` + 两路由 except 分支），新增 4 路由测试；前端：errors.ts/PasteTextInput.tsx/zh.json/en.json，新增 errors 6 用例 + 组件 1 用例
   - 验证：后端全量 277 passed / 2 skipped（基线 273 + 4）；前端 382 passed（基线 375 + 7）、tsc 干净、构建成功；突变自证：后端 429 分支失效→2 红、前端 friendlyErrorKey 恒 null→3 红，均抓红后还原恢复全绿
+
+## D-037：图片 EXIF Orientation 物理归一化，修复旋转照片高亮框错位
+
+- **日期**：2026-10-12
+- **状态**：已接受
+- **来源**：用户反馈——手机竖拍照片（EXIF Orientation=8，像素 1844×4096 竖向存储）上传解析后，点击放大镜高亮框位置错位，仍是"竖图片"的坐标位置
+- **背景**：
+  - 浏览器 <img> 默认 image-orientation: from-image，按 EXIF 旋转显示（横版 4096×1844 视觉）；而 glm-ocr 忽略 EXIF、按原始竖版像素返回 bbox_2d
+  - 同一份图片字节在两个消费端解码方向不一致 → 前端把竖版坐标系的百分比叠加在横版显示上 → 高亮框错位
+- **决策**：
+  1. ocr.py 新增 _normalize_image_orientation(image_bytes, media_type)：PIL 打开读 EXIF Orientation（tag 274），值为 2-8 时 ImageOps.exif_transpose() 物理转置像素并按原 media_type 重编码（JPEG quality=95 + 保留 icc_profile；重编码不带 EXIF → 无方向歧义）；无标签/值为 1 原样透传（零重编码零质量损失）；PIL 解码失败原样透传（失败模式仍是"GLM 拒绝文件"而非新增错误）
+  2. parse_image() 在调 _call_glm_ocr 前过该函数；PDF 路径不涉及（fitz 渲染与 GLM 同按 PDF 页面坐标系）
+  3. 新增依赖 Pillow 12.3.0（uv add pillow）
+- **理由**：
+  - 前端反向旋转坐标 → 放弃：需读文件 EXIF + 4 值旋转变换 + 兼容 5-7 翻转方向，复杂脆弱且重复逻辑
+  - 只改 EXIF 字节为 1 → 放弃：GLM 与浏览器确实对齐了，但前端显示变回竖版（用户已把图转正，体验倒退）
+  - 后端物理转置是唯一同时满足"GLM 坐标系 = 浏览器显示方向"且前端零改动的位置；剥离 EXIF 后不依赖 GLM 内部 EXIF 处理行为
+- **影响**：
+  - 后端：[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（_normalize_image_orientation + parse_image 接入）、pyproject.toml（+pillow）
+  - 验证：TDD 先红（转置 2 用例红）后绿；真实样张 IMG_20261012_171227.jpg 归一化输出 4096×1844 + orientation=1，视觉即浏览器显示方向；全量 uv run pytest -q 281 passed / 2 skipped 无回归；突变自证（orientation=8 加入透传白名单 → 1 红）后还原
+  - 注意：修复只影响新解析；历史记录里的旧 boxes 仍是旧坐标，重新解析即恢复

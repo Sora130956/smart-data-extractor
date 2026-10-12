@@ -4,10 +4,12 @@
 import asyncio
 import base64
 import json
+from io import BytesIO
 
 import fitz
 import httpx
 import pytest
+from PIL import Image
 
 import smart_data_extractor.extraction.ocr as ocr_module
 from smart_data_extractor.config import get_settings
@@ -304,6 +306,105 @@ async def test_parse_image_ocrs_bytes_directly(fake_openai_env):
     assert result["pages_images"] is None
     body = json.loads(captured["request"].content)
     assert body["file"] == f"data:image/jpeg;base64,{base64.b64encode(b'jpeg-bytes').decode('ascii')}"
+
+
+# --- parse_image: EXIF orientation normalization (highlight-box misplacement) ---
+
+
+def _image_bytes(
+    format: str, width: int, height: int, orientation: int | None, color=(200, 30, 30)
+) -> bytes:
+    """A small real image carrying the given EXIF Orientation tag (274).
+
+    ``orientation=None`` writes no EXIF at all; otherwise the tag is set to
+    the given value (1 = upright, 8 = rotate 90° CCW to display, ...).
+    """
+    img = Image.new("RGB", (width, height), color=color)
+    buf = BytesIO()
+    save_kwargs = {}
+    if orientation is not None:
+        exif = Image.Exif()
+        exif[274] = orientation
+        save_kwargs["exif"] = exif
+    img.save(buf, format=format, **save_kwargs)
+    return buf.getvalue()
+
+
+def _request_file_bytes(request: httpx.Request) -> bytes:
+    """Decode the base64 payload of the captured layout_parsing request."""
+    body = json.loads(request.content)
+    header, b64 = body["file"].split(",", 1)
+    assert header.startswith("data:")
+    return base64.b64decode(b64)
+
+
+async def test_parse_image_applies_exif_orientation_before_ocr(fake_openai_env):
+    """A phone photo stores portrait pixels + EXIF Orientation (e.g. 8).
+    Browsers display the EXIF-rotated view, but glm-ocr grounds boxes on
+    the raw stored pixels — so the highlight box landed as if the image
+    were still unrotated. The fix: physically transpose the pixels (and
+    drop the orientation tag) before the call, so GLM's coordinate frame
+    equals the browser's display frame."""
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "IMG", [0.2, 0.2, 0.8, 0.8])]])
+    jpeg = _image_bytes("JPEG", 40, 20, orientation=8)
+
+    await parse_image(
+        jpeg, media_type="image/jpeg", http_client=_mock_client(payload, captured=captured)
+    )
+
+    sent = _request_file_bytes(captured["request"])
+    with Image.open(BytesIO(sent)) as img:
+        # Orientation 8 = rotate 90° CCW: 40x20 storage -> 20x40 pixels.
+        assert img.size == (20, 40)
+        # No orientation ambiguity left for any consumer downstream.
+        assert img.getexif().get(274, 1) != 8
+
+
+async def test_parse_image_passes_through_bytes_without_exif(fake_openai_env):
+    """An image without EXIF needs no re-encode: the exact original bytes
+    hit the wire (zero quality loss, zero CPU on the common path)."""
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "IMG", [0.2, 0.2, 0.8, 0.8])]])
+    jpeg = _image_bytes("JPEG", 40, 20, orientation=None)
+
+    await parse_image(
+        jpeg, media_type="image/jpeg", http_client=_mock_client(payload, captured=captured)
+    )
+
+    assert _request_file_bytes(captured["request"]) == jpeg
+
+
+async def test_parse_image_passes_through_explicit_orientation_1(fake_openai_env):
+    """Orientation=1 (upright) is already unambiguous: pass through as-is."""
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "IMG", [0.2, 0.2, 0.8, 0.8])]])
+    jpeg = _image_bytes("JPEG", 40, 20, orientation=1)
+
+    await parse_image(
+        jpeg, media_type="image/jpeg", http_client=_mock_client(payload, captured=captured)
+    )
+
+    assert _request_file_bytes(captured["request"]) == jpeg
+
+
+async def test_parse_image_transposes_png_orientation_in_png_format(fake_openai_env):
+    """The re-encode honors the upload's media type: a PNG (eXIf chunk)
+    comes back as a transposed PNG, not silently converted to JPEG."""
+    captured: dict = {}
+    payload = _glm_ocr_payload([[_element("text", "IMG", [0.2, 0.2, 0.8, 0.8])]])
+    png = _image_bytes("PNG", 40, 20, orientation=6)
+
+    await parse_image(
+        png, media_type="image/png", http_client=_mock_client(payload, captured=captured)
+    )
+
+    sent = _request_file_bytes(captured["request"])
+    assert sent.startswith(b"\x89PNG")  # still a PNG
+    with Image.open(BytesIO(sent)) as img:
+        # Orientation 6 = rotate 90° CW: 40x20 storage -> 20x40 pixels.
+        assert img.size == (20, 40)
+        assert img.getexif().get(274, 1) != 6
 
 
 # --- calculate_glm_ocr_cost ---

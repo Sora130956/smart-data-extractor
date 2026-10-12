@@ -303,3 +303,8 @@
 - 决策：路由层 `_ocr_http_error` 映射 httpx 异常（上游 429→503 ocr_rate_limited / 其他非 2xx→502 ocr_upstream_error / 网络超时→503 ocr_network_error，`{code, message}` 契约对齐 D-019）；ocr.py 保持抛 httpx 原始异常（传输层语义不变）；前端 errors.ts 组合查找 `friendlyErrorKey` + i18n `ocr.*` 中英文案，PasteTextInput 优先显示本地化提示、无映射回退原始 message
 - 理由：映射放 ocr.py 内部会破坏既有模块测试契约，路由层才是 HTTP 语义转换边界；前端按 code（而非 status）匹配更稳健；组合查找让未来新增友好错误只扩展 errors.ts 一处
 - 详见 .harness/decisions.md（验证：TDD 先红后绿，后端 +4 / 前端 +7 用例；全量后端 277 passed / 2 skipped、前端 382 passed + tsc 0 错误 + build 成功；突变自证后端 429 分支失效→2 红、前端 friendlyErrorKey 恒 null→3 红）
+
+### D-037: 图片 EXIF Orientation 物理归一化，修复旋转照片高亮框错位
+- 决策：`ocr.py` 新增 `_normalize_image_orientation`——EXIF Orientation 2-8 时 `ImageOps.exif_transpose` 物理转置像素 + 按原 media_type 重编码（剥离 EXIF）后再传 glm-ocr；无标签/1 原样透传；解码失败原样透传；`parse_image` 接入，新增依赖 Pillow
+- 理由：浏览器 `<img>` 按 EXIF 旋转显示而 glm-ocr 按原始像素返回 bbox，两端坐标系不一致导致高亮框错位；后端物理转置是唯一同时满足坐标对齐且前端零改动的修复点
+- 详见 .harness/decisions.md（验证：TDD 先红后绿 +4 用例；真实样张归一化后 4096×1844/orientation=1 与浏览器显示一致；全量 281 passed / 2 skipped；突变自证 1 红后还原）
