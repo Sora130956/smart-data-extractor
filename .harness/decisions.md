@@ -740,3 +740,31 @@
   - 代码：[locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/locate.py#L90-L131)（`normalize_boxes` 签名+逻辑）、[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（`_extract_text_blocks`/`_build_result` 透传宽高、docstring 更正、删诊断日志）、前端 `ResultDetailModal.tsx`/`SourcePreviewPane.tsx`（删诊断日志）
   - 测试：[test_locate.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_locate.py)（+3 用例）、[test_ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/tests/extraction/test_ocr.py)（+2 用例，含 `pages_dims` 测试 fixture 扩展）
   - 验证：TDD 先红后绿；后端全量 `uv run pytest` 257 passed, 2 skipped；前端 `npm run test` 303 passed（1 个既有失败经 `git stash` 核实为主干既有问题，与本次改动无关）、`npm run typecheck` 无错、`npm run build` 成功
+
+---
+
+## D-033：字段名（JSON key）用户可编辑 + 双侧标识符校验（Issue #9）
+
+- **日期**：2026-10-12
+- **状态**：已接受
+- **来源**：[GitHub Issue #9](https://github.com/Sora130956/smart-data-extractor/issues/9)——"允许用户自己定义 JSON schema，即允许编辑字段名（不是展示名），帮助用户直接导入到自己的 CRM 系统中。"；设计规格 `docs/superpowers/specs/2026-10-12-issue9-field-name-editing-design.md`（用户逐节过审）
+- **背景**：
+  - 自定义 schema 已支持（增删字段/编辑展示名/存 localStorage），但 field_name（JSON 输出的 key）不可编辑，由 LLM 生成——用户无法让输出 key 对齐 CRM 字段名
+  - 提交链路缺陷：App.tsx 仅在 `!needsResolve(f)` 时传 `field_name`，用户同时改 key 和展示名时 key 被 LLM 重新生成静默丢弃
+  - 后端校验缺口：`resolve_schema` 对 caller 提供的 field_name 只查重（caller 之间重复还会静默覆盖 `schema_fields[name]`），非法名（中文/空格/关键字/`model_` 前缀/`_confidence` 后缀）直通 `create_dynamic_model` → 500 或孪生置信度字段被覆盖（review.md R-7 记录过该类风险）
+- **决策**：
+  1. UI（用户拍板方案 A）：SchemaEditor 展示名右侧加常驻"字段名"列（130px）；preset 字段预填后端 field_name；新增字段留空 placeholder"留空自动生成"（`fieldName: null` 语义不变），清空输入回 null
+  2. key 优先级：用户填写的 key **永远**直传后端（`if (f.fieldName) field.field_name = f.fieldName`），删除 `needsResolve` 函数及其 `originalDisplayName`/`originalDescription` 基线（key 不再是 diff 对象；编辑展示名不再重掷 key，输出 key 稳定）
+  3. 校验规则前后端同一套（`utils/fieldName.ts` ↔ `_validate_identifier`）：`^[a-z][a-z0-9_]*$` + 禁 `_confidence` 后缀 + 禁 Python 关键字 + 禁 `model_` 前缀 + schema 内唯一；前端行内红框+分文案提示且 `handleStart` 开头拦截（零 LLM 成本失败），后端 `resolve_schema` 对 caller 名 fail-fast 校验（LLM 调用前）+ caller 间查重，ValueError → 400 复用既有映射
+  4. `_validate_identifier` 扩展关键字/`model_` 检查同时覆盖 LLM 生成路径（两路一致）
+  5. i18n 术语修正：原 `schema.fieldName`（"字段名"）实际标注展示名列——展示名列改用新词条 `schema.displayName`（"展示名"），`schema.fieldName` 让位给 key 列（对齐 issue 原文术语"字段名（不是展示名）"）
+- **理由（为什么不选备选方案）**：
+  - 备选 A（UI）：高级 toggle 展开 key 列 → 放弃。目标用户（CRM 导入者）反而多点一步，可发现性差
+  - 备选 B（UI）：展示名内联展开 → 放弃。交互不常规，逐字段展开繁琐
+  - 备选 C（范围）：后端 schema CRUD 持久化 → 用户明确排除（本期仅字段名编辑，localStorage 架构不变）
+  - 备选 D（防御深度）：`create_dynamic_model` 内加守卫 → 放弃。`/extract` 直传 schema 是既有 API 面、非本期引入（R-7 已记录），范围聚焦
+- **影响**：
+  - 后端：[schema_resolve.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/schema_resolve.py)（`_validate_identifier` 扩展 + caller 名 fail-fast 校验/查重）；测试 `tests/extraction/test_schema_resolve.py` +7 用例
+  - 前端：`utils/fieldName.ts`（新，校验单一真源）+ SchemaEditor（key 列 + 行内校验）+ App.tsx（key 直传 + 提交前拦截）+ types/usePresetSchema（删 needsResolve 基线）+ i18n zh/en（5 词条）；测试 SchemaEditor +7 / App +3 / fieldName +8
+  - 兼容性：D-016 快照惯例——改 key 只影响后续提取，旧批次/导出保持旧 key；Excel 列头仍展示名（non-goal）；JSON 导出天然以 field_name 为 key（CRM 诉求直接收益）
+  - 验证：TDD 先红后绿（后端 6 红→19 绿；前端 fieldName 模块缺失→8 绿）；突变自证（App key 直传改 `false &&` → 1 红再还原）；后端全量 `uv run pytest -q` 264 passed, 2 skipped；前端 `npm test` 321/322（1 失败为 D-032 已记录的既有失败，`git stash` 复核实为主干既有）+ `tsc -b --noEmit` 0 错误
