@@ -254,7 +254,7 @@ describe('F5 smart inference template name', () => {
     // EN UI: the inferred field label in the schema editor follows the UI
     // language (display_name_en), not the input text's language.
     expect(
-      (screen.getAllByRole('textbox', { name: 'Field Name' })[0] as HTMLInputElement).value,
+      (screen.getAllByRole('textbox', { name: 'Display Name' })[0] as HTMLInputElement).value,
     ).toBe('Invoice Number');
     // Same for the field description (description_en).
     expect(
@@ -343,7 +343,7 @@ describe('F5 smart inference template name', () => {
 
     // ZH UI: inferred field label comes from display_name.
     expect(
-      (screen.getAllByRole('textbox', { name: '字段名' })[0] as HTMLInputElement).value,
+      (screen.getAllByRole('textbox', { name: '展示名' })[0] as HTMLInputElement).value,
     ).toBe('发票号');
     // ZH UI: the description keeps the text-language column.
     expect(
@@ -740,5 +740,158 @@ describe('preset override submit path', () => {
     // The saved override replaces the backend preset schema on submit.
     expect(bodies[0].schema).toBeDefined();
     expect(bodies[0].preset).toBeUndefined();
+  });
+
+  it('sends the user-edited field name to /schema/resolve (issue #9)', async () => {
+    const resolveBodies: Array<{ fields: Array<Record<string, unknown>> }> = [];
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (url === '/api/schema/resolve') {
+        resolveBodies.push(JSON.parse(String(init?.body)));
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            schema: {
+              fields: {
+                crm_company: { type: 'string', description: 'The company', required: true },
+              },
+            },
+            tokens_used: { input: 10, output: 5 },
+            cost_usd: 0.0001,
+            cost_cny: 0.0007,
+          }),
+        });
+      }
+      if (url === '/api/batch_extract') {
+        return Promise.resolve({ ok: true, json: async () => batchExtractPayload('Acme Corp') });
+      }
+      if (typeof url === 'string' && url.startsWith('/api/presets/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ fields: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    useUiStore.setState({
+      presetOverrides: {
+        invoice: [
+          // The display name diverged from the preset AND the key is
+          // user-edited: the user's key must win, no LLM regeneration.
+          { displayName: '公司名', fieldName: 'crm_company', type: 'string', description: 'The company' },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('invoice.txt', 'Invoice #123 from Acme Corp')] },
+    });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+
+    await waitFor(() => expect(resolveBodies).toHaveLength(1));
+    expect(resolveBodies[0].fields[0]).toMatchObject({
+      field_name: 'crm_company',
+      display_name: '公司名',
+    });
+  });
+
+  it('blocks submission when an edited field name is invalid (issue #9)', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (typeof url === 'string' && url.startsWith('/api/presets/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ fields: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    useUiStore.setState({
+      presetOverrides: {
+        invoice: [
+          { displayName: 'Company', fieldName: 'Company Name', type: 'string', description: 'd' },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('invoice.txt', 'Invoice #123 from Acme Corp')] },
+    });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+
+    // The error surfaces both inline in the editor and in the request-error
+    // banner, and no LLM work (resolve or extract) is ever issued.
+    await waitFor(() =>
+      expect(screen.getAllByText(/Lowercase letters, digits, underscores only/).length).toBeGreaterThan(0),
+    );
+    const calledUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calledUrls).not.toContain('/api/schema/resolve');
+    expect(calledUrls).not.toContain('/api/batch_extract');
+  });
+
+  it('blocks submission when two fields share the same key (issue #9)', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/presets') {
+        return Promise.resolve({ ok: true, json: async () => PRESET_LIST });
+      }
+      if (typeof url === 'string' && url.startsWith('/api/presets/')) {
+        return Promise.resolve({ ok: true, json: async () => ({ fields: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    useUiStore.setState({
+      presetOverrides: {
+        invoice: [
+          { displayName: 'Email', fieldName: 'email', type: 'string', description: 'd' },
+          { displayName: '电邮', fieldName: 'email', type: 'string', description: 'd' },
+        ],
+      },
+    });
+
+    const user = userEvent.setup();
+    const { container } = renderApp();
+
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: 'Preset: Invoice' })).toBeInTheDocument(),
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [makeFile('invoice.txt', 'Invoice #123 from Acme Corp')] },
+    });
+    await waitFor(() => expect(screen.getByText('invoice.txt')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Start Extraction 🚀' }));
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/Duplicate field name/).length).toBeGreaterThan(0),
+    );
+    const calledUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calledUrls).not.toContain('/api/schema/resolve');
+    expect(calledUrls).not.toContain('/api/batch_extract');
   });
 });

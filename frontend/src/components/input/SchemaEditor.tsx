@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useUiStore, SMART_PRESET_ID } from '@/store/uiStore';
 import { DEFAULT_MIN_CONFIDENCE, formatConfidence } from '@/utils/confidence';
+import { fieldNameError, findDuplicateFieldNames } from '@/utils/fieldName';
 import type { SchemaField } from '@/types/extraction';
 
 const FIELD_TYPES: SchemaField['type'][] = [
@@ -52,6 +53,18 @@ function isLegacyConfidence(minConfidence: number | null | undefined): minConfid
     minConfidence != null &&
     !MIN_CONFIDENCE_TIERS.some((tier) => tier.value === minConfidence)
   );
+}
+
+/** Issue #9: i18n key for a field-name (JSON key) cell's inline error, if any.
+ * Duplicate detection runs across the whole field set; the rest are
+ * per-name checks shared with the backend's _validate_identifier. */
+function keyErrorKey(field: SchemaField, duplicates: Set<string>): string | null {
+  if (field.fieldName == null) return null;
+  if (duplicates.has(field.fieldName)) return 'schema.fieldNameDuplicate';
+  const error = fieldNameError(field.fieldName);
+  if (error === 'invalid') return 'schema.fieldNameInvalid';
+  if (error === 'reserved') return 'schema.fieldNameReserved';
+  return null;
 }
 
 export function SchemaEditor() {
@@ -131,6 +144,9 @@ export function SchemaEditor() {
     );
   }
 
+  // Issue #9: duplicate key detection spans the whole field set.
+  const duplicates = findDuplicateFieldNames(customFields);
+
   return (
     <div className="mt-3 rounded-card border border-border p-3">
       <div className="mb-2 flex items-center gap-2">
@@ -160,20 +176,38 @@ export function SchemaEditor() {
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2 text-caption font-semibold text-text-muted">
-          <span className="w-[140px] flex-none">{t('schema.fieldName')}</span>
+          <span className="w-[140px] flex-none">{t('schema.displayName')}</span>
+          <span className="w-[130px] flex-none">{t('schema.fieldName')}</span>
           <span className="w-[110px] flex-none">{t('schema.fieldType')}</span>
           <span className="w-[120px] flex-none">{t('schema.minConfidence')}</span>
           <span className="flex-1">{t('schema.fieldDescription')}</span>
           <span className="w-[20px] flex-none" />
         </div>
-        {customFields.map((field, i) => (
+        {customFields.map((field, i) => {
+          const keyError = keyErrorKey(field, duplicates);
+          return (
           <div key={i} className="flex items-center gap-2">
             <input
-              aria-label={t('schema.fieldName')}
+              aria-label={t('schema.displayName')}
               className={`${cellClass} w-[140px] flex-none`}
               value={field.displayName}
               onChange={(e) => updateField(i, { displayName: e.target.value })}
             />
+            <div className="flex w-[130px] flex-none flex-col gap-0.5">
+              <input
+                aria-label={t('schema.fieldName')}
+                aria-invalid={keyError ? true : undefined}
+                className={`${cellClass} w-full ${keyError ? 'border-error' : ''}`}
+                value={field.fieldName ?? ''}
+                placeholder={t('schema.fieldNamePlaceholder')}
+                onChange={(e) =>
+                  updateField(i, { fieldName: e.target.value.trim() || null })
+                }
+              />
+              {keyError ? (
+                <span className="text-caption leading-tight text-error">{t(keyError)}</span>
+              ) : null}
+            </div>
             <select
               aria-label={t('schema.fieldType')}
               className={`${cellClass} w-[110px] flex-none`}
@@ -218,7 +252,8 @@ export function SchemaEditor() {
               ✕
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <Button size="sm" className="mt-2" onClick={addField}>

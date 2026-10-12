@@ -30,8 +30,6 @@ export function usePresetSchema(preset: string, options?: { enabled?: boolean })
           fieldName: f.field_name,
           type: f.type as SchemaField['type'],
           description,
-          originalDisplayName: isZh ? f.display_name_zh : f.display_name_en,
-          originalDescription: description,
         };
       });
     },

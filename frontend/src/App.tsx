@@ -15,6 +15,7 @@ import { useBatchExtract } from '@/hooks/useBatchExtract';
 import { usePresetSchema } from '@/hooks/usePresetSchema';
 import { useHistoryStore, type HistoryEntry } from '@/store/historyStore';
 import { useUiStore, savedSchemaLabel, SMART_PRESET_ID } from '@/store/uiStore';
+import { fieldNameError, findDuplicateFieldNames } from '@/utils/fieldName';
 import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
 import {
   applyFieldEdit,
@@ -25,17 +26,6 @@ import {
 import type { ExtractionResult, ExtractionSource, OcrBlock, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
-
-/** §5.3: a field needs /schema/resolve when its name is unknown, or when a
- * preset field's display name/description has diverged from its baseline. */
-function needsResolve(field: SchemaField): boolean {
-  return (
-    field.fieldName === null ||
-    (field.originalDisplayName !== undefined &&
-      (field.displayName !== field.originalDisplayName ||
-        field.description !== field.originalDescription))
-  );
-}
 
 /** Restored history batches may collide with sources already on screen (same
  * ids), so they get a fresh unique suffix before being prepended. */
@@ -148,6 +138,24 @@ function AppShell() {
   async function handleStart() {
     setResolveError(null);
 
+    // Issue #9: user-edited JSON keys must be valid and unique before any
+    // LLM work — mirror the backend's _validate_identifier rules inline.
+    const duplicateNames = findDuplicateFieldNames(customFields);
+    const invalidField = customFields.find((f) => {
+      if (f.fieldName == null) return false;
+      return duplicateNames.has(f.fieldName) || fieldNameError(f.fieldName) !== null;
+    });
+    if (invalidField?.fieldName != null) {
+      setResolveError(
+        duplicateNames.has(invalidField.fieldName)
+          ? t('schema.fieldNameDuplicate')
+          : fieldNameError(invalidField.fieldName) === 'reserved'
+            ? t('schema.fieldNameReserved')
+            : t('schema.fieldNameInvalid'),
+      );
+      return;
+    }
+
     let target: { schema: Record<string, unknown> } | { preset: string };
     let schemaResolveCost: { costUsd: number; costCny: number } | undefined;
     let fieldLabels: Record<string, string> | undefined;
@@ -231,7 +239,10 @@ function AppShell() {
           description: f.description,
           type: f.type,
         };
-        if (!needsResolve(f) && f.fieldName) field.field_name = f.fieldName;
+        // Issue #9: a user-edited key always wins, even when the display
+        // name/description also changed (needsResolve) — without this the
+        // LLM would regenerate the key and silently drop the user's edit.
+        if (f.fieldName) field.field_name = f.fieldName;
         return field;
       });
 

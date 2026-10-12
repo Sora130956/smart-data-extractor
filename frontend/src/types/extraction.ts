@@ -104,7 +104,8 @@ export interface SchemaField {
   displayName: string;
   /** English label from the preset; passed to /schema/resolve when present. */
   displayNameEn?: string | null;
-  /** Real LLM schema key; null until /schema/resolve assigns one. */
+  /** JSON output key (issue #9: user-editable, mirrors the backend's
+   * identifier rules). null = auto-generate via /schema/resolve. */
   fieldName: string | null;
   type: 'string' | 'number' | 'integer' | 'boolean' | 'date';
   description: string;
@@ -114,9 +115,6 @@ export interface SchemaField {
    * Frontend-only: never sent to the backend, it does not change the LLM
    * schema. */
   minConfidence?: number | null;
-  /** Preset fields only: baseline for the needsResolve diff. */
-  originalDisplayName?: string;
-  originalDescription?: string;
 }
 
 export type PresetId = string;

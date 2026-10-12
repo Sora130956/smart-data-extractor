@@ -67,7 +67,7 @@ describe('SchemaEditor', () => {
     stubPresetSchemaFetch();
     render(<SchemaEditor />, { wrapper });
 
-    await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByLabelText('Display Name')).toHaveLength(2));
     expect(screen.getByDisplayValue('Name')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Email')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Full name of the contact person')).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe('SchemaEditor', () => {
     stubPresetSchemaFetch();
     render(<SchemaEditor />, { wrapper });
 
-    await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByLabelText('Display Name')).toHaveLength(2));
     expect(screen.queryByText('Modified')).not.toBeInTheDocument();
 
     useUiStore.getState().setCustomFields(useUiStore.getState().customFields);
@@ -91,7 +91,7 @@ describe('SchemaEditor', () => {
     stubPresetSchemaFetch();
     render(<SchemaEditor />, { wrapper });
 
-    await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByLabelText('Display Name')).toHaveLength(2));
     useUiStore
       .getState()
       .setCustomFields([{ displayName: 'custom', fieldName: null, type: 'string', description: '' }]);
@@ -156,7 +156,7 @@ describe('SchemaEditor', () => {
     stubPresetSchemaFetch();
     render(<SchemaEditor />, { wrapper });
 
-    await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByLabelText('Display Name')).toHaveLength(2));
     const edited = [
       { displayName: 'Edited', fieldName: 'name', type: 'string' as const, description: '' },
     ];
@@ -216,12 +216,106 @@ describe('SchemaEditor', () => {
     expect(useUiStore.getState().savedSchemas[0].fields).toEqual(fields);
   });
 
+  describe('field-name column (issue #9 — editable JSON keys)', () => {
+    it('prefills preset field names as editable inputs', async () => {
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      expect(screen.getAllByLabelText('Field Name')[0]).toHaveValue('name');
+      expect(screen.getAllByLabelText('Field Name')[1]).toHaveValue('email');
+    });
+
+    it('edits a field name and marks the schema modified', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      const keyInput = screen.getAllByLabelText('Field Name')[0];
+      await user.clear(keyInput);
+      await user.type(keyInput, 'crm_contact_name');
+
+      expect(useUiStore.getState().customFields[0].fieldName).toBe('crm_contact_name');
+      expect(screen.getByText('Modified')).toBeInTheDocument();
+    });
+
+    it('clearing the input returns the field to auto-generate (null)', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      await user.clear(screen.getAllByLabelText('Field Name')[0]);
+
+      expect(useUiStore.getState().customFields[0].fieldName).toBeNull();
+    });
+
+    it('shows the auto-generate placeholder for newly added fields', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      await user.click(screen.getByRole('button', { name: '+ Add Field' }));
+
+      const inputs = screen.getAllByLabelText('Field Name');
+      expect(inputs).toHaveLength(3);
+      expect(inputs[2]).toHaveValue('');
+      expect(inputs[2]).toHaveAttribute('placeholder', 'Auto if empty');
+    });
+
+    it('shows an inline error for an invalid key', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      const keyInput = screen.getAllByLabelText('Field Name')[0];
+      await user.clear(keyInput);
+      await user.type(keyInput, 'First Name');
+
+      expect(keyInput).toHaveAttribute('aria-invalid', 'true');
+      expect(
+        screen.getByText('Lowercase letters, digits, underscores only; must start with a letter'),
+      ).toBeInTheDocument();
+    });
+
+    it('shows the reserved-name error for the model_ prefix', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      const keyInput = screen.getAllByLabelText('Field Name')[0];
+      await user.clear(keyInput);
+      await user.type(keyInput, 'model_version');
+
+      expect(
+        screen.getByText(/Reserved name/),
+      ).toBeInTheDocument();
+    });
+
+    it('flags duplicate keys across fields', async () => {
+      const user = userEvent.setup();
+      stubPresetSchemaFetch();
+      render(<SchemaEditor />, { wrapper });
+
+      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      const keyInput = screen.getAllByLabelText('Field Name')[1];
+      await user.clear(keyInput);
+      await user.type(keyInput, 'name');
+
+      expect(screen.getAllByText('Duplicate field name')).toHaveLength(2);
+    });
+  });
+
   describe('min confidence column (issue #2 — preset tiers)', () => {
     it('renders one tier select per field with the Default (0.85) tier selected', async () => {
       stubPresetSchemaFetch();
       render(<SchemaEditor />, { wrapper });
 
-      await waitFor(() => expect(screen.getAllByLabelText('Field Name')).toHaveLength(2));
+      await waitFor(() => expect(screen.getAllByLabelText('Display Name')).toHaveLength(2));
       const selects = screen.getAllByLabelText('Min Confidence');
       expect(selects).toHaveLength(2);
       for (const select of selects) {
