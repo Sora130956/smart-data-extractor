@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import '@/i18n';
-import { parseImage, parsePdf } from '@/api/client';
+import { ApiError, parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { PasteTextInput, type StagedText } from './PasteTextInput';
 
@@ -220,6 +220,24 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(screen.getByText('File must be a PDF')).toBeInTheDocument());
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('shows a localized retry hint instead of the raw message on upstream ocr errors', async () => {
+    // Issue #13 follow-up: 503 {code: ocr_rate_limited} must not surface
+    // as "Internal Server Error".
+    vi.mocked(parsePdf).mockRejectedValue(
+      new ApiError('Internal Server Error', 503, 'ocr_rate_limited'),
+    );
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText(/busy right now/)).toBeInTheDocument());
+    expect(screen.queryByText('Internal Server Error')).not.toBeInTheDocument();
     expect(onAdd).not.toHaveBeenCalled();
   });
 

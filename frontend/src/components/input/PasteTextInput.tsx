@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import type { OcrBlock } from '@/types/extraction';
-import { quotaErrorCode, quotaI18nKey } from '@/utils/errors';
+import { friendlyErrorKey } from '@/utils/errors';
 
 const ACCEPT = '.txt,.pdf,.png,.jpg,.jpeg,.bmp';
 // Extensions the backend /parse_image endpoint accepts (GLM vision formats).
@@ -99,9 +99,9 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               );
             }
           } catch (err) {
-            const quota = quotaErrorCode(err);
-            const message = quota
-              ? t(quotaI18nKey(quota))
+            const key = friendlyErrorKey(err);
+            const message = key
+              ? t(key)
               : err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
           }
@@ -120,9 +120,9 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               result.pages_blocks ?? undefined,
             );
           } catch (err) {
-            const quota = quotaErrorCode(err);
-            const message = quota
-              ? t(quotaI18nKey(quota))
+            const key = friendlyErrorKey(err);
+            const message = key
+              ? t(key)
               : err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
           }

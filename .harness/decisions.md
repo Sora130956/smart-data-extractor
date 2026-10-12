@@ -812,3 +812,24 @@
   - 后端：[ocr.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/extraction/ocr.py)（`_retry_sleep`/`_glm_ocr_semaphore`/`_backoff_delay`/`_post_with_retries`，`_call_glm_ocr` 重构）；[config.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/config.py)（两项新设置）
   - 路由层零改动：`/parse_pdf`、`/parse_image` 契约不变；默认并发 2 + 重试 3 次最坏增加约 7s 延迟（相对 120s 请求超时可接受）
   - 验证：TDD 先红（config 4 红 + ocr 3 红，缺属性/缺函数）后绿；新增 9 用例（config 4 + ocr 5：退避重试成功/Retry-After 优先/耗尽抛出/400 不重试/信号量并发峰值==2）；全量 `uv run pytest -q` 273 passed / 2 skipped（基线 264 + 9）无回归；突变自证三连（退避不增长→2 红、重试少一次→1 红、信号量上限失效→1 红）均抓红后还原恢复全绿
+
+---
+
+## D-036：上游 GLM-OCR 失败的结构化友好错误映射（Issue #13 追问）
+
+- **日期**：2026-10-12
+- **状态**：已接受
+- **来源**：用户反馈——“像这种东西报错没有抛到前端吗，前端的组件直接报错了，有个组件变成了 Internal Server Error，这种得给前端友好的提示啊”
+- **背景**：
+  - `/parse_pdf`/`/parse_image` 路由只捕获 `ValueError`→400；`ocr.py` 抛出的 `httpx.HTTPStatusError`（429 重试耗尽/上游其他错误）与网络异常直接冒泡成 500，前端只能裸显 "Internal Server Error"
+  - D-035 降低了 429 出现概率，但重试耗尽/上游故障时仍需要对用户可读的提示
+- **决策**：
+  1. 后端路由层映射（`routes.py` `_ocr_http_error`）：上游 429 →503 `ocr_rate_limited`；上游其他非 2xx →502 `ocr_upstream_error`；网络/超时（`httpx.HTTPError` 家族，`HTTPStatusError` 子类优先匹配）→503 `ocr_network_error`。响应体延续 quota 卫兵的 `{code, message}` 契约（D-019），两个 parse 路由共用
+  2. 前端（`utils/errors.ts`）：新增 `ocrErrorCode`/`ocrI18nKey` （按 code 匹配，不依赖 status）与组合查找 `friendlyErrorKey`；`PasteTextInput` 两处 catch 改用之，有映射显示本地化文案，无映射回退原始 `err.message`；i18n 新增 `ocr.rateLimited`/`ocr.upstreamError`/`ocr.networkError` 中英文案
+  3. `ocr.py` 保持抛出 httpx 原始异常（传输层语义，D-031 decision 7 不变），映射只在路由边界做——与 quota 卫兵同层，职责单一
+- **理由**：
+  - 追加到 ocr.py 内部（包装成领域异常）→ 放弃：会破坏既有 ocr 模块测试契约（多个测试断言 `httpx.HTTPStatusError`），且路由层才是 HTTP 语义的正确转换边界
+  - 前端单独维护 OCR 映射表→ 采用 `friendlyErrorKey` 组合查找：组件不关心错误家族，未来新增友好错误只扩展 errors.ts 一处
+- **影响**：
+  - 后端：[routes.py](file:///d:/freelancer/workspace/code/smart-data-extractor/src/smart_data_extractor/api/routes.py)（`_ocr_http_error` + 两路由 except 分支），新增 4 路由测试；前端：errors.ts/PasteTextInput.tsx/zh.json/en.json，新增 errors 6 用例 + 组件 1 用例
+  - 验证：后端全量 277 passed / 2 skipped（基线 273 + 4）；前端 382 passed（基线 375 + 7）、tsc 干净、构建成功；突变自证：后端 429 分支失效→2 红、前端 friendlyErrorKey 恒 null→3 红，均抓红后还原恢复全绿

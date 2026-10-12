@@ -94,6 +94,11 @@
     "perIp": "You've used all free extractions allowed per visitor for today. The quota resets at 00:00 UTC.",
     "global": "This demo has used up its daily free quota. It resets at 00:00 UTC — please come back tomorrow."
   },
+  "ocr": {
+    "rateLimited": "The document parsing service is busy right now. Please wait a moment and try again.",
+    "upstreamError": "The document parsing service failed to process this file. Please try again later.",
+    "networkError": "Could not reach the document parsing service. Please try again later."
+  },
   "schema": {
     "loading": "Loading…",
     "title": "Extraction Fields",

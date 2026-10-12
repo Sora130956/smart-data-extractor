@@ -161,6 +161,7 @@
 - [x] Issue-12（2026-10-12，D-034，导出 Excel 列宽自适应）：GitHub Issue #12——列宽写死（22/16）导致窄列大量留白、宽列被截断。实现：`excelExport.ts` 新增纯函数 `autoColumnWidths(sheet)`（每列 = 表头/单元格显示宽度最大值 + 2 padding，钳制 [6, 60]；CJK/全角计 2 宽度单位，number/boolean 字符串化、null 记 0），`buildWorkbook` 接线替换写死宽度。纯前端改动。TDD 先红（6 失败）后绿（17/17）；突变自证（CJK 记 1 → 1 红；去钳制 → 3 红）；全量 vitest 375 passed（25 files）+ tsc 0 错误 + build 成功。详见 D-034
 - [x] 文档（2026-10-11）：新增 `docs/重要结论和经验/2026-10-11-从程序员到独立开发者的角色转变.md` —— 记录场景驱动开发感悟（展会/沙龙名片与签到表批量入库案例 → 场景真实性决定工具存亡 → 推导出置信度 + 复核交互两核心功能 → 后续规划：一致性采样、键盘快捷键、自定义 schema 对接 CRM），纯文档无代码改动；同日补记"转译型程序员结构性失业"判断；新增 `docs/重要结论和经验/2026-10-11-展会名片入库场景的行业数据验证.md`（名片场景行业数据：80% 线索未跟进、人工链路转化率 0.67%、$250–283/条获客成本、Zoho 四大痛点结构，验证工具存亡逻辑），两文档互相链接；新增 `docs/重要结论和经验/2026-10-11-置信度可靠性-从模型自评到校准化与一致性采样.md`（置信度技术路线学术依据：ConfBench 校准发现/OCR+Image 双模态输入优势/first-token aggregation/M-N 一致性估计/validity ladder 与 fit-val split/ECARB 复核成本指标/N=3 或 5 采样权衡 + 项目落地清单六条），与角色转变文档第四节互链
 - [x] Issue-13（2026-10-12，D-035，GLM-OCR 429 限流）：GitHub Issue #13——上传图片/PDF 传 GLM-OCR 解析时并发超限报 429 Too Many Requests。根因：前端 PasteTextInput `Promise.all` 每文件并发请求 + 后端 `_call_glm_ocr` 无限流无重试。修复（后端单点收口）：`ocr.py` 新增进程级 `asyncio.Semaphore`（`_glm_ocr_semaphore`，对齐 D-006 惯例）+ `_post_with_retries` 429 指数退避重试（1s/2s/4s，数字 `Retry-After` 优先，信号量按次获取）+ `_retry_sleep` 测试间接缝；`config.py` 新增 `glm_ocr_max_concurrency=2`/`glm_ocr_max_retries=3`（env 可调）。TDD 先红后绿：新增 9 用例（config 4 + ocr 5）；全量 273 passed / 2 skipped 无回归；突变自证三连（退避不增长/重试少一次/信号量失效）均抓红再还原
+- [x] Issue-13 追问（2026-10-12，D-036，上游 OCR 错误友好提示）：用户反馈上游报错在前端裸显 "Internal Server Error"。修复：`routes.py` 新增 `_ocr_http_error` 映射（上游 429→503 `ocr_rate_limited`、上游其他非 2xx→502 `ocr_upstream_error`、网络/超时→503 `ocr_network_error`，`{code, message}` 契约对齐 D-019 quota 卫兵），两个 parse 路由捕获 `httpx.HTTPError`；前端 `errors.ts` 新增 `ocrErrorCode`/`ocrI18nKey`/`friendlyErrorKey` 组合查找，PasteTextInput 两处 catch 改用之，i18n 中英新增 `ocr.*` 三条文案。后端 277 passed / 2 skipped（+4 路由用例）；前端 382 passed（+7）、tsc 干净、构建成功；突变自证（后端 429 分支失效→2 红、前端 friendlyErrorKey 恒 null→3 红）均抓红再还原
 
 ## 可视化约定（docs/view/）
 
@@ -294,6 +295,11 @@
 - 详见 `.harness/decisions.md`（验证：TDD 先红 6 失败后绿 17/17；突变自证 CJK 记 1→1 红、去钳制→3 红；全量 vitest 375 passed + tsc 0 错误 + build 成功）
 
 ### D-035: GLM-OCR 429 限流——进程级信号量 + 指数退避重试（Issue #13）
-- 决策：ocr.py 进程级 syncio.Semaphore（默认 2，env GLM_OCR_MAX_CONCURRENCY）+ 429 指数退避重试（默认 3 次，1s/2s/4s，数字型 Retry-After 头优先，env GLM_OCR_MAX_RETRIES）；信号量按次获取不占退避等待；非 429 维持立即抛出；路由层零改动
+- 决策：ocr.py 进程级 asyncio.Semaphore（默认 2，env GLM_OCR_MAX_CONCURRENCY）+ 429 指数退避重试（默认 3 次，1s/2s/4s，数字型 Retry-After 头优先，env GLM_OCR_MAX_RETRIES）；信号量按次获取不占退避等待；非 429 维持立即抛出；路由层零改动
 - 理由：前端 Promise.all 每文件并发请求 + 多用户场景超出智谱账号并发额度必现 429；后端单点收口是唯一能覆盖所有并发来源的层；前端限流/重试库/持锁退避均有明确缺陷
 - 详见 .harness/decisions.md（验证：TDD 先红后绿，新增 9 用例；全量 uv run pytest -q 273 passed / 2 skipped 无回归；突变自证三连均抓红）
+
+### D-036: 上游 GLM-OCR 失败的结构化友好错误映射（Issue #13 追问）
+- 决策：路由层 `_ocr_http_error` 映射 httpx 异常（上游 429→503 ocr_rate_limited / 其他非 2xx→502 ocr_upstream_error / 网络超时→503 ocr_network_error，`{code, message}` 契约对齐 D-019）；ocr.py 保持抛 httpx 原始异常（传输层语义不变）；前端 errors.ts 组合查找 `friendlyErrorKey` + i18n `ocr.*` 中英文案，PasteTextInput 优先显示本地化提示、无映射回退原始 message
+- 理由：映射放 ocr.py 内部会破坏既有模块测试契约，路由层才是 HTTP 语义转换边界；前端按 code（而非 status）匹配更稳健；组合查找让未来新增友好错误只扩展 errors.ts 一处
+- 详见 .harness/decisions.md（验证：TDD 先红后绿，后端 +4 / 前端 +7 用例；全量后端 277 passed / 2 skipped、前端 382 passed + tsc 0 错误 + build 成功；突变自证后端 429 分支失效→2 红、前端 friendlyErrorKey 恒 null→3 红）

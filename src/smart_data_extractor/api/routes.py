@@ -9,6 +9,7 @@ import hmac
 from functools import lru_cache
 from typing import Any, Callable
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 
 from smart_data_extractor.api.quota import DailyQuota
@@ -41,6 +42,46 @@ router = APIRouter()
 def _to_cny(usd: float) -> float:
     """Convert a USD cost to CNY for display (approximate static rate)."""
     return round(usd * get_settings().usd_to_cny, 6)
+
+
+def _ocr_http_error(exc: httpx.HTTPError) -> HTTPException:
+    """Map an upstream GLM-OCR failure to a structured, localizable HTTP
+    error (same {code, message} contract as the quota guard, D-019) —
+    never a raw 500 Internal Server Error for the UI to choke on.
+
+    - upstream 429 (retries exhausted, issue #13) -> 503 ocr_rate_limited
+    - any other upstream non-2xx -> 502 ocr_upstream_error
+    - network/timeout failures -> 503 ocr_network_error
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 429:
+            return HTTPException(
+                503,
+                detail={
+                    "code": "ocr_rate_limited",
+                    "message": (
+                        "The document parsing service is busy right now. "
+                        "Please wait a moment and try again."
+                    ),
+                },
+            )
+        return HTTPException(
+            502,
+            detail={
+                "code": "ocr_upstream_error",
+                "message": (
+                    "The document parsing service failed to process this "
+                    "file. Please try again later."
+                ),
+            },
+        )
+    return HTTPException(
+        503,
+        detail={
+            "code": "ocr_network_error",
+            "message": "Could not reach the document parsing service. Please try again later.",
+        },
+    )
 
 
 def get_extract_fn() -> Callable[..., Any]:
@@ -245,6 +286,9 @@ async def parse_pdf_route(
         result = await fn(pdf_bytes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        # Upstream GLM-OCR failure: structured, localizable error (D-035).
+        raise _ocr_http_error(exc) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 
 
@@ -268,5 +312,8 @@ async def parse_image_route(
         result = await fn(image_bytes, media_type=media_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        # Upstream GLM-OCR failure: structured, localizable error (D-035).
+        raise _ocr_http_error(exc) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
 

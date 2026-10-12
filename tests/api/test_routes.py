@@ -565,6 +565,64 @@ async def test_parse_pdf_value_error_becomes_400(app, client):
     assert "broken pdf" in resp.json()["detail"]
 
 
+def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
+    """An httpx.HTTPStatusError as raised by ocr.py after retries (issue #13)."""
+    request = httpx.Request("POST", "https://open.bigmodel.cn/api/paas/v4/layout_parsing")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError(
+        f"Client error '{status_code} Too Many Requests'", request=request, response=response
+    )
+
+
+# Upstream GLM-OCR failures must surface as structured, localizable errors —
+# not a raw 500 Internal Server Error (issue #13 friendly-error follow-up).
+
+
+async def test_parse_pdf_upstream_429_becomes_503_rate_limited(app, client):
+    fake, _ = _make_fake_parse_pdf(fail_with=_http_status_error(429))
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
+    )
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail["code"] == "ocr_rate_limited"
+    assert detail["message"]
+
+
+async def test_parse_pdf_upstream_error_becomes_502(app, client):
+    fake, _ = _make_fake_parse_pdf(fail_with=_http_status_error(500))
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
+    )
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert detail["code"] == "ocr_upstream_error"
+    assert detail["message"]
+
+
+async def test_parse_pdf_network_error_becomes_503(app, client):
+    fake, _ = _make_fake_parse_pdf(fail_with=httpx.ConnectError("connection refused"))
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_pdf",
+        files={"file": ("doc.pdf", b"%PDF-1.4 fake bytes", "application/pdf")},
+    )
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail["code"] == "ocr_network_error"
+    assert detail["message"]
+
+
 # --- /parse_image ---
 
 
@@ -638,6 +696,21 @@ async def test_parse_image_value_error_becomes_400(app, client):
 
     assert resp.status_code == 400
     assert "broken image" in resp.json()["detail"]
+
+
+async def test_parse_image_upstream_429_becomes_503_rate_limited(app, client):
+    fake, _ = _make_fake_parse_image(fail_with=_http_status_error(429))
+    app.dependency_overrides[get_parse_image_fn] = lambda: fake
+
+    resp = await client.post(
+        "/parse_image",
+        files={"file": ("scan.png", b"fake png bytes", "image/png")},
+    )
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail["code"] == "ocr_rate_limited"
+    assert detail["message"]
 
 
 # --- /parse_pdf page images (issue #4 review-pane overlay) ---
