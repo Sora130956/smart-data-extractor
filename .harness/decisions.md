@@ -871,3 +871,123 @@
 - **影响**：
   - 前端：SourcePreviewPane.tsx（zoom 状态/效果 + 居中 + 工具栏按钮）、ResultDetailModal.tsx（宽度）、zh/en.json（resetZoom）
   - 验证：TDD 先红（3 失败）后绿 15/15；全量 vitest 389 passed + tsc 0 错误 + build 成功；突变自证 stepZoom 恒返 1 → 2 红后还原
+
+## D-039：推广准备——限额放宽至 200/5000 + USAGE 结构化日志（流量可统计）
+
+- **日期**：2026-10-14
+- **状态**：已接受
+- **来源**：用户需求——"将单个 IP 的每日限额放宽到 200 条，整个系统的整体限流放宽到 5000 条；项目部署到了 Render，不久后要推广，想通过日志记录有多少人使用了多少次这个工具"
+- **决策**：
+  1. 限额：`config.py` 默认值 `daily_quota_per_ip` 50→200、`daily_quota_global` 1000→5000；`render.yaml` 显式值同步（"200"/"5000"）；README 环境变量表与 test_quota 默认值断言同步
+  2. 结构化使用日志：`DailyQuota.spend` 每次扣减输出一条 INFO——成功 `USAGE ip=%s endpoint=%s units=%d`（units 覆盖 batch_extract 的多文本计费）、被拒 `USAGE_REJECTED … reason=per_ip|global`（被限额挡掉的需求也是推广数据）；日志在配额模块收口，天然覆盖全部 LLM 消耗端点（extract/batch_extract/schema_*/parse_*）
+  3. 日志可见性：`api/__init__.py` lifespan 内 `logging.basicConfig(level=INFO)`——uvicorn 只给自家 "uvicorn.*" logger 挂 handler，应用 logger 的 INFO 会因 root 无 handler 被丢弃；basicConfig 在测试中不执行（ASGITransport 跳过 lifespan），不影响 caplog
+- **理由**：
+  - 内存计数器重启/部署即清零（D-019 已知缺陷），"多少人 × 多少次"的推广统计必须依赖部署无关的记录 → 日志行是最低成本方案（无需持久化磁盘/外部服务）
+  - key=value 格式可在 Render 日志面板直接 grep "USAGE"；uvicorn access log 虽含 IP 但混入静态资源/health 噪声且无 batch units，不可直接当使用量统计
+  - 免费版 Render 日志保留很短（约 1 天）→ 推广期间需每日查看/复制统计；实时当日数据继续走既有 `GET /stats?token=…`（unique_ips/per_endpoint/global_used）
+- **影响**：
+  - 后端：config.py、api/quota.py、api/__init__.py、render.yaml、README.md
+  - 验证：TDD 先红（2 用例红：USAGE/USAGE_REJECTED 均无输出）后绿；全量 uv run pytest -q 296 passed / 2 skipped 无回归
+
+## D-040：用户反馈邮件通道（POST /feedback → QQ SMTP）+ 前端清空按钮
+
+- **日期**：2026-10-14
+- **状态**：已接受
+- **来源**：用户需求——"在导出按钮旁加一个清空按钮，清空当前所有提取结果并记录到历史记录中；在设置按钮旁加一个问题反馈按钮，反馈的问题直接发到我的邮箱 1309564814@qq.com"
+- **决策**：
+  1. 后端 `POST /feedback`：`FeedbackRequest`（message 1~2000 且非空白、contact ≤200 可选，pydantic 校验 422）；`api/feedback.py` 用 stdlib smtplib 经 `smtp.qq.com:465` SSL 发信（零新依赖），收件人 `feedback_to_email` 默认 1309564814@qq.com（pyproject 作者字段已公开该邮箱）；`FEEDBACK_SMTP_USER`/`FEEDBACK_SMTP_PASSWORD` 未配置 → 503 `feedback_not_configured`，SMTP 失败 → 502 `feedback_send_failed`；阻塞发送走 `run_in_threadpool`
+  2. 反馈独立限流 `get_feedback_quota`（默认 10/IP/天 + 全站 100/天，env 可调 `FEEDBACK_QUOTA_*`），与提取配额互不占用；429 重标 code 为 `feedback_quota` 让前端与提取限额文案区分；到达日志只记 `FEEDBACK ip=… chars=…` 不记内容（发件人隐私）
+  3. 前端反馈：Header 设置按钮后新增「问题反馈」→ `FeedbackModal`（textarea + 可选联系方式、空白禁发、trim 后发送、成功态 ✓、失败本地化文案 errorQuota/errorNotConfigured/errorSendFailed/errorGeneric、Escape/遮罩关闭、重开重置草稿）
+  4. 前端清空：ResultsHeader 导出按钮旁新增「清空」→ App 传 `onClear={() => setSources([])}` 只清屏幕。批次在提取完成时已自动 addHistoryEntry 归档（historyStore），复核编辑也经 updateResultField 实时同步——清屏无数据丢失，故不重复写历史（避免每次清空产生整批重复条目）
+- **理由**：
+  - 反馈直达邮箱：演示推广期最低摩擦的客服通道，QQ 邮箱授权码（设置→账户→开启 SMTP）+ smtplib 零成本；mailTo 方案依赖访客本机邮件客户端不可靠，第三方表单服务引入外部依赖
+  - 清空语义：屏幕上的批次必然已在历史（onSuccess 即归档），"记录到历史记录"由既有自动归档满足；重复归档会让历史面板每次清空翻倍污染
+  - 反馈限流必须独立：无鉴权端点直连站长邮箱，可伪造 XFF 的场景下全站 100/天上限是邮箱轰炸的唯一护栏
+- **影响**：
+  - 后端：config.py、api/feedback.py（新）、api/schemas.py、api/routes.py、tests/api/test_feedback.py（新，13 用例：DI fake 投递 + smtplib 边界假件 + 限流/422/503/502 + 隐私断言"内容不入日志"）、conftest.py（清 get_feedback_quota 缓存）、render.yaml
+  - 前端：client.ts/schemas.ts（sendFeedback + zod）、components/feedback/FeedbackModal.tsx（新）+ 测试（5 用例）、Header.tsx、ResultsHeader.tsx/App.tsx + 测试（4 用例）、zh/en.json
+  - 验证：TDD 先红后绿；全量后端 296 passed / 2 skipped、前端 vitest 396 passed + tsc 0 错误 + build 成功
+  - 部署注意：Render Dashboard 需补 `FEEDBACK_SMTP_USER`（QQ 邮箱地址）与 `FEEDBACK_SMTP_PASSWORD`（授权码，非 QQ 密码），否则反馈按钮返回 503 通道未开放
+
+## D-041：导出简化——Excel 去掉「（原始）」伴随列，JSON 只导出结果数组
+
+- **日期**：2026-10-14
+- **状态**：已接受（部分替代 Issue #1 的导出伴随列设计）
+- **来源**：用户需求——"导出的 excel 不需要（原始）后缀列，以修改后的数据为准；导出的 JSON 只导出一个数组保存所有结果"
+- **决策**：
+  1. Excel：`buildExportModel` 删除 reviewedKeys/fieldColumns 伴随列逻辑——每个字段单列，直接导出修正后的 `data`；`originalData` 仍保留在数据模型中（详情弹窗「原始值」展示 + 历史存档用），仅不再进导出；删除无引用的 i18n key `excel.originalColumn`（zh/en）；详情弹窗的单结果导出同函数受益，行为一致
+  2. JSON：`handleExportAll` 从导出整个 `sources`（含 confidence/reviewedFields/blob URL/stats 等界面元数据）改为只导出 `result.data` 的扁平数组——每个成功结果一个对象，失败项无 data 跳过；文件名规则不变
+- **理由**：
+  - 导出物面向最终交付/二次处理，用户只关心修正后的结果值；原始值对照是界面内复核功能，不该混入交付文件
+  - 整包 sources 导出把 blob URL、内部状态、计费统计暴露给用户，既冗余又易误导（blob URL 离开会话即失效）
+- **影响**：
+  - 前端：utils/excelExport.ts、components/results/ResultsHeader.tsx、types/extraction.ts（注释修正）、zh/en.json（删 originalColumn）
+  - 测试：excelExport.test.ts（reviewed describe 重写为"无伴随列+修正值"）、ResultsHeader.test.tsx（JSON 用例改为断言 stringify 载荷 `[{vendor}]`——jsdom Blob 无 .text()，经 JSON.stringify spy 断言）
+  - 验证：导出相关 77/77；全量 vitest 396 passed + tsc 0 错误
+
+## D-042：Excel 成本列币种跟随界面语言（zh→CNY，en→USD）
+
+- **日期**：2026-10-14
+- **状态**：已接受（D-041 的补充）
+- **决策**：`buildExportModel` / `exportToExcel` 新增 `language` 参数（调用方传 `i18n.language`），`zh*` 时表头用 `excel.costCny`（"成本 (CNY)"）并导出 `result.costCny`，否则保持 `excel.costUsd` + `result.costUsd`；ResultsHeader 批量导出与 ResultDetailModal 单条导出两处调用点同步
+- **理由**：成本列面向用户交付，中文用户看人民币、英文用户看美元；两个币种值在提取时已由后端换算好，前端只做选择不做换算
+- **影响**：utils/excelExport.ts、ResultsHeader.tsx、ResultDetailModal.tsx、zh/en.json（新增 excel.costCny）；测试 +2（en 断言 USD、zh 断言 CNY 表头与值）；全量 vitest 398 passed + tsc 0
+
+## D-043：GLM-OCR 请求频率限流——请求发起节奏 pacer + AIMD 自适应（Issue #13 追增量）
+
+- **日期**：2026-10-15
+- **状态**：已接受（D-035 的补全）
+- **来源**：用户反馈——"同时传入 20 个名片进行 glm-ocr 解析，还是触发了限流（429 retry 2/3）"；浏览器直接打开 layout_parsing 链接报 1001 未鉴权为无关红鲱鱼（浏览器 GET 不带 Authorization 头；429 本身即证明后端鉴权通过）
+- **背景**：
+  - D-035 的进程级信号量只限制**同时在途**请求数（默认 2），但智谱 1302/429 是**请求频率**限制（官方错误码表原文"您的账户已达到速率限制，请您控制请求频率"）
+  - 名片类小图 1-2s 即完成，2 并发稳态可打出 ~60-120 请求/分钟，超过账号 RPM 额度 → 429 依旧；重试机制在吸收（日志可见 retry 后成功），但治标不治本，批量更大/额度更紧时会重试耗尽 → 503
+- **决策**：
+  1. `ocr.py` 新增进程级 `_RequestPacer`（`_glm_ocr_pacer` lru_cache，对齐信号量惯例）：每次 layout_parsing 请求（含重试）发起前 `acquire()` 等待自己的节奏起点——首请求立即放行（单文件零额外延迟），突发按当前间隔排队
+  2. AIMD 自适应：每次 429 `on_rate_limited()` 间隔 ×2（上限 10s 常量 `_PACE_MAX_INTERVAL_SECONDS`），每次非 429 `on_success()` 间隔 ×0.75 衰减回地板值——请求节奏自动收敛到账号真实额度，无需配置档位 RPM
+  3. 新配置 `Settings.glm_ocr_min_request_interval`（默认 1.0s，env `GLM_OCR_MIN_REQUEST_INTERVAL`，0=禁用）；`acquire()` 在获取信号量**之前**执行，节奏等待不占并发槽
+  4. 状态全部为纯 float、仅在同步段变更（asyncio 协作调度下原子），无锁无事件循环亲和；`_pace_sleep` 独立测试间接缝（与 `_retry_sleep` 分离，两类等待可分别观测）
+  5. conftest `fake_openai_env` 前后清理 `_glm_ocr_pacer` 缓存——否则前一个测试的 next_start 残留会让后继测试真实等待其节奏窗口（首版实现后套件 55s → 修复后 0.6s，即此污染的证据）
+- **理由（为什么不选备选方案）**：
+  - 备选 A（仅调低 GLM_OCR_MAX_CONCURRENCY=1）→ 放弃：小图请求快，单并发仍可超 RPM，且无法自适应账号档位
+  - 备选 B（固定 RPM 令牌桶，静态配置）→ 放弃：需知道账号确切额度才能配对；AIMD 自动收敛免配置
+  - 备选 C（仅加退避 jitter）→ 放弃：pacer 已把含重试的所有发起串行排队，重试波次天然错开，jitter 冗余
+- **影响**：
+  - 后端：config.py（+1 设置）、extraction/ocr.py（`_RequestPacer`/`_glm_ocr_pacer`/`_pace_sleep`/`_post_with_retries` 接线/模块 docstring）、tests/conftest.py（fixture 清 pacer 缓存）
+  - 测试：test_config.py +2（默认 1.0 / env 覆盖）；test_ocr.py 新增 7 用例（AIMD 增长衰减、首请求立即、连续 acquire 间隔、interval=0 禁用、突发 4 并发起点 1s/2s/3s 错开、429 后 interval 1.0→2.0→1.5、单元级）+ 既有 3 个 429 用例补 patch `_pace_sleep` + 信号量用例设 interval=0 隔离测并发
+  - 验证：TDD 先红（7 失败：缺属性/缺类）后绿；全量 `uv run pytest -q` 304 passed / 2 skipped 无回归；突变自证两连（acquire 不推进 next_start → 2 红；429 不增长 interval → 1 红）均抓红后还原恢复全绿
+  - 用户侧效果：20 张名片批量上传时请求按 ≥1s 间隔错峰发起，429 出现时间隔自动放大（1→2→4s…），成功后缓慢回落；单文件上传零额外延迟
+
+## D-044：对照智谱官方限流文档核验 + 退避补 jitter（Issue #13 追增量）
+
+- **日期**：2026-10-15
+- **状态**：已接受（D-043 的补全）
+- **来源**：用户提供官方限流文档 docs.bigmodel.cn/cn/api/rate-limit 及其建议（控制并发与请求频率/请求队列或并发池/避免瞬时洪峰/避免固定间隔的高频重试）
+- **核验结论**：① 智谱速率限制本质是并发数（"同一时刻正在处理中的请求数量"），按权益等级 × 模型划分；② 但 1302 典型原因第二条"短时间内请求过于密集"存在频率成分——解释了 semaphore=2 仍 429；③ 高峰期账户维度动态收紧——印证 AIMD 自适应的必要性；④ 1305 平台过载同为 HTTP 429，已被退避覆盖；⑤ layout_parsing 无批处理端点，Batch API 不适用
+- **决策**：唯一偏离官方建议的点是退避无抖动，补齐——`ocr.py` 新增 `_with_jitter(delay)`（`delay + uniform(0, delay × 0.25)`，只上浮不下浮，安全值含 Retry-After 是硬下界），`_post_with_retries` 退避延迟经其抖动后传入日志与 `_retry_sleep`。单调用者场景重试时刻原为确定性（1s/3s/7s…），pacer 只能错开并发发起，jitter 补上单流去同步
+- **影响**：
+  - 后端：extraction/ocr.py（`_with_jitter` + 接线 + 常量 `_RETRY_JITTER_MAX_FRACTION=0.25` + 模块 docstring）
+  - 测试：test_ocr.py 新增 `_with_jitter` 边界+非退化单测（50 采样断言 base ≤ j ≤ base×1.25 且样本数 >1——范围断言无法区分"无抖动"，非退化断言才能）；3 个既有 429 集成用例的精确断言改范围断言（base 为下界）
+  - 验证：TDD 先红（AttributeError）后绿；全量 305 passed / 2 skipped；突变自证（jitter 恒等 → 非退化断言红）抓红后还原恢复全绿
+  - 文档：docs/重要结论和经验/2026-10-15-大模型API限流治理 文档新增 4.4 官方核验小节与实操入口（控制台查 glm-ocr 真实并发限额；若为 1 应调 GLM_OCR_MAX_CONCURRENCY=1）
+
+## D-045：前端自动重试限流失败的解析（ocr_rate_limited 自愈）
+
+- **日期**：2026-10-15
+- **状态**：已接受（D-043/D-044 的前端补全）
+- **来源**：用户反馈——"万一 429 抛到了前端，前端组件直接报错了，对用户来说很不友好，这种错误听起来我们通过程序可以自己适应修复"；讨论后用户拍板"实现前端自动重试"
+- **背景**：
+  - 后端三层防御（D-035 信号量 + D-043 AIMD pacer + D-044 jitter 退避）大幅降低 429 概率，但重试耗尽时 `ocr_rate_limited`（503）仍会抛到前端，PasteTextInput 直接报"服务繁忙"错误，用户需手动重传
+  - 限流是暂时性状态：后端 pacer 恰在退避，前端隔一段时间重发大概率成功——这类错误前端可自愈
+- **决策**：
+  1. `utils/parseRetry.ts` 新增 `withOcrAutoRetry(fn, isRetryable, onRetry?, sleep?)`——固定阶梯 `OCR_AUTO_RETRY_DELAYS_MS = [8s, 15s, 30s]`（无 jitter：单客户端至多并发 handful 个文件，非惊群场景），耗尽后重抛最后错误；非可重试错误立即抛出；`sleep` 可注入供测试
+  2. `utils/errors.ts` 新增 `isOcrAutoRetryable(err)`——仅 `ocr_rate_limited` 为 true；`ocr_upstream_error`/`ocr_network_error` 是真实故障不可自愈，立即走 D-036 友好提示
+  3. `PasteTextInput` pdf/image 两处 parse 调用包裹 `withOcrAutoRetry`：重试期间 `retryingCount` 计数显示"正在自动重试"提示（muted 非报错色调），成功后提示消失照常入列；耗尽后回落 D-036 友好错误文案；finally 减计数保证提示不残留
+  4. i18n 新增 `paste.retrying` 中英文案
+- **理由（为什么不选备选方案）**：
+  - 备选 A（后端无限重试直至成功）→ 放弃：请求挂在服务端无上限，超时/资源耗尽更糟
+  - 备选 B（后端假装成功返回空结果）→ 放弃：欺骗用户，数据错误
+  - 备选 C（只提示用户手动重试）→ 放弃：限流是暂时性且可预期恢复的，自动重试零用户成本；8s/15s/30s 阶梯与后端 pacer 退避窗口（1→10s）天然错开
+- **影响**：
+  - 前端：utils/parseRetry.ts（新）、utils/errors.ts、components/input/PasteTextInput.tsx、zh/en.json
+  - 测试：parseRetry.test.ts 5 用例（契约：首成功不等待/重试后成功/不可重试立即抛/耗尽重抛/中途不可重试停止）；errors.test.ts +2；PasteTextInput.test.tsx 新增 2 fake-timers 用例（重试成功入列 + 耗尽回落友好文案），既有 rate-limited 组件用例改用 `ocr_upstream_error`（否则会被自动重试挂 53s）
+  - 验证：TDD 先红（模块缺失）后绿；全量 vitest 407 passed（27 files）+ tsc 0 错误；突变自证（`isOcrAutoRetryable` 恒 false → 3 红含 2 个自动重试用例）抓红后还原恢复全绿

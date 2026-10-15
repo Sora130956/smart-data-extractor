@@ -162,6 +162,9 @@
 - [x] 文档（2026-10-11）：新增 `docs/重要结论和经验/2026-10-11-从程序员到独立开发者的角色转变.md` —— 记录场景驱动开发感悟（展会/沙龙名片与签到表批量入库案例 → 场景真实性决定工具存亡 → 推导出置信度 + 复核交互两核心功能 → 后续规划：一致性采样、键盘快捷键、自定义 schema 对接 CRM），纯文档无代码改动；同日补记"转译型程序员结构性失业"判断；新增 `docs/重要结论和经验/2026-10-11-展会名片入库场景的行业数据验证.md`（名片场景行业数据：80% 线索未跟进、人工链路转化率 0.67%、$250–283/条获客成本、Zoho 四大痛点结构，验证工具存亡逻辑），两文档互相链接；新增 `docs/重要结论和经验/2026-10-11-置信度可靠性-从模型自评到校准化与一致性采样.md`（置信度技术路线学术依据：ConfBench 校准发现/OCR+Image 双模态输入优势/first-token aggregation/M-N 一致性估计/validity ladder 与 fit-val split/ECARB 复核成本指标/N=3 或 5 采样权衡 + 项目落地清单六条），与角色转变文档第四节互链
 - [x] Issue-13（2026-10-12，D-035，GLM-OCR 429 限流）：GitHub Issue #13——上传图片/PDF 传 GLM-OCR 解析时并发超限报 429 Too Many Requests。根因：前端 PasteTextInput `Promise.all` 每文件并发请求 + 后端 `_call_glm_ocr` 无限流无重试。修复（后端单点收口）：`ocr.py` 新增进程级 `asyncio.Semaphore`（`_glm_ocr_semaphore`，对齐 D-006 惯例）+ `_post_with_retries` 429 指数退避重试（1s/2s/4s，数字 `Retry-After` 优先，信号量按次获取）+ `_retry_sleep` 测试间接缝；`config.py` 新增 `glm_ocr_max_concurrency=2`/`glm_ocr_max_retries=3`（env 可调）。TDD 先红后绿：新增 9 用例（config 4 + ocr 5）；全量 273 passed / 2 skipped 无回归；突变自证三连（退避不增长/重试少一次/信号量失效）均抓红再还原
 - [x] Issue-13 追问（2026-10-12，D-036，上游 OCR 错误友好提示）：用户反馈上游报错在前端裸显 "Internal Server Error"。修复：`routes.py` 新增 `_ocr_http_error` 映射（上游 429→503 `ocr_rate_limited`、上游其他非 2xx→502 `ocr_upstream_error`、网络/超时→503 `ocr_network_error`，`{code, message}` 契约对齐 D-019 quota 卫兵），两个 parse 路由捕获 `httpx.HTTPError`；前端 `errors.ts` 新增 `ocrErrorCode`/`ocrI18nKey`/`friendlyErrorKey` 组合查找，PasteTextInput 两处 catch 改用之，i18n 中英新增 `ocr.*` 三条文案。后端 277 passed / 2 skipped（+4 路由用例）；前端 382 passed（+7）、tsc 干净、构建成功；突变自证（后端 429 分支失效→2 红、前端 friendlyErrorKey 恒 null→3 红）均抓红再还原
+- [x] Issue-13 再追问（2026-10-15，D-043，请求频率限流 pacer + AIMD）：用户反馈 20 张名片并发仍触发 429（retry 2/3 在吸收）。根因：D-035 信号量只限并发数，智谱 1302/429 是请求**频率**限制，小图 1-2s 完成时 2 并发稳态 ~60-120 req/min 超账号 RPM。修复：`ocr.py` 新增进程级 `_RequestPacer`（每次请求含重试发起前按间隔排队，首请求立即；429 时间隔 ×2 至上限 10s，成功 ×0.75 衰减回地板，AIMD 自动收敛到账号真实额度），新配置 `glm_ocr_min_request_interval`（默认 1.0s，0=禁用）；`_pace_sleep` 独立测试缝；conftest fixture 清 pacer 缓存防跨测试真实等待（55s→0.6s）。TDD 先红（7）后绿；全量 304 passed / 2 skipped；突变自证两连（不推进 next_start→2 红、429 不增长→1 红）。浏览器打开 API 链接报 1001 为红鲱鱼（GET 不带鉴权头，429 即证明鉴权通过）
+- [x] Issue-13 官方文档核验（2026-10-15，D-044，退避补 jitter）：用户提供官方限流文档（docs.bigmodel.cn/cn/api/rate-limit）。核验：智谱限额本质是并发数但 1302 含"短时间密集"频率成分、高峰动态收紧、1305 同为 429 已覆盖；唯一偏离官方建议"避免固定间隔的高频重试"的点是退避无抖动——补 `_with_jitter`（+0~25% 只上浮，安全值为硬下界）接入 `_post_with_retries`。测试：新增 jitter 边界+非退化单测、3 个 429 集成断言改范围；全量 305 passed / 2 skipped；突变自证（jitter 恒等→1 红）。经验文档新增 4.4 官方核验小节与控制台查额度入口
+- [x] Issue-13 前端自愈（2026-10-15，D-045，前端自动重试 ocr_rate_limited）：后端三层防御后 429 仍可能耗尽重试抛到前端，用户拍板前端自动重试而非报错。实现：`utils/parseRetry.ts`（`withOcrAutoRetry` 固定阶梯 8s/15s/30s，耗尽重抛、不可重试立即抛，sleep 可注入）+ `errors.ts#isOcrAutoRetryable`（仅 ocr_rate_limited，upstream/network 立即报错走 D-036 友好提示）+ `PasteTextInput` pdf/image 两处包裹（retryingCount 计数显示"正在自动重试"muted 提示，finally 减计数防残留）+ i18n `paste.retrying`。TDD 先红后绿；全量 vitest 407 passed（27 files）+ tsc 0；突变自证（isOcrAutoRetryable 恒 false → 3 红）抓红后还原
 
 ## 可视化约定（docs/view/）
 
@@ -313,3 +316,28 @@
 - 决策：弹窗 max-w 1080→1400、aside 400→560；预览容器 flex flex-col + 包裹层 m-auto 双向居中（溢出安全）；wheel 离散档位缩放 20%~500%（fit-width 基准 + 像素宽 + 解除 max-w-full 钳制），高亮框百分比天然同步，双击/按钮重置、换页重置
 - 理由：对照核验需要更大预览面积；百分比高亮框挂在包裹层上随图缩放零额外计算；transform:scale 不扩展布局会裁剪溢出
 - 详见 .harness/decisions.md（验证：TDD 先红后绿 15/15；全量 vitest 389 passed + tsc 0 + build 成功；突变自证 2 红）
+
+### D-039: 推广准备——限额放宽至 200/5000 + USAGE 结构化日志
+- 决策：`daily_quota_per_ip` 50→200、`daily_quota_global` 1000→5000（config.py 默认值 + render.yaml 显式值 + README 同步）；`DailyQuota.spend` 每次扣减输出一条 grep 友好 INFO 日志——成功 `USAGE ip=… endpoint=… units=…`、被拒 `USAGE_REJECTED … reason=per_ip|global`；`api/__init__.py` lifespan 内 `logging.basicConfig(INFO)` 让应用日志经 root handler 落到 Render 日志流（uvicorn 只配置自家 logger）
+- 理由：推广期需统计「多少人 × 多少次」；内存计数器部署即清零（D-019 已知缺陷），日志行是部署无关的持久记录；免费版 Render 日志保留很短（约 1 天），推广期间需每日查看/导出，实时当日数据走既有 `GET /stats?token=`
+- 详见 .harness/decisions.md（验证：TDD 先红后绿；后端全量 296 passed / 2 skipped）
+
+### D-040: 用户反馈邮件通道 + 前端清空按钮
+- 决策：新增 `POST /feedback`（FeedbackRequest：message ≤2000 非空、contact ≤200 可选）→ `api/feedback.py` 经 smtp.qq.com:465 SSL（stdlib smtplib，零新依赖）发到 `feedback_to_email`（默认 1309564814@qq.com）；SMTP 凭据走 env `FEEDBACK_SMTP_USER`/`FEEDBACK_SMTP_PASSWORD`（QQ 邮箱授权码），未配置返回 503 `feedback_not_configured`；独立 `get_feedback_quota`（默认 10/IP/天、全站 100/天），拒绝重标为 `feedback_quota` 便于前端区分文案；反馈日志仅记 `FEEDBACK ip=… chars=…` 不记内容；阻塞式 SMTP 走 `run_in_threadpool`。前端：Header 设置旁「问题反馈」按钮 + FeedbackModal（裁剪发送、成功/失败态、Escape 关闭、重开重置）；ResultsHeader 导出按钮旁新增「清空」按钮——仅清屏幕（批次在完成时已自动入 historyStore，清空无数据丢失），App 传 `onClear={() => setSources([])}`
+- 理由：反馈直达邮箱是演示推广期最低摩擦的客服通道；QQ SMTP 授权码方案零成本零新依赖；清空不重复写历史避免与批次完成时的自动归档重复
+- 详见 .harness/decisions.md（验证：TDD 先红后绿；后端 +13 用例含 smtplib 边界假件、前端 +9 用例；全量后端 296 passed / 2 skipped、前端 396 passed + tsc 0 + build 成功）
+
+### D-041: 导出简化——Excel 去「（原始）」伴随列，JSON 只导结果数组
+- 决策：`buildExportModel` 删 reviewedKeys/fieldColumns 伴随列逻辑，每字段单列、直接导出修正后 `data`（`originalData` 保留于详情弹窗/历史，不再进导出；i18n 删 `excel.originalColumn`）；`handleExportAll` 从导出整包 `sources` 改为只导 `result.data` 扁平数组（成功结果各一对象，失败项跳过），文件名规则不变
+- 理由：导出物面向最终交付，用户只关心修正后的结果值；整包 sources 暴露 blob URL/内部状态/计费统计，冗余且易误导
+- 详见 .harness/decisions.md（验证：导出相关 77/77；全量 vitest 396 passed + tsc 0）
+
+### D-042: Excel 成本列币种跟随界面语言（zh→CNY，en→USD）
+- 决策：`buildExportModel`/`exportToExcel` 新增 `language` 参数（调用方传 `i18n.language`），zh 环境表头「成本 (CNY)」+ `result.costCny`，否则「Cost (USD)」+ `result.costUsd`；批量导出与详情弹窗单条导出同步
+- 理由：两个币种值提取时后端已换算好，前端只按语言选择；中文用户交付文件看人民币
+- 详见 `.harness/decisions.md`（验证：+2 币种用例；全量 vitest 398 passed + tsc 0）
+
+### D-045: 前端自动重试限流失败的解析（ocr_rate_limited 自愈）
+- 决策：`withOcrAutoRetry` 固定阶梯 8s/15s/30s 重试（耗尽重抛、不可重试立即抛）；`isOcrAutoRetryable` 仅认 `ocr_rate_limited`（upstream/network 真实故障立即报错）；PasteTextInput 两处 parse 包裹 + retryingCount"正在自动重试"提示
+- 理由：限流是暂时性状态（后端 AIMD pacer 正在退避），前端隔时重发大概率成功且零用户成本；后端无限重试会挂死请求、假成功是欺骗
+- 详见 `.harness/decisions.md`（验证：TDD 先红后绿；全量 vitest 407 passed + tsc 0；突变自证 3 红后还原）
