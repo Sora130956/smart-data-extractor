@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import type { OcrBlock } from '@/types/extraction';
-import { friendlyErrorKey } from '@/utils/errors';
+import { friendlyErrorKey, isOcrAutoRetryable } from '@/utils/errors';
+import { withOcrAutoRetry } from '@/utils/parseRetry';
 
 const ACCEPT = '.txt,.pdf,.png,.jpg,.jpeg,.bmp';
 // Extensions the backend /parse_image endpoint accepts (GLM vision formats).
@@ -51,6 +52,8 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
   const [dragging, setDragging] = useState(false);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
+  // Files currently waiting out an auto-retry pause (rate-limited parses).
+  const [retryingCount, setRetryingCount] = useState(0);
   const pdfSplitMode = useUiStore((s) => s.pdfSplitMode);
 
   // The browser fires dragleave on child elements too; count entries instead.
@@ -74,9 +77,18 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
     try {
       await Promise.all([
         ...pdfFiles.map(async (file) => {
+          // Issue #13 follow-up: rate-limited parses self-heal — re-send after
+          // a pause (the backend AIMD pacer backs off meanwhile) instead of
+          // failing the upload. Other errors surface immediately in catch.
+          let autoRetrying = false;
+          const markRetrying = () => {
+            if (autoRetrying) return;
+            autoRetrying = true;
+            setRetryingCount((c) => c + 1);
+          };
           try {
             const fileUrl = URL.createObjectURL(file);
-            const result = await parsePdf(file);
+            const result = await withOcrAutoRetry(() => parsePdf(file), isOcrAutoRetryable, markRetrying);
             if (pdfSplitMode === 'pages') {
               // Failed pages come back as null; index+1 is the original page number.
               result.pages.forEach((page, i) => {
@@ -104,13 +116,21 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               ? t(key)
               : err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
+          } finally {
+            if (autoRetrying) setRetryingCount((c) => c - 1);
           }
         }),
         // Images have no pages to split: one image = one source, always whole.
         ...imageFiles.map(async (file) => {
+          let autoRetrying = false;
+          const markRetrying = () => {
+            if (autoRetrying) return;
+            autoRetrying = true;
+            setRetryingCount((c) => c + 1);
+          };
           try {
             const fileUrl = URL.createObjectURL(file);
-            const result = await parseImage(file);
+            const result = await withOcrAutoRetry(() => parseImage(file), isOcrAutoRetryable, markRetrying);
             onAdd(
               file.name,
               result.text,
@@ -125,6 +145,8 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               ? t(key)
               : err instanceof Error ? err.message : String(err);
             setParseErrors((prev) => [...prev, message]);
+          } finally {
+            if (autoRetrying) setRetryingCount((c) => c - 1);
           }
         }),
       ]);
@@ -204,6 +226,9 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               </div>
             ))}
           </div>
+        )}
+        {retryingCount > 0 && (
+          <div className="mt-2 text-caption text-text-muted">{t('paste.retrying')}</div>
         )}
       </div>
 

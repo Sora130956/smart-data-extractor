@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import { ApiError, parseImage, parsePdf } from '@/api/client';
@@ -224,10 +224,11 @@ describe('PasteTextInput', () => {
   });
 
   it('shows a localized retry hint instead of the raw message on upstream ocr errors', async () => {
-    // Issue #13 follow-up: 503 {code: ocr_rate_limited} must not surface
-    // as "Internal Server Error".
+    // Issue #13 follow-up: 503 {code: ocr_upstream_error} must not surface
+    // as "Internal Server Error". (ocr_rate_limited is auto-retried —
+    // covered by its own tests below — so exhaustion uses this path.)
     vi.mocked(parsePdf).mockRejectedValue(
-      new ApiError('Internal Server Error', 503, 'ocr_rate_limited'),
+      new ApiError('Internal Server Error', 502, 'ocr_upstream_error'),
     );
     const onAdd = vi.fn();
     const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
@@ -236,9 +237,73 @@ describe('PasteTextInput', () => {
     const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/busy right now/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/failed to process this file/)).toBeInTheDocument());
     expect(screen.queryByText('Internal Server Error')).not.toBeInTheDocument();
     expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('auto-retries a rate-limited parse and stages the file without any error', async () => {
+    // Issue #13 follow-up: the backend's retry ladder was exhausted, but a
+    // rate-limited parse is self-healable — re-send after a pause (the
+    // backend AIMD pacer uses that time to back off) instead of failing.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(parseImage)
+        .mockRejectedValueOnce(new ApiError('Service busy', 503, 'ocr_rate_limited'))
+        .mockResolvedValueOnce({
+          text: 'image OCR text',
+          pages: ['image OCR text'],
+          pages_failed: [],
+          tokens_used: { input: 10, output: 5 },
+          cost_usd: 0,
+          cost_cny: 0,
+        });
+      const onAdd = vi.fn();
+      const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(input, { target: { files: [makeFile('card.jpg', 'ignored', 'image/jpeg')] } });
+
+      // First attempt rejects: the auto-retry hint shows, no error surfaces.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText(/retrying automatically/i)).toBeInTheDocument();
+      expect(screen.queryByText(/busy right now/i)).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000);
+      });
+      expect(onAdd).toHaveBeenCalledWith('card.jpg', 'image OCR text', 'blob:mock-url', 'image', undefined, undefined);
+      expect(screen.queryByText(/retrying automatically/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/busy right now/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to the friendly rate-limit message when auto-retries are exhausted', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(parseImage).mockRejectedValue(
+        new ApiError('Service busy', 503, 'ocr_rate_limited'),
+      );
+      const onAdd = vi.fn();
+      const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(input, { target: { files: [makeFile('card.jpg', 'ignored', 'image/jpeg')] } });
+
+      // Exhaust the full frontend ladder (8s + 15s + 30s).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8_000 + 15_000 + 30_000);
+      });
+      expect(screen.getByText(/busy right now/i)).toBeInTheDocument();
+      expect(onAdd).not.toHaveBeenCalled();
+      expect(screen.queryByText(/retrying automatically/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('calls parseImage and onAdd once when an image file is selected, even in pages split mode', async () => {

@@ -74,6 +74,7 @@
     "dropActive": "Release to add these files",
     "empty": "No text sources yet — upload a .txt, .pdf or image file on the left",
     "parsing": "Parsing file (OCR)…",
+    "retrying": "Some files hit a rate limit — retrying automatically…",
     "itemLabel": "Text {{index}}",
     "itemChars": "{{count}} chars",
     "remove": "Remove"

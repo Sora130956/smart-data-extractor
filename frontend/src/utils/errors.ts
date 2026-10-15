@@ -55,3 +55,10 @@ export function friendlyErrorKey(err: unknown): string | null {
   if (ocr) return ocrI18nKey(ocr);
   return null;
 }
+
+/** True when the failed parse was rate-limited — the frontend can re-send
+ * it after a pause instead of surfacing an error (issue #13 follow-up).
+ * Upstream/network failures are not self-healable and surface immediately. */
+export function isOcrAutoRetryable(err: unknown): boolean {
+  return ocrErrorCode(err) === 'ocr_rate_limited';
+}

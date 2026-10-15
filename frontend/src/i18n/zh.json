@@ -74,6 +74,7 @@
     "dropActive": "松开即可添加文件",
     "empty": "还没有文本来源 — 在左侧上传 txt、pdf 或图片文件",
     "parsing": "正在解析文件（OCR），请稍候…",
+    "retrying": "部分文件解析繁忙，正在自动重试…",
     "itemLabel": "文本 {{index}}",
     "itemChars": "{{count}} 字符",
     "remove": "移除"

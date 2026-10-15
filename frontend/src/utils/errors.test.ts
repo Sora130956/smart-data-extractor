@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import {
   friendlyErrorKey,
+  isOcrAutoRetryable,
   ocrErrorCode,
   ocrI18nKey,
   quotaErrorCode,
@@ -70,5 +71,17 @@ describe('friendlyErrorKey', () => {
     expect(friendlyErrorKey(new ApiError('boom', 400, 'bad_request'))).toBeNull();
     expect(friendlyErrorKey(new Error('network'))).toBeNull();
     expect(friendlyErrorKey('str')).toBeNull();
+  });
+});
+
+describe('isOcrAutoRetryable (frontend self-healing, issue #13 follow-up)', () => {
+  it('marks rate-limited parses as retryable', () => {
+    expect(isOcrAutoRetryable(new ApiError('busy', 503, 'ocr_rate_limited'))).toBe(true);
+  });
+
+  it('does not retry other ocr failures or unknown errors', () => {
+    expect(isOcrAutoRetryable(new ApiError('failed', 502, 'ocr_upstream_error'))).toBe(false);
+    expect(isOcrAutoRetryable(new ApiError('unreachable', 503, 'ocr_network_error'))).toBe(false);
+    expect(isOcrAutoRetryable(new Error('network'))).toBe(false);
   });
 });
