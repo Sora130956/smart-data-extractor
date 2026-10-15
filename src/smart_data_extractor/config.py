@@ -34,10 +34,24 @@ class Settings(BaseSettings):
     # DEMO-STAGE quota guard (D-019): caps the daily LLM bill before any
     # public promotion. A limit <= 0 disables that layer. Replace with
     # per-user quotas when the tool goes public.
-    daily_quota_per_ip: int = 50
-    daily_quota_global: int = 1000
+    daily_quota_per_ip: int = 200
+    daily_quota_global: int = 5000
     # Set to enable GET /stats (today's traffic report); unset hides it.
     admin_stats_token: str | None = None
+    # User-feedback email channel (POST /feedback): messages from the demo
+    # site are delivered to the owner's mailbox via QQ SMTP. SMTP user +
+    # password (the QQ mail *authorization code*, not the login password)
+    # must be set in the environment or the endpoint answers 503.
+    feedback_smtp_host: str = "smtp.qq.com"
+    feedback_smtp_port: int = 465
+    feedback_smtp_user: str | None = None
+    feedback_smtp_password: str | None = None
+    feedback_to_email: str = "1309564814@qq.com"
+    # Anti-abuse caps for the unauthenticated feedback endpoint; separate
+    # from the extraction guard so feedback can't eat extraction budget.
+    # A limit <= 0 disables that layer.
+    feedback_quota_per_ip: int = 10
+    feedback_quota_global: int = 100
     
     model_config = SettingsConfigDict(
         env_file=".env",

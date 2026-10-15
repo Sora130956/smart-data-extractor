@@ -101,6 +101,11 @@ export const parsePdfResponseSchema = z.object({
 // /parse_image returns the same shape (one image = one "page").
 export const parseImageResponseSchema = parsePdfResponseSchema;
 
+// POST /feedback: delivery receipt.
+export const feedbackResponseSchema = z.object({
+  ok: z.boolean(),
+});
+
 export type TokensUsed = z.infer<typeof tokensUsedSchema>;
 export type BatchResultItem = z.infer<typeof batchResultItemSchema>;
 export type BatchExtractResponse = z.infer<typeof batchExtractResponseSchema>;
@@ -110,3 +115,4 @@ export type PresetListItem = z.infer<typeof presetListItemSchema>;
 export type SchemaResolveResponse = z.infer<typeof schemaResolveResponseSchema>;
 export type ParsePdfResponse = z.infer<typeof parsePdfResponseSchema>;
 export type ParseImageResponse = ParsePdfResponse;
+export type FeedbackResponse = z.infer<typeof feedbackResponseSchema>;

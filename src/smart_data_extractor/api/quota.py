@@ -9,12 +9,20 @@ DEMO-STAGE ONLY: in-memory, per-process counters that reset on every
 deploy and trust the client-supplied X-Forwarded-For. Good enough to
 stop casual abuse and cap the daily API bill; NOT a real rate-limiting
 solution. Replace with per-user quotas before any public promotion.
+
+Every spend() also emits one greppable INFO line ("USAGE ..." /
+"USAGE_REJECTED ... reason=...") so promotion-stage traffic — unique
+visitors and per-endpoint demand — can be counted from the Render log
+stream even though the counters themselves reset on every deploy.
 """
 
+import logging
 from collections.abc import Callable
 from datetime import date, datetime, timezone
 
 from fastapi import HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 RESET_AT = "00:00 UTC"
 
@@ -96,6 +104,10 @@ class DailyQuota:
         ip = self.client_ip(request)
         endpoint = self.endpoint(request)
         if self.per_ip_limit > 0 and self._per_ip.get(ip, 0) + n > self.per_ip_limit:
+            logger.info(
+                "USAGE_REJECTED ip=%s endpoint=%s units=%d reason=per_ip",
+                ip, endpoint, n,
+            )
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -108,6 +120,10 @@ class DailyQuota:
                 },
             )
         if self.global_limit > 0 and self._global_used + n > self.global_limit:
+            logger.info(
+                "USAGE_REJECTED ip=%s endpoint=%s units=%d reason=global",
+                ip, endpoint, n,
+            )
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -119,6 +135,7 @@ class DailyQuota:
                     "reset_at": RESET_AT,
                 },
             )
+        logger.info("USAGE ip=%s endpoint=%s units=%d", ip, endpoint, n)
         self._per_ip[ip] = self._per_ip.get(ip, 0) + n
         self._per_endpoint[endpoint] = self._per_endpoint.get(endpoint, 0) + n
         self._global_used += n

@@ -28,10 +28,19 @@ services:
       # DEMO-STAGE quota guard (D-019): caps the daily LLM bill. Replace
       # with per-user quotas before public promotion.
       - key: DAILY_QUOTA_PER_IP
-        value: "50"
+        value: "200"
       - key: DAILY_QUOTA_GLOBAL
-        value: "1000"
+        value: "5000"
       # Optional: set in the dashboard to enable GET /stats?token=...
       # (today's traffic report); unset hides the endpoint.
       - key: ADMIN_STATS_TOKEN
+        sync: false
+      # POST /feedback: delivers visitor feedback to the owner's QQ mailbox
+      # via smtp.qq.com. FEEDBACK_SMTP_USER is the QQ mail address and
+      # FEEDBACK_SMTP_PASSWORD its SMTP *authorization code* (QQ mail:
+      # 设置 -> 账户 -> 开启 SMTP 服务), not the account password. Recipient
+      # defaults to feedback_to_email in config.py (override: FEEDBACK_TO_EMAIL).
+      - key: FEEDBACK_SMTP_USER
+        sync: false
+      - key: FEEDBACK_SMTP_PASSWORD
         sync: false

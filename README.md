@@ -94,9 +94,12 @@ All endpoints are also reachable under the `/api` prefix (used by the frontend).
 | `GLM_API_KEY` | optional | Enables PDF/image OCR via `glm-ocr` dedicated layout-parsing endpoint (flat 0.2 CNY per 1M tokens — see `.harness/decisions.md` D-031) |
 | `MAX_CONCURRENCY` | no | Global concurrency cap (default 5) |
 | `DATABASE_URL` | no | SQLAlchemy URL (default local SQLite) |
-| `DAILY_QUOTA_PER_IP` | no | DEMO-STAGE guard: requests per visitor IP per UTC day (default 50, 0 disables) |
-| `DAILY_QUOTA_GLOBAL` | no | DEMO-STAGE guard: total requests per UTC day (default 1000, 0 disables) |
+| `DAILY_QUOTA_PER_IP` | no | DEMO-STAGE guard: requests per visitor IP per UTC day (default 200, 0 disables) |
+| `DAILY_QUOTA_GLOBAL` | no | DEMO-STAGE guard: total requests per UTC day (default 5000, 0 disables) |
 | `ADMIN_STATS_TOKEN` | no | When set, enables `GET /stats?token=...` (today's traffic: usage, unique IPs, per-endpoint counts). Counters are in-memory and reset on deploy — replace with per-user quotas before public promotion (see `.harness/decisions.md` D-019) |
+| `FEEDBACK_SMTP_USER` / `FEEDBACK_SMTP_PASSWORD` | optional | Enables `POST /feedback` (sends user feedback to the owner's mailbox via `smtp.qq.com`). The password is the QQ mail SMTP *authorization code* (设置 → 账户 → 开启 SMTP 服务), not the account password. Unset → the endpoint answers 503 |
+| `FEEDBACK_TO_EMAIL` | no | Feedback recipient (defaults to the owner's QQ address in `config.py`) |
+| `FEEDBACK_QUOTA_PER_IP` / `FEEDBACK_QUOTA_GLOBAL` | no | Anti-abuse caps for the unauthenticated feedback endpoint (default 10 / IP / day, 100 site-wide) |
 
 ## Testing
 

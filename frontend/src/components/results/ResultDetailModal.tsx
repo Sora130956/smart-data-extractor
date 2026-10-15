@@ -232,10 +232,12 @@ export function ResultDetailModal({
   }
 
   function handleExportExcel() {
+    // Cost column currency follows the UI language (CNY under Chinese).
     void exportToExcel(
       [{ ...source, results: [result] }],
       buildExportFilename(source.presetLabel ?? source.name, 'xlsx'),
       t,
+      i18n.language,
     );
   }
 

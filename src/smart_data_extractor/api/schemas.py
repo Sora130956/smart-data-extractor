@@ -8,7 +8,7 @@ with pydantic ValidationError, which FastAPI turns into HTTP 422.
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from smart_data_extractor.presets import list_presets
 
@@ -180,3 +180,23 @@ class ParsePdfResponse(BaseModel):
     tokens_used: TokensUsed
     cost_usd: float
     cost_cny: float
+
+
+class FeedbackRequest(BaseModel):
+    """POST /feedback: a visitor's problem report / suggestion, delivered to
+    the owner's mailbox by the backend (see api/feedback.py)."""
+
+    message: str = Field(min_length=1, max_length=2000)
+    # Optional reply address / handle ("how can I reach you").
+    contact: str | None = Field(default=None, max_length=200)
+
+    @field_validator("message")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Feedback message must not be blank")
+        return value
+
+
+class FeedbackResponse(BaseModel):
+    ok: bool

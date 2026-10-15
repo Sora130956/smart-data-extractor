@@ -3,6 +3,7 @@
 Uvicorn target: ``smart_data_extractor.api:app``.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,6 +20,13 @@ FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Uvicorn only attaches handlers to its own "uvicorn.*" loggers, so app
+    # INFO records (quota USAGE lines, feedback receipt) would otherwise be
+    # dropped by the logging module's last-resort rule. One root handler
+    # routes them to stderr -> the platform's log stream (Render). No-op in
+    # tests (ASGITransport skips lifespan) and if something already
+    # configured the root logger (basicConfig is idempotent that way).
+    logging.basicConfig(level=logging.INFO)
     # Deferred to startup: importing this module must not touch the
     # filesystem (ASGI test transports skip lifespan; tests use test_db).
     init_db()

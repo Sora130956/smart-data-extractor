@@ -349,6 +349,7 @@ describe('ResultDetailModal', () => {
         [expect.objectContaining({ name: 'Manual Input 1', results: [highConfidenceResult] })],
         expect.stringMatching(/^Invoice-\d{8}-\d{6}\.xlsx$/),
         expect.any(Function),
+        'en',
       );
     });
   });

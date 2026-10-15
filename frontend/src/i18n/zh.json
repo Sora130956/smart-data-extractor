@@ -9,6 +9,7 @@
     "themeDark": "深色",
     "language": "EN / 中文",
     "settings": "设置",
+    "feedback": "问题反馈",
     "history": "历史记录",
     "github": "GitHub"
   },
@@ -91,8 +92,8 @@
     "smartSavedNamePrefix": "智能推断"
   },
   "quota": {
-    "perIp": "今日免费提取次数已用完（每天重置），重置时间为 00:00 UTC（北京时间早上 8 点）。",
-    "global": "本站今日免费额度已用完，明天 00:00 UTC（北京时间早上 8 点）重置后再来吧。"
+    "perIp": "当前为测试版本，每日文档处理数量有限，你今日的免费额度已用完（每天 00:00 UTC / 北京时间早上 8 点重置）。如有更多需求，欢迎点击右上角「问题反馈」告诉我们。",
+    "global": "当前为测试版本，全站每日文档处理数量有限，今日额度已用完（每天 00:00 UTC / 北京时间早上 8 点重置）。如有更多需求，欢迎点击右上角「问题反馈」告诉我们。"
   },
   "ocr": {
     "rateLimited": "文档解析服务当前繁忙，请稍等片刻后重试。",
@@ -148,8 +149,25 @@
     "filterReviewed": "已复核",
     "exportJson": "导出全部 JSON",
     "exportExcel": "导出 Excel",
+    "clear": "清空",
     "emptyTitle": "还没有提取结果",
     "emptyBody": "在上方添加文件或粘贴文本，选择预设后点击「开始提取」。每个字段都会带回各自的置信度。"
+  },
+  "feedback": {
+    "title": "问题反馈",
+    "messageLabel": "反馈内容",
+    "placeholder": "描述你遇到的问题或建议…",
+    "contactLabel": "联系方式（可选）",
+    "contactPlaceholder": "邮箱或其他联系方式，方便回复你",
+    "send": "发送",
+    "sending": "发送中…",
+    "sent": "已发送，感谢你的反馈！",
+    "sentHint": "我们会认真查看每一条反馈；如果你留了联系方式，会尽量回复。",
+    "done": "完成",
+    "errorQuota": "今天提交的反馈太多啦，明天再来吧。",
+    "errorNotConfigured": "反馈通道暂未开放，请稍后再试。",
+    "errorSendFailed": "发送失败，请稍后重试。",
+    "errorGeneric": "发送失败：{{message}}"
   },
   "confidence": {
     "high": "高",
@@ -182,7 +200,7 @@
     "error": "错误",
     "avgConfidence": "平均置信度",
     "costUsd": "成本 (USD)",
-    "originalColumn": "{{field}}（原始）"
+    "costCny": "成本 (CNY)"
   },
   "resultDetail": {
     "title": "提取结果 — {{index}}",

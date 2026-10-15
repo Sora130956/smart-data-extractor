@@ -6,18 +6,23 @@ the object under test).
 """
 
 import hmac
+import logging
 from functools import lru_cache
 from typing import Any, Callable
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
-from smart_data_extractor.api.quota import DailyQuota
+from smart_data_extractor.api.feedback import FeedbackError, get_deliver_feedback_fn
+from smart_data_extractor.api.quota import RESET_AT, DailyQuota
 from smart_data_extractor.api.schemas import (
     BatchExtractRequest,
     BatchExtractResponse,
     ExtractRequest,
     ExtractResponse,
+    FeedbackRequest,
+    FeedbackResponse,
     ParsePdfResponse,
     PresetListItem,
     PresetSchemaResponse,
@@ -37,6 +42,7 @@ from smart_data_extractor.extraction import (
 from smart_data_extractor.presets import get_preset_fields, list_presets
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _to_cny(usd: float) -> float:
@@ -126,6 +132,21 @@ def get_quota() -> DailyQuota:
     return DailyQuota(
         per_ip_limit=settings.daily_quota_per_ip,
         global_limit=settings.daily_quota_global,
+    )
+
+
+@lru_cache
+def get_feedback_quota() -> DailyQuota:
+    """DI seam: process-wide daily quota for POST /feedback only.
+
+    Separate counters from the extraction guard so feedback spam can
+    neither consume extraction budget nor be blocked by extraction
+    traffic. Defaults: 10 / IP / day, 100 site-wide.
+    """
+    settings = get_settings()
+    return DailyQuota(
+        per_ip_limit=settings.feedback_quota_per_ip,
+        global_limit=settings.feedback_quota_global,
     )
 
 
@@ -316,4 +337,47 @@ async def parse_image_route(
         # Upstream GLM-OCR failure: structured, localizable error (D-035).
         raise _ocr_http_error(exc) from exc
     return {**result, "cost_cny": _to_cny(result["cost_usd"])}
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def feedback(
+    req: FeedbackRequest,
+    request: Request,
+    fn: Callable[..., Any] = Depends(get_deliver_feedback_fn),
+    quota: DailyQuota = Depends(get_feedback_quota),
+) -> FeedbackResponse:
+    """Forward a visitor's problem report to the owner's mailbox.
+
+    Anti-abuse: the dedicated feedback quota runs first (rejections get a
+    feedback-specific code so the UI can word them differently from the
+    extraction guard), and receipt is logged with the message length only —
+    never its content. Delivery runs in a threadpool (blocking smtplib).
+    """
+    try:
+        quota.spend(request)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "feedback_quota",
+                    "message": (
+                        "You have submitted too many feedback messages "
+                        "today. Please come back tomorrow."
+                    ),
+                    "reset_at": RESET_AT,
+                },
+            ) from exc
+        raise
+    ip = DailyQuota.client_ip(request)
+    logger.info("FEEDBACK ip=%s chars=%d", ip, len(req.message))
+    try:
+        await run_in_threadpool(fn, req.message, req.contact, ip)
+    except FeedbackError as exc:
+        status_code = 503 if exc.code == "feedback_not_configured" else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return FeedbackResponse(ok=True)
 

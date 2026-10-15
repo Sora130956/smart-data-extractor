@@ -59,48 +59,38 @@ function columnHeaders(sources: ExtractionSource[], keys: string[]): string[] {
   return keys.map((key) => labelFor.get(key) ?? key);
 }
 
-export function buildExportModel(sources: ExtractionSource[], t: TFunction): ExportModel {
+/** Cost column currency follows the UI language: Chinese exports CNY
+ * (result.costCny), everything else exports USD (result.costUsd). Both
+ * values are converted server-side at extraction time. */
+function useCny(language: string): boolean {
+  return language.toLowerCase().startsWith('zh');
+}
+
+export function buildExportModel(
+  sources: ExtractionSource[],
+  t: TFunction,
+  language: string,
+): ExportModel {
   const keys = fieldKeys(sources);
   const fields = columnHeaders(sources, keys);
+  const cny = useCny(language);
+  const costHeader = cny ? t('excel.costCny') : t('excel.costUsd');
 
-  // Issue #1: a field reviewed on any row gets a companion "(Original)"
-  // column right after it, so the sheet compares the LLM's extraction with
-  // the human correction. Fields never reviewed keep the old layout.
-  const reviewedKeys = new Set<string>();
-  for (const source of sources) {
-    for (const result of source.results) {
-      for (const key of keys) {
-        if (result.reviewedFields?.[key]) reviewedKeys.add(key);
-      }
-    }
-  }
-  const fieldColumns = fields.flatMap((header, i) =>
-    reviewedKeys.has(keys[i]) ? [header, t('excel.originalColumn', { field: header })] : [header],
-  );
-
+  // The sheet reflects the reviewed/corrected `data` only — one column per
+  // field, no "(Original)" companions. Original extraction values stay in
+  // the UI detail modal / history store (Issue #1 rework).
   const resultsRows: CellValue[][] = [];
   const confidenceRows: CellValue[][] = [];
   for (const source of sources) {
     for (const result of source.results) {
-      const fieldCells = keys.flatMap((key): CellValue[] => {
-        const cells: CellValue[] = [toCell(result.data?.[key])];
-        if (reviewedKeys.has(key)) {
-          cells.push(
-            result.reviewedFields?.[key]
-              ? toCell(result.originalData?.[key] ?? null)
-              : null,
-          );
-        }
-        return cells;
-      });
       resultsRows.push([
         source.name,
         result.index,
         result.status === 'success' ? t('excel.statusSuccess') : t('excel.statusFailed'),
         result.error ?? null,
-        ...fieldCells,
+        ...keys.map((key) => toCell(result.data?.[key])),
         result.avgConfidence,
-        result.costUsd,
+        cny ? result.costCny : result.costUsd,
       ]);
       confidenceRows.push([
         source.name,
@@ -119,9 +109,9 @@ export function buildExportModel(sources: ExtractionSource[], t: TFunction): Exp
         t('excel.item'),
         t('excel.status'),
         t('excel.error'),
-        ...fieldColumns,
+        ...fields,
         t('excel.avgConfidence'),
-        t('excel.costUsd'),
+        costHeader,
       ],
       rows: resultsRows,
     },
@@ -184,8 +174,9 @@ export async function exportToExcel(
   sources: ExtractionSource[],
   filename: string,
   t: TFunction,
+  language: string,
 ): Promise<void> {
-  const workbook = await buildWorkbook(buildExportModel(sources, t));
+  const workbook = await buildWorkbook(buildExportModel(sources, t, language));
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

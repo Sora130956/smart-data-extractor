@@ -40,7 +40,8 @@ export interface ExtractionResult {
   /** field_name -> value as originally extracted, snapshotted right before
    * the FIRST user edit of that field (re-edits keep the first snapshot).
    * Fields never edited have no entry — their original value is still in
-   * `data`. Lets exports compare the LLM's answer with the correction. */
+   * `data`. Shown in the UI detail modal ("original value") and kept in
+   * the history store; exports follow the corrected `data` only. */
   originalData?: Record<string, unknown>;
 }
 

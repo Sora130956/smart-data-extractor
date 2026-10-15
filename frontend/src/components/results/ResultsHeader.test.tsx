@@ -43,13 +43,13 @@ const sources: ExtractionSource[] = [
 
 describe('ResultsHeader', () => {
   it('disables Export All JSON when there are no results', () => {
-    render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} />);
+    render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} onClear={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Export All JSON' })).toBeDisabled();
   });
 
   it('disables Export Excel when there are no results', () => {
-    render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} />);
+    render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} onClear={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: 'Export Excel' })).toBeDisabled();
   });
@@ -62,7 +62,11 @@ describe('ResultsHeader', () => {
     it('renders the Reviewed chip with its count and switches the filter on click', async () => {
       const user = userEvent.setup();
       render(
-        <ResultsHeader counts={{ all: 1, high: 0, review: 0, reviewed: 1 }} sources={sources} />,
+        <ResultsHeader
+          counts={{ all: 1, high: 0, review: 0, reviewed: 1 }}
+          sources={sources}
+          onClear={vi.fn()}
+        />,
       );
 
       const chip = screen.getByRole('button', { name: /Reviewed/ });
@@ -75,6 +79,30 @@ describe('ResultsHeader', () => {
     });
   });
 
+  describe('Clear (clears the on-screen results)', () => {
+    it('is disabled when there are no results', () => {
+      render(<ResultsHeader counts={EMPTY_COUNTS} sources={[]} onClear={vi.fn()} />);
+
+      expect(screen.getByRole('button', { name: 'Clear' })).toBeDisabled();
+    });
+
+    it('clears the on-screen results on click', async () => {
+      const user = userEvent.setup();
+      const onClear = vi.fn();
+      render(
+        <ResultsHeader
+          counts={{ all: 1, high: 1, review: 0, reviewed: 0 }}
+          sources={sources}
+          onClear={onClear}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Clear' }));
+
+      expect(onClear).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Export Excel', () => {
     beforeEach(() => {
       vi.mocked(exportToExcel).mockReset();
@@ -82,7 +110,13 @@ describe('ResultsHeader', () => {
 
     it('exports all sources to a file named after the template and a timestamp', async () => {
       const user = userEvent.setup();
-      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0, reviewed: 0 }} sources={sources} />);
+      render(
+        <ResultsHeader
+          counts={{ all: 1, high: 1, review: 0, reviewed: 0 }}
+          sources={sources}
+          onClear={vi.fn()}
+        />,
+      );
 
       await user.click(screen.getByRole('button', { name: 'Export Excel' }));
 
@@ -90,6 +124,7 @@ describe('ResultsHeader', () => {
         sources,
         expect.stringMatching(/^Invoice-\d{8}-\d{6}\.xlsx$/),
         expect.any(Function),
+        'en',
       );
     });
   });
@@ -100,7 +135,7 @@ describe('ResultsHeader', () => {
       URL.revokeObjectURL = vi.fn();
     });
 
-    it('triggers a JSON file download named after the template and a timestamp', async () => {
+    it('triggers a JSON download holding only the extracted data array', async () => {
       const user = userEvent.setup();
       const downloads: string[] = [];
       const clickSpy = vi
@@ -108,17 +143,29 @@ describe('ResultsHeader', () => {
         .mockImplementation(function (this: HTMLAnchorElement) {
           downloads.push(this.download);
         });
+      const stringifySpy = vi.spyOn(JSON, 'stringify');
 
-      render(<ResultsHeader counts={{ all: 1, high: 1, review: 0, reviewed: 0 }} sources={sources} />);
+      render(
+        <ResultsHeader
+          counts={{ all: 1, high: 1, review: 0, reviewed: 0 }}
+          sources={sources}
+          onClear={vi.fn()}
+        />,
+      );
 
       await user.click(screen.getByRole('button', { name: 'Export All JSON' }));
 
       expect(URL.createObjectURL).toHaveBeenCalled();
       expect(clickSpy).toHaveBeenCalledTimes(1);
       expect(downloads[0]).toMatch(/^Invoice-\d{8}-\d{6}\.json$/);
+      // Issue: the JSON file is a plain array of extracted field values —
+      // no UI metadata (confidence, review state, file blobs, stats).
+      // (jsdom's Blob lacks .text(), so assert on the serialized payload.)
+      expect(JSON.stringify).toHaveBeenCalledWith([{ vendor: 'Acme Corp' }], null, 2);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
 
       clickSpy.mockRestore();
+      stringifySpy.mockRestore();
     });
   });
 });

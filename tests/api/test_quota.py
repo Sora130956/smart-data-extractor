@@ -1,12 +1,15 @@
 """Tests for the demo-stage daily quota guard (D-019).
 
 Two layers over every LLM-costing endpoint: per client IP (default
-50/day) and global (default 1000/day), in-memory, auto-reset at UTC
+200/day) and global (default 5000/day), in-memory, auto-reset at UTC
 midnight. Offline: quota instances are injected via dependency_overrides,
-extraction functions via the existing DI seams.
+extraction functions via the existing DI seams. Also covers the USAGE /
+USAGE_REJECTED log lines emitted per spend (promotion-stage traffic
+counting via Render logs).
 """
 
 from datetime import date, datetime, timezone
+import logging
 
 import httpx
 import pytest
@@ -156,10 +159,47 @@ class TestDailyQuotaUnit:
         for _ in range(5):
             quota.spend(make_request(ip="1.1.1.1"))
 
+    def test_spend_emits_greppable_usage_log_line(self, caplog):
+        """Promotion-stage traffic counting (Render logs): every accepted
+        unit emits one INFO line carrying ip / endpoint / units."""
+        quota = DailyQuota(per_ip_limit=10, global_limit=100)
+        with caplog.at_level(logging.INFO, logger="smart_data_extractor.api.quota"):
+            quota.spend(make_request(ip="1.1.1.1", path="/api/extract"))
+            quota.spend(make_request(ip="2.2.2.2", path="/batch_extract"), n=3)
+
+        usage = [r for r in caplog.records if r.message.startswith("USAGE")]
+        assert [r.message for r in usage] == [
+            "USAGE ip=1.1.1.1 endpoint=extract units=1",
+            "USAGE ip=2.2.2.2 endpoint=batch_extract units=3",
+        ]
+        assert all(r.levelno == logging.INFO for r in usage)
+
+    def test_rejection_emits_usage_rejected_log_line_with_reason(self, caplog):
+        quota = DailyQuota(per_ip_limit=3, global_limit=5)
+        with caplog.at_level(logging.INFO, logger="smart_data_extractor.api.quota"):
+            quota.spend(make_request(ip="1.1.1.1"))
+            # per_ip check fires first: 1 + 3 would exceed this IP's 3/day.
+            with pytest.raises(HTTPException):
+                quota.spend(make_request(ip="1.1.1.1"), 3)
+            quota.spend(make_request(ip="2.2.2.2"), 3)
+            # Global layer: 4 + 2 would exceed the whole site's 5/day even
+            # though this fresh IP is nowhere near its own cap.
+            with pytest.raises(HTTPException):
+                quota.spend(make_request(ip="3.3.3.3"), 2)
+
+        rejected = [
+            r.message for r in caplog.records
+            if r.message.startswith("USAGE_REJECTED")
+        ]
+        assert rejected == [
+            "USAGE_REJECTED ip=1.1.1.1 endpoint=extract units=3 reason=per_ip",
+            "USAGE_REJECTED ip=3.3.3.3 endpoint=extract units=2 reason=global",
+        ]
+
     def test_default_settings_match_demo_limits(self, fake_openai_env):
         settings = get_settings()
-        assert settings.daily_quota_per_ip == 50
-        assert settings.daily_quota_global == 1000
+        assert settings.daily_quota_per_ip == 200
+        assert settings.daily_quota_global == 5000
         assert settings.admin_stats_token is None
 
 

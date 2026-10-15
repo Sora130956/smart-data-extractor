@@ -3,12 +3,14 @@
 
 import {
   batchExtractResponseSchema,
+  feedbackResponseSchema,
   parseImageResponseSchema,
   parsePdfResponseSchema,
   presetListResponseSchema,
   presetSchemaResponseSchema,
   schemaResolveResponseSchema,
   type BatchExtractResponse,
+  type FeedbackResponse,
   type ParseImageResponse,
   type ParsePdfResponse,
   type PresetListItem,
@@ -160,4 +162,23 @@ export async function parseImage(file: File): Promise<ParseImageResponse> {
   if (!res.ok) throw await toApiError(res);
 
   return parseImageResponseSchema.parse(await res.json());
+}
+
+/** POST /feedback: forward a visitor's problem report to the owner. */
+export async function sendFeedback(
+  message: string,
+  contact?: string,
+): Promise<FeedbackResponse> {
+  const body: Record<string, unknown> = { message };
+  if (contact) body.contact = contact;
+
+  const res = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) throw await toApiError(res);
+
+  return feedbackResponseSchema.parse(await res.json());
 }

@@ -425,7 +425,11 @@ function AppShell() {
 
         <section>
           <StatsStrip stats={stats} />
-          <ResultsHeader counts={counts} sources={sources} />
+          <ResultsHeader
+            counts={counts}
+            sources={sources}
+            onClear={() => setSources([])}
+          />
           {sources.length === 0 ? (
             <EmptyState />
           ) : (

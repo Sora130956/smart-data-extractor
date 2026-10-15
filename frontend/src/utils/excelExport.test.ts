@@ -76,8 +76,9 @@ const bareSource = makeSource({
   ],
 });
 
-// Issue #1: a reviewed field must keep its original extraction value so the
-// export can compare the LLM's answer with the human correction.
+// Issue #1: a reviewed field keeps its original extraction value in
+// `originalData` (UI detail modal / history), but the export reflects the
+// corrected `data` only — no companion "(Original)" columns.
 const reviewedSource = makeSource({
   id: 'text-3',
   name: 'Invoice C',
@@ -100,7 +101,7 @@ const reviewedSource = makeSource({
 });
 
 describe('buildExportModel', () => {
-  const model = buildExportModel([labeledSource, bareSource], t);
+  const model = buildExportModel([labeledSource, bareSource], t, 'en');
 
   it('names the two sheets via i18n', () => {
     expect(model.results.name).toBe('Results');
@@ -201,32 +202,47 @@ describe('buildExportModel', () => {
 });
 
 describe('buildExportModel with reviewed fields (issue #1)', () => {
-  const model = buildExportModel([reviewedSource, bareSource], t);
+  const model = buildExportModel([reviewedSource, bareSource], t, 'en');
 
-  it('inserts an "(Original)" column right after each reviewed field column', () => {
-    const columns = model.results.columns;
-    expect(columns).toEqual([
+  it('exports corrected data with no "(Original)" companion columns', () => {
+    // The export reflects the reviewed/corrected values only; original
+    // extraction values stay in the UI detail modal / history.
+    expect(model.results.columns).toEqual([
       'Source',
       'Item',
       'Status',
       'Error',
       'Vendor',
-      'Vendor (Original)', // reviewed union-wide -> companion column
-      'Total', // never reviewed anywhere -> no companion
+      'Total',
       'email',
       'Avg Confidence',
       'Cost (USD)',
     ]);
   });
 
-  it('fills the original column only on reviewed rows; unreviewed rows stay empty', () => {
-    // Row 1 (Invoice C / item 1): vendor reviewed -> original 'Acme Corp'.
-    expect(model.results.rows[0][5]).toBe('Acme Corp');
-    expect(model.results.rows[0][4]).toBe('Beta Ltd');
-    // Row 2 (Invoice C / item 2): vendor not reviewed on this row -> empty.
-    expect(model.results.rows[1][5]).toBeNull();
-    // Row 3 (Lead B): empty as well.
-    expect(model.results.rows[2][5]).toBeNull();
+  it('exports one single column per field, reviewed or not', () => {
+    expect(model.results.rows[0]).toEqual([
+      'Invoice C',
+      '1',
+      'Success',
+      null,
+      'Beta Ltd',
+      1200,
+      null,
+      0.9,
+      0.0002,
+    ]);
+    expect(model.results.rows[1]).toEqual([
+      'Invoice C',
+      '2',
+      'Success',
+      null,
+      'Unreviewed Ltd',
+      300,
+      null,
+      0.9,
+      0.0002,
+    ]);
   });
 
   it('leaves the confidence sheet layout untouched by review state', () => {
@@ -238,6 +254,23 @@ describe('buildExportModel with reviewed fields (issue #1)', () => {
       'email',
       'Avg Confidence',
     ]);
+  });
+});
+
+describe('buildExportModel cost currency follows the UI language', () => {
+  it('exports cost in USD under English', () => {
+    const model = buildExportModel([labeledSource], t, 'en');
+
+    expect(model.results.columns.at(-1)).toBe('Cost (USD)');
+    expect(model.results.rows[0].at(-1)).toBe(0.0002);
+  });
+
+  it('exports cost in CNY under Chinese', () => {
+    const tZh = i18next.getFixedT('zh') as TFunction;
+    const model = buildExportModel([labeledSource], tZh, 'zh');
+
+    expect(model.results.columns.at(-1)).toBe('成本 (CNY)');
+    expect(model.results.rows[0].at(-1)).toBe(0.00145);
   });
 });
 
@@ -294,7 +327,7 @@ describe('buildWorkbook', () => {
   // exceljs buffer writes occasionally exceed the 5s default when the whole
   // suite runs in parallel (known flake, D-019) — give it headroom.
   it('builds the two sheets with a bold frozen header row, and writes a valid buffer', { timeout: 20000 }, async () => {
-    const model = buildExportModel([labeledSource, bareSource], t);
+    const model = buildExportModel([labeledSource, bareSource], t, 'en');
     const workbook = await buildWorkbook(model);
 
     expect(workbook.worksheets.map((ws) => ws.name)).toEqual(['Results', 'Field Confidence']);
@@ -311,7 +344,7 @@ describe('buildWorkbook', () => {
   });
 
   it('sizes worksheet columns to their content (issue #12)', { timeout: 20000 }, async () => {
-    const model = buildExportModel([labeledSource, bareSource], t);
+    const model = buildExportModel([labeledSource, bareSource], t, 'en');
     const workbook = await buildWorkbook(model);
     const results = workbook.getWorksheet('Results')!;
     const expected = autoColumnWidths(model.results);

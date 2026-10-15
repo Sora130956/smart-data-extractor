@@ -9,6 +9,7 @@
     "themeDark": "Dark",
     "language": "EN / 中文",
     "settings": "Settings",
+    "feedback": "Feedback",
     "history": "History",
     "github": "GitHub"
   },
@@ -91,8 +92,8 @@
     "smartSavedNamePrefix": "Smart inference"
   },
   "quota": {
-    "perIp": "You've used all free extractions allowed per visitor for today. The quota resets at 00:00 UTC.",
-    "global": "This demo has used up its daily free quota. It resets at 00:00 UTC — please come back tomorrow."
+    "perIp": "This is a trial version with a limited number of document extractions per day — your daily quota is used up (resets at 00:00 UTC / 8:00 AM Beijing time). Need a higher limit? Click the Feedback button in the top-right corner to tell us.",
+    "global": "This is a trial version with a limited total number of document extractions per day — the site-wide quota is used up (resets at 00:00 UTC / 8:00 AM Beijing time). Need a higher limit? Click the Feedback button in the top-right corner to tell us."
   },
   "ocr": {
     "rateLimited": "The document parsing service is busy right now. Please wait a moment and try again.",
@@ -148,8 +149,25 @@
     "filterReviewed": "Reviewed",
     "exportJson": "Export All JSON",
     "exportExcel": "Export Excel",
+    "clear": "Clear",
     "emptyTitle": "No extractions yet",
     "emptyBody": "Add files or paste text above, pick a preset, then run Start Extraction. Every field comes back with its own confidence score."
+  },
+  "feedback": {
+    "title": "Feedback",
+    "messageLabel": "Message",
+    "placeholder": "Describe the problem or suggestion…",
+    "contactLabel": "Contact (optional)",
+    "contactPlaceholder": "Email or another way to reach you",
+    "send": "Send",
+    "sending": "Sending…",
+    "sent": "Sent — thank you for your feedback!",
+    "sentHint": "We read every message and reply when a contact is left.",
+    "done": "Done",
+    "errorQuota": "You have submitted too many feedback messages today. Please come back tomorrow.",
+    "errorNotConfigured": "The feedback channel is not open yet. Please try again later.",
+    "errorSendFailed": "Failed to send. Please try again later.",
+    "errorGeneric": "Failed to send: {{message}}"
   },
   "confidence": {
     "high": "High",
@@ -182,7 +200,7 @@
     "error": "Error",
     "avgConfidence": "Avg Confidence",
     "costUsd": "Cost (USD)",
-    "originalColumn": "{{field}} (Original)"
+    "costCny": "Cost (CNY)"
   },
   "resultDetail": {
     "title": "Extraction Result — {{index}}",

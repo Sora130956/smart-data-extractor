@@ -52,16 +52,26 @@ function Chip({
 export function ResultsHeader({
   counts = EMPTY_COUNTS,
   sources = [],
+  onClear,
 }: {
   counts?: FilterCounts;
   sources?: ExtractionSource[];
+  /** Clears the on-screen results. Completed batches are already archived
+   * in the browser history store, so this hides them without data loss. */
+  onClear: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const filter = useUiStore((s) => s.filter);
   const setFilter = useUiStore((s) => s.setFilter);
 
   function handleExportAll() {
-    const blob = new Blob([JSON.stringify(sources, null, 2)], { type: 'application/json' });
+    // Export just the extracted data: one plain JSON array element per
+    // successful result (accumulation order). Failed items have no data;
+    // UI metadata (confidence, review state, blobs, stats) stays out.
+    const rows = sources.flatMap((source) =>
+      source.results.flatMap((result) => (result.data ? [result.data] : [])),
+    );
+    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -71,7 +81,8 @@ export function ResultsHeader({
   }
 
   function handleExportExcel() {
-    void exportToExcel(sources, buildExportFilename(exportLabel(), 'xlsx'), t);
+    // Cost column currency follows the UI language (CNY under Chinese).
+    void exportToExcel(sources, buildExportFilename(exportLabel(), 'xlsx'), t, i18n.language);
   }
 
   /** Newest batch first: its template label names the export. Older sources
@@ -110,6 +121,11 @@ export function ResultsHeader({
       </Button>
       <Button size="sm" disabled={counts.all === 0} onClick={handleExportExcel}>
         {t('results.exportExcel')}
+      </Button>
+      {/* Completed batches are already saved in the history store when
+       * extraction finishes, so clearing the screen loses nothing. */}
+      <Button size="sm" disabled={counts.all === 0} onClick={onClear}>
+        {t('results.clear')}
       </Button>
     </div>
   );
