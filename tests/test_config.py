@@ -197,3 +197,22 @@ def test_settings_glm_ocr_max_retries_override(monkeypatch):
     monkeypatch.setenv("GLM_OCR_MAX_RETRIES", "5")
     get_settings.cache_clear()
     assert get_settings().glm_ocr_max_retries == 5
+
+
+def test_settings_glm_ocr_min_request_interval_default(monkeypatch):
+    """glm_ocr_min_request_interval defaults to 1.0s (issue #13 follow-up:
+    Zhipu's 429 is a request-frequency limit, so request starts must be
+    paced, not just in-flight concurrency capped)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("GLM_OCR_MIN_REQUEST_INTERVAL", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().glm_ocr_min_request_interval == 1.0
+
+
+def test_settings_glm_ocr_min_request_interval_override(monkeypatch):
+    """Test glm_ocr_min_request_interval can be overridden via
+    GLM_OCR_MIN_REQUEST_INTERVAL."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_OCR_MIN_REQUEST_INTERVAL", "2.5")
+    get_settings.cache_clear()
+    assert get_settings().glm_ocr_min_request_interval == 2.5

@@ -446,6 +446,17 @@ def _patch_sleep(monkeypatch) -> list[float]:
     return sleeps
 
 
+def _patch_pace(monkeypatch) -> list[float]:
+    """Stub ocr_module._pace_sleep into a recorder (no real waits)."""
+    waits: list[float] = []
+
+    async def fake_pace_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(ocr_module, "_pace_sleep", fake_pace_sleep)
+    return waits
+
+
 async def test_parse_pdf_retries_429_with_backoff_then_succeeds(
     monkeypatch, fake_openai_env
 ):
@@ -453,6 +464,7 @@ async def test_parse_pdf_retries_429_with_backoff_then_succeeds(
     until an attempt succeeds — burst uploads no longer fail the whole
     document (issue #13)."""
     sleeps = _patch_sleep(monkeypatch)
+    _patch_pace(monkeypatch)
     monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
     requests: list[httpx.Request] = []
     payload = _glm_ocr_payload([[_element("text", "OK", [0.1, 0.1, 0.5, 0.2])]])
@@ -472,12 +484,17 @@ async def test_parse_pdf_retries_429_with_backoff_then_succeeds(
 
     assert result["pages"] == ["OK"]
     assert len(requests) == 3  # two 429s then success
-    assert sleeps == [1.0, 2.0]  # exponential backoff between attempts
+    # exponential backoff between attempts, jittered up to +25% (官方建议
+    # "避免固定间隔的高频重试"): base delay is the floor, never undercut
+    assert len(sleeps) == 2
+    assert 1.0 <= sleeps[0] <= 1.25
+    assert 2.0 <= sleeps[1] <= 2.5
 
 
 async def test_parse_pdf_honors_numeric_retry_after_header(monkeypatch, fake_openai_env):
     """A numeric Retry-After on the 429 overrides the exponential default."""
     sleeps = _patch_sleep(monkeypatch)
+    _patch_pace(monkeypatch)
     monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
     requests: list[httpx.Request] = []
     payload = _glm_ocr_payload([[_element("text", "OK", [0.1, 0.1, 0.5, 0.2])]])
@@ -499,7 +516,8 @@ async def test_parse_pdf_honors_numeric_retry_after_header(monkeypatch, fake_ope
 
     assert result["pages"] == ["OK"]
     assert len(requests) == 2
-    assert sleeps == [7.0]
+    assert len(sleeps) == 1
+    assert 7.0 <= sleeps[0] <= 7.0 * 1.25  # server value is the floor, jittered
 
 
 async def test_parse_pdf_raises_429_after_retries_exhausted(
@@ -510,6 +528,7 @@ async def test_parse_pdf_raises_429_after_retries_exhausted(
     monkeypatch.setenv("GLM_OCR_MAX_RETRIES", "2")
     get_settings.cache_clear()
     sleeps = _patch_sleep(monkeypatch)
+    _patch_pace(monkeypatch)
     monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
     requests: list[httpx.Request] = []
 
@@ -525,7 +544,9 @@ async def test_parse_pdf_raises_429_after_retries_exhausted(
 
     assert exc_info.value.response.status_code == 429
     assert len(requests) == 3  # 1 initial + 2 retries
-    assert sleeps == [1.0, 2.0]
+    assert len(sleeps) == 2
+    assert 1.0 <= sleeps[0] <= 1.25
+    assert 2.0 <= sleeps[1] <= 2.5
 
 
 async def test_parse_pdf_does_not_retry_non_429_errors(fake_openai_env):
@@ -548,10 +569,13 @@ async def test_glm_ocr_semaphore_caps_concurrent_layout_parsing_calls(
 ):
     """Concurrent parse calls share one process-wide semaphore sized by
     GLM_OCR_MAX_CONCURRENCY, keeping in-flight layout_parsing requests
-    within the account's concurrency allowance (issue #13)."""
+    within the account's concurrency allowance (issue #13). Pacing is
+    disabled here (interval 0) so the semaphore is measured in isolation."""
     monkeypatch.setenv("GLM_OCR_MAX_CONCURRENCY", "2")
+    monkeypatch.setenv("GLM_OCR_MIN_REQUEST_INTERVAL", "0")
     get_settings.cache_clear()
     ocr_module._glm_ocr_semaphore.cache_clear()
+    ocr_module._glm_ocr_pacer.cache_clear()
     try:
         payload = _glm_ocr_payload([[_element("text", "v", [0.1, 0.1, 0.5, 0.2])]])
         in_flight = 0
@@ -574,3 +598,131 @@ async def test_glm_ocr_semaphore_caps_concurrent_layout_parsing_calls(
         assert peak == 2  # capped at the configured limit, with real overlap
     finally:
         ocr_module._glm_ocr_semaphore.cache_clear()
+        ocr_module._glm_ocr_pacer.cache_clear()
+
+
+# --- retry jitter (官方建议"避免固定间隔的高频重试") ---
+
+
+def test_with_jitter_stays_within_bounds_and_never_undercuts():
+    """_with_jitter adds 0~25% on top of the computed delay: the base
+    delay (including a server Retry-After) stays a hard floor, so
+    jittered retries are never EARLIER than the safe value."""
+    samples = set()
+    for base in (1.0, 2.0, 4.0, 7.0):
+        for _ in range(50):
+            jittered = ocr_module._with_jitter(base)
+            assert base <= jittered <= base * 1.25
+            if base == 2.0:
+                samples.add(round(jittered, 6))
+    assert len(samples) > 1  # actually random, not a no-op constant
+
+
+# --- request-start pacing: rate limiting, not just concurrency (issue #13
+# follow-up: Zhipu's 1302/429 is an account request-FREQUENCY limit) ---
+
+
+def test_request_pacer_grows_interval_on_429_and_decays_on_success():
+    """AIMD adaptation: each 429 doubles the pacing interval up to the cap;
+    each success decays it back toward the configured floor."""
+    pacer = ocr_module._RequestPacer(min_interval=1.0, max_interval=10.0)
+    assert pacer.interval == 1.0
+    pacer.on_rate_limited()
+    assert pacer.interval == 2.0
+    pacer.on_rate_limited()
+    assert pacer.interval == 4.0
+    for _ in range(3):
+        pacer.on_rate_limited()
+    assert pacer.interval == 10.0  # capped at the ceiling (4 -> 8 -> 10)
+    for _ in range(10):
+        pacer.on_success()
+    assert pacer.interval == 1.0  # decayed and clamped at the floor
+
+
+async def test_request_pacer_first_acquire_is_immediate(monkeypatch):
+    """An idle pacer lets the first request start at once: single-file
+    uploads pay zero pacing latency."""
+    waits = _patch_pace(monkeypatch)
+    pacer = ocr_module._RequestPacer(min_interval=1.0)
+    await pacer.acquire()
+    assert waits == []  # nothing to wait for
+
+
+async def test_request_pacer_spaces_request_starts(monkeypatch):
+    """Successive acquires are spaced by the current interval: the offered
+    request rate is capped even when each call completes instantly."""
+    waits = _patch_pace(monkeypatch)
+    pacer = ocr_module._RequestPacer(min_interval=1.0)
+    for _ in range(3):
+        await pacer.acquire()
+    assert waits[0] == pytest.approx(1.0)
+    assert waits[1] == pytest.approx(2.0)
+
+
+async def test_request_pacer_disabled_when_interval_zero(monkeypatch):
+    """min_interval=0 disables pacing entirely (escape hatch)."""
+    waits = _patch_pace(monkeypatch)
+    pacer = ocr_module._RequestPacer(min_interval=0.0)
+    for _ in range(5):
+        await pacer.acquire()
+    assert waits == []
+
+
+async def test_parse_image_burst_paces_request_starts(monkeypatch, fake_openai_env):
+    """A burst of uploads spaces layout_parsing starts by the pacing
+    interval: 20-card style bursts no longer offer more requests per
+    minute than the account allows (issue #13 follow-up)."""
+    monkeypatch.setenv("GLM_OCR_MIN_REQUEST_INTERVAL", "1.0")
+    get_settings.cache_clear()
+    ocr_module._glm_ocr_pacer.cache_clear()
+    waits = _patch_pace(monkeypatch)
+    payload = _glm_ocr_payload([[_element("text", "v", [0.1, 0.1, 0.5, 0.2])]])
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    try:
+        results = await asyncio.gather(
+            *[parse_image(b"img-bytes", http_client=client) for _ in range(4)]
+        )
+        assert all(r["pages"] == ["v"] for r in results)
+        # First start is immediate; the rest are spaced 1s, 2s, 3s out.
+        assert waits == [
+            pytest.approx(1.0),
+            pytest.approx(2.0),
+            pytest.approx(3.0),
+        ]
+    finally:
+        ocr_module._glm_ocr_pacer.cache_clear()
+
+
+async def test_parse_pdf_429_grows_pacing_interval(monkeypatch, fake_openai_env):
+    """A 429 doubles the process-wide pacing interval so later requests
+    start slower; a success decays it back toward the floor."""
+    monkeypatch.setenv("GLM_OCR_MIN_REQUEST_INTERVAL", "1.0")
+    get_settings.cache_clear()
+    ocr_module._glm_ocr_pacer.cache_clear()
+    _patch_sleep(monkeypatch)
+    _patch_pace(monkeypatch)
+    monkeypatch.setattr(ocr_module, "pdf_to_images", lambda b: [b"i1"])
+    requests: list[httpx.Request] = []
+    payload = _glm_ocr_payload([[_element("text", "OK", [0.1, 0.1, 0.5, 0.2])]])
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                429, json={"error": {"code": "1302", "message": "并发超限"}}
+            )
+        return httpx.Response(200, json=payload)
+
+    pacer = ocr_module._glm_ocr_pacer()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    try:
+        result = await parse_pdf(b"fake-pdf-bytes", http_client=client)
+        assert result["pages"] == ["OK"]
+        # 1.0 -> (429) 2.0 -> (success) 1.5
+        assert pacer.interval == pytest.approx(1.5)
+    finally:
+        ocr_module._glm_ocr_pacer.cache_clear()

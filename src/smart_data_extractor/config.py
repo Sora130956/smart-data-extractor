@@ -26,11 +26,15 @@ class Settings(BaseSettings):
     glm_model: str = "glm-ocr"
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
     # Zhipu rate limiting (issue #13): layout_parsing answers 429 Too Many
-    # Requests once concurrent calls exceed the account's allowance.
-    # One process-wide semaphore caps in-flight calls; 429s are retried
-    # with backoff. Tune both to your account tier.
+    # Requests (error 1302, an account request-FREQUENCY limit) once calls
+    # arrive faster than the account allows. One process-wide semaphore
+    # caps in-flight calls; a process-wide pacer spaces request starts at
+    # least glm_ocr_min_request_interval seconds apart (0 disables),
+    # doubling after each 429 and decaying after each success; 429s are
+    # retried with backoff. Tune to your account tier.
     glm_ocr_max_concurrency: int = 2
     glm_ocr_max_retries: int = 3
+    glm_ocr_min_request_interval: float = 1.0
     # DEMO-STAGE quota guard (D-019): caps the daily LLM bill before any
     # public promotion. A limit <= 0 disables that layer. Replace with
     # per-user quotas when the tool goes public.

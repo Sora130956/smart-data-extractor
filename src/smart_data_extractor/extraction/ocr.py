@@ -21,19 +21,29 @@ missing or empty is skipped (its index recorded in ``pages_failed``).
 API-level failures (network error, non-2xx) raise — the whole call
 failed and the caller surfaces an error.
 
-Rate limiting (issue #13): layout_parsing answers 429 Too Many Requests
-once concurrent calls exceed the account's allowance, which a burst
-upload (the frontend fires one request per file) hits immediately. Two
-guards in ``_post_with_retries``: a process-wide semaphore caps
-in-flight calls (``GLM_OCR_MAX_CONCURRENCY``), and 429 answers are
-retried with backoff (``GLM_OCR_MAX_RETRIES``, a numeric Retry-After
-header wins over the exponential default).
+Rate limiting (issue #13): Zhipu's 429 (business code 1302, "please
+control your request frequency") is an account request-FREQUENCY limit,
+so capping in-flight concurrency alone cannot prevent it — a burst of
+quick single-image calls at concurrency 2 still offers far more requests
+per minute than the account allows. Three guards in
+``_post_with_retries``: a process-wide semaphore caps in-flight calls
+(``GLM_OCR_MAX_CONCURRENCY``); a process-wide pacer spaces request
+STARTS at least ``GLM_OCR_MIN_REQUEST_INTERVAL`` seconds apart (0
+disables), doubling the spacing after each 429 and decaying it after
+each success (AIMD, capped at 10s) so the offered rate converges to the
+account's real allowance without configuring the tier's exact RPM; and
+429 answers are retried with backoff (``GLM_OCR_MAX_RETRIES``, a
+numeric Retry-After header wins over the exponential default, and every
+delay is jittered upward by up to 25% per the official guidance to
+avoid fixed-interval retries).
 """
 
 import asyncio
 import base64
 import logging
+import random
 import re
+import time
 from functools import lru_cache
 from io import BytesIO
 from typing import Any
@@ -59,8 +69,18 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _REQUEST_TIMEOUT_SECONDS = 120.0
 
 # 429 retry/backoff (issue #13): 1s, 2s, 4s... unless Retry-After says more.
+# Jittered up to +25% per the official guidance "避免固定间隔的高频重试"
+# (docs.bigmodel.cn/cn/api/rate-limit) so concurrent retries don't realign.
 _RETRYABLE_STATUS_CODE = 429
 _RETRY_BASE_DELAY_SECONDS = 1.0
+_RETRY_JITTER_MAX_FRACTION = 0.25
+
+# Request-start pacing (issue #13 follow-up): AIMD bounds on the interval
+# between layout_parsing request starts. A 429 grows the interval
+# multiplicatively (capped); a success decays it back toward the floor.
+_PACE_MAX_INTERVAL_SECONDS = 10.0
+_PACE_GROWTH_FACTOR = 2.0
+_PACE_DECAY_FACTOR = 0.75
 
 # EXIF Orientation tag: 1 = upright, 2-8 = rotate/flip to display upright.
 _EXIF_ORIENTATION_TAG = 274
@@ -136,6 +156,89 @@ async def _retry_sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+def _with_jitter(delay: float) -> float:
+    """Add 0~25% random jitter on top of a computed backoff delay.
+
+    Official guidance (docs.bigmodel.cn/cn/api/rate-limit): avoid
+    fixed-interval retries — deterministic delays make concurrent
+    retries realign in waves. Upward-only: the computed delay
+    (including a server Retry-After) stays a hard floor, so a jittered
+    retry is never EARLIER than the safe value.
+    """
+    return delay + random.uniform(0.0, delay * _RETRY_JITTER_MAX_FRACTION)
+
+
+async def _pace_sleep(seconds: float) -> None:
+    """Wait until a paced request's start time.
+
+    A second indirection seam, kept separate from ``_retry_sleep`` so
+    tests can observe pacing waits and backoff delays independently.
+    """
+    await asyncio.sleep(seconds)
+
+
+class _RequestPacer:
+    """Process-wide request-START pacing (issue #13 follow-up).
+
+    The semaphore caps how many layout_parsing calls are in flight; this
+    pacer caps how often new ones may START. Zhipu's 1302/429 is a
+    request-frequency limit ("please control your request frequency"),
+    which a concurrency cap alone cannot prevent: 20 quick single-image
+    calls at concurrency 2 offer far more requests per minute than the
+    account allows.
+
+    AIMD adaptation: every 429 multiplies the current interval (capped
+    at ``max_interval``); every non-429 answer decays it back toward
+    ``min_interval``. The offered rate therefore converges to whatever
+    the account's real allowance is, without configuring the tier's
+    exact RPM. All state is plain floats mutated only inside synchronous
+    sections — atomic under asyncio's cooperative scheduling, so no
+    locks and no event-loop affinity.
+    """
+
+    def __init__(
+        self,
+        min_interval: float,
+        max_interval: float = _PACE_MAX_INTERVAL_SECONDS,
+    ) -> None:
+        self._min_interval = max(0.0, min_interval)
+        self._max_interval = max(self._min_interval, max_interval)
+        self._interval = self._min_interval
+        self._next_start = 0.0  # time.monotonic() domain
+
+    @property
+    def interval(self) -> float:
+        """Current spacing between request starts (seconds)."""
+        return self._interval
+
+    async def acquire(self) -> None:
+        """Wait until this request's paced start time.
+
+        A first request on an idle pacer starts immediately; a burst is
+        spaced one interval apart. ``min_interval <= 0`` disables pacing
+        entirely.
+        """
+        if self._min_interval <= 0:
+            return
+        now = time.monotonic()
+        start = max(now, self._next_start)
+        self._next_start = start + self._interval
+        if start > now:
+            await _pace_sleep(start - now)
+
+    def on_rate_limited(self) -> None:
+        """A 429 was answered: slow future request starts down."""
+        self._interval = min(
+            self._interval * _PACE_GROWTH_FACTOR, self._max_interval
+        )
+
+    def on_success(self) -> None:
+        """A request went through: gently recover toward the floor."""
+        self._interval = max(
+            self._interval * _PACE_DECAY_FACTOR, self._min_interval
+        )
+
+
 @lru_cache(maxsize=1)
 def _glm_ocr_semaphore() -> asyncio.Semaphore:
     """Process-wide cap on concurrent layout_parsing calls (issue #13).
@@ -146,6 +249,14 @@ def _glm_ocr_semaphore() -> asyncio.Semaphore:
     ``shared_concurrency_limiter`` pattern (D-006).
     """
     return asyncio.Semaphore(max(1, get_settings().glm_ocr_max_concurrency))
+
+
+@lru_cache(maxsize=1)
+def _glm_ocr_pacer() -> _RequestPacer:
+    """Process-wide request-start pacer shared by every layout_parsing
+    call (same lru_cache pattern as ``_glm_ocr_semaphore``)."""
+    settings = get_settings()
+    return _RequestPacer(max(0.0, settings.glm_ocr_min_request_interval))
 
 
 def _backoff_delay(response: httpx.Response, attempt: int) -> float:
@@ -166,25 +277,34 @@ async def _post_with_retries(
     payload: dict[str, Any],
     headers: dict[str, str],
 ) -> dict[str, Any]:
-    """One layout_parsing POST, retried with backoff on 429 (issue #13).
+    """One layout_parsing POST, paced, concurrency-capped, and retried
+    with backoff on 429 (issue #13).
 
-    The semaphore is acquired per attempt, so a caller waiting out its
-    backoff does not hold a concurrency slot another request could use.
-    Exhausted retries (still 429) and all other non-2xx answers raise —
-    an API-level failure fails the whole document (D-031 decision 7).
+    Every attempt (retries included) first waits for its paced start time
+    — the account's rate limit counts all requests, not just fresh ones —
+    then acquires the semaphore, so a caller waiting out its backoff or
+    pacing delay does not hold a concurrency slot another request could
+    use. A 429 grows the pacer's interval for every future request; a
+    non-429 answer decays it back (AIMD). Exhausted retries (still 429)
+    and all other non-2xx answers raise — an API-level failure fails the
+    whole document (D-031 decision 7).
     """
     settings = get_settings()
     max_retries = max(0, settings.glm_ocr_max_retries)
     semaphore = _glm_ocr_semaphore()
+    pacer = _glm_ocr_pacer()
     response: httpx.Response | None = None
     for attempt in range(max_retries + 1):
+        await pacer.acquire()
         async with semaphore:
             response = await client.post(url, json=payload, headers=headers)
         if response.status_code != _RETRYABLE_STATUS_CODE:
+            pacer.on_success()
             break
+        pacer.on_rate_limited()
         if attempt == max_retries:
             break  # retries exhausted: the raise below surfaces the 429
-        delay = _backoff_delay(response, attempt)
+        delay = _with_jitter(_backoff_delay(response, attempt))
         logger.warning(
             "glm-ocr layout_parsing rate limited (429), retry %d/%d in %.1fs",
             attempt + 1,
