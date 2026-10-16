@@ -991,3 +991,43 @@
   - 前端：utils/parseRetry.ts（新）、utils/errors.ts、components/input/PasteTextInput.tsx、zh/en.json
   - 测试：parseRetry.test.ts 5 用例（契约：首成功不等待/重试后成功/不可重试立即抛/耗尽重抛/中途不可重试停止）；errors.test.ts +2；PasteTextInput.test.tsx 新增 2 fake-timers 用例（重试成功入列 + 耗尽回落友好文案），既有 rate-limited 组件用例改用 `ocr_upstream_error`（否则会被自动重试挂 53s）
   - 验证：TDD 先红（模块缺失）后绿；全量 vitest 407 passed（27 files）+ tsc 0 错误；突变自证（`isOcrAutoRetryable` 恒 false → 3 红含 2 个自动重试用例）抓红后还原恢复全绿
+
+## D-046：OCR 置信度融合（glm-ocr 主文本 + hand_write 行级置信度）
+
+- **日期**：2026-10-16
+- **状态**：已接受
+- **来源**：用户发现字段置信度仅来自第二个文本模型自评，glm-ocr 解析时图片是否模糊对其不可见；讨论后选定"glm-ocr 主文本 + 智谱 OCR 服务（`/files/ocr`，`tool_type=hand_write`，`probability=true`）提供行级置信度"，用户以模糊名片实测，认为 `min` 概率可靠
+- **背景**：
+  - glm-ocr（layout_parsing）响应无置信度字段；表格是未来重要功能，不能换掉 glm-ocr
+  - 两个引擎分块方式不同，不能按序号对齐，只能按位置（bbox 重叠）匹配
+- **决策**：
+  1. 数据流（无状态）：parse 响应新增 `ocr_lines`（`{page, text, box[0-100], min_prob}`）；前端暂存并随 `/batch_extract` 以 `ocr_inputs`（与 texts 按下标对齐，可为 null）回传；后端 `fuse_confidence` 按字段融合
+  2. 合成：`最终 = min(LLM 自评, 对应 OCR 行 min 置信度) × 一致性惩罚`（文本不一致时乘 `ocr_consistency_penalty=0.7`），clamp [0,1]；找不到对应行的字段只用自评并在 `confidence_signals` 标 `ocr_signal:false`
+  3. 范围：图片与 PDF 一起做，PDF 逐页按 2 倍缩放渲染后调用接口（接口不支持 PDF）
+  4. 容错：hand_write 调用失败降级（不影响主流程，无 `ocr_lines` 即退回纯自评）；独立 pacer/semaphore（`glm_hand_write_max_concurrency=2`、`glm_hand_write_min_request_interval=1.0`）；开关 `glm_ocr_confidence_enabled=True`
+- **理由**：文本模型只见文本，看不到图像质量；OCR 行级最低概率直接反映识别可靠度；取 min 保守，宁可低估不高估；回传方案避免服务端缓存状态
+- **已知局限**：惩罚系数 0.7 与 0.5 重叠阈值未用真实数据校准；`confidence_signals` 仅更新 zod schema，UI 尚未展示
+- **影响**：
+  - 后端：extraction/ocr.py、extraction/confidence_fusion.py（新）、api/schemas.py、api/routes.py、config.py
+  - 前端：PasteTextInput.tsx、App.tsx、hooks/useBatchExtract.ts、api/client.ts、api/schemas.ts、types/extraction.ts
+  - 测试：test_confidence_fusion.py（新）、test_ocr.py、test_routes.py、conftest.py；前端 PasteTextInput.test.tsx、client.test.ts
+  - 验证：TDD 先红后绿；后端 332 passed / 2 skipped；前端 vitest 411 passed；tsc 仅既有 parseRetry.test.ts(50,48) 错误；突变自证（融合去 min → 8 红；去惩罚 → 2 红）抓红后还原
+
+## D-047：严格阈值字段详情页最高黄色 + 一致性判定忽略标点
+
+- **背景**：①阈值严格（如 0.95）的字段实际 0.92，详情页仍显示绿色；②"明明正确的字段置信度仅 ~0.6"，怀疑一致性惩罚 0.7 过重
+- **决策**：
+  1. 前端：utils/confidence.ts 新增 ieldConfidenceLevel(value, threshold)——按 confidenceLevel 分档后，若为 high 但 alue < 字段阈值 则降为 medium（黄）；红不受影响。ResultDetailModal 字段徽章改用它（阈值取 ieldThreshold(key, source.reviewThresholds)）；已复核字段仍为绿色"已复核"。左侧高亮窗格与列表 ConfidenceBar 未改
+  2. 后端：confidence_fusion 的相关行判定与一致性判定改为只比较字母数字（_comparable，去标点/符号/空白），避免 ¥1,234.00 vs OCR 1,234.00、138-0000-1111、+86 等被误判不一致而乘 0.7（0.9→0.63）。少/错字符仍判不一致
+  3. 惩罚系数 0.7 暂不调整：无真实 confidence_signals 数据无法判断是系数问题还是 OCR min_prob 偏低；需用户提供样例（confidence_signals 中 consistent/ocr_confidence）再校准
+- **验证**：TDD 先红后绿；后端 334 passed/2 skipped；前端 417 passed；tsc 仅既有 parseRetry 错误；突变自证（取消降级 → 2 红后还原）
+
+## D-048：移除一致性比较与 0.7 惩罚，OCR 仅提供置信度
+
+- **背景**：D-047 修正标点后用户仍觉得结果"很奇怪"（正确字段被一致性惩罚压低）；文本一致性判定本身对 OCR 切分差异过于敏感
+- **决策**：
+  1. confidence_fusion 删除一致性比较与惩罚：最终置信度 = min(LLM 自评, 对应 OCR 行 min_prob)，不再乘 0.7；signals 仅含 ocr_confidence/ocr_signal（不再有 consistent）
+  2. 相关行筛选（_comparable + 互为子串）保留，仅用于挑选字段对应的 OCR 行；无相关行时取重叠行 min（无惩罚）
+  3. 删除 config.ocr_consistency_penalty 及 routes 中的传参。取代 D-046 决策 2 的"×一致性惩罚"与 D-047 第 2/3 条的一致性相关内容
+- **取舍**：OCR 漏字/错字不再被惩罚（probability 看不到丢字），仅靠置信度数值与 LLM 自评
+- **验证**：TDD 先红后绿；后端 333 passed/2 skipped；突变自证（min 改为只取 llm → 7 红后还原）

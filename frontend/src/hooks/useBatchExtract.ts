@@ -4,7 +4,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { adaptBatchExtractResponse } from '@/api/adapters';
 import { batchExtract } from '@/api/client';
-import type { ExtractionSource, OcrBlock } from '@/types/extraction';
+import type { ExtractionSource, OcrBlock, OcrLine } from '@/types/extraction';
 
 export interface BatchExtractInput {
   texts: string[];
@@ -30,6 +30,9 @@ export interface BatchExtractInput {
   /** Per-text OCR grounding blocks (D-028), aligned by index — the review
    * pane matches extracted values against them locally. */
   pagesBlocks?: Array<Array<OcrBlock[] | null> | undefined>;
+  /** Per-text hand_write OCR rows (D-046), aligned by index — sent back so
+   * the backend fuses row confidence into each field's confidence. */
+  ocrLines?: Array<OcrLine[] | undefined>;
   /** field_name -> user-configured minimum confidence, snapshotted onto each
    * source so review flags survive later schema edits (issue #2). */
   reviewThresholds?: Record<string, number>;
@@ -40,8 +43,14 @@ export interface BatchExtractInput {
 
 export function useBatchExtract() {
   return useMutation<ExtractionSource[], Error, BatchExtractInput>({
-    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, fileTypes, pageImages, pagesBlocks, reviewThresholds, allowEmptyFields }) => {
-      const response = await batchExtract({ texts, preset, schema, instructions, lang });
+    mutationFn: async ({ texts, preset, schema, instructions, lang, schemaResolveCost, fieldLabels, presetLabel, fileUrls, fileTypes, pageImages, pagesBlocks, ocrLines, reviewThresholds, allowEmptyFields }) => {
+      const ocrInputs = texts.map((_, i) => {
+        const lines = ocrLines?.[i];
+        return lines && lines.length > 0
+          ? { pagesBlocks: pagesBlocks?.[i] ?? [], ocrLines: lines }
+          : undefined;
+      });
+      const response = await batchExtract({ texts, preset, schema, instructions, lang, ocrInputs });
       return adaptBatchExtractResponse(response, texts, schemaResolveCost, fieldLabels, presetLabel, fileUrls, reviewThresholds, allowEmptyFields, fileTypes, pageImages, pagesBlocks);
     },
   });

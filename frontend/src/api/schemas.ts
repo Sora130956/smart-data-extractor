@@ -15,6 +15,8 @@ export const batchResultItemSchema = z.object({
   cost_usd: z.number(),
   cost_cny: z.number(),
   error: z.string().nullable(),
+  // D-046: per-field OCR fusion evidence; null when no OCR input was sent.
+  confidence_signals: z.record(z.string(), z.record(z.string(), z.unknown())).nullish(),
 });
 
 export const batchExtractResponseSchema = z.object({
@@ -81,8 +83,19 @@ export const ocrBlockSchema = z.object({
   box: z.tuple([z.number(), z.number(), z.number(), z.number()]),
 });
 
+// One hand_write OCR row (D-046).
+export const ocrLineSchema = z.object({
+  page: z.number(),
+  text: z.string(),
+  box: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+  min_prob: z.number(),
+});
+
 export const parsePdfResponseSchema = z.object({
   text: z.string(),
+  // D-046: row-level OCR confidence (hand_write interface). Echoed back to
+  // /batch_extract for confidence fusion; null/absent when disabled/failed.
+  ocr_lines: z.array(ocrLineSchema).nullish(),
   // Per-page OCR text aligned to the original page order; null marks a failed page.
   pages: z.array(z.string().nullable()),
   // Per-page OCR grounding blocks (D-028), aligned with `pages` — the review

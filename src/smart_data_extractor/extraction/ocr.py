@@ -68,6 +68,9 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
 
+# PDF pages are rendered at 2x (vs the 1x preview) for the confidence OCR.
+_OCR_RENDER_SCALE = 2.0
+
 # 429 retry/backoff (issue #13): 1s, 2s, 4s... unless Retry-After says more.
 # Jittered up to +25% per the official guidance "避免固定间隔的高频重试"
 # (docs.bigmodel.cn/cn/api/rate-limit) so concurrent retries don't realign.
@@ -134,13 +137,18 @@ def _normalize_image_orientation(image_bytes: bytes, media_type: str) -> bytes:
         return image_bytes
 
 
-def pdf_to_images(pdf_bytes: bytes) -> list[bytes]:
-    """Render each page of a PDF to a PNG image (preview only, D-031)."""
+def pdf_to_images(pdf_bytes: bytes, *, scale: float = 1.0) -> list[bytes]:
+    """Render each page of a PDF to a PNG image.
+
+    At the default scale it is the review-pane preview (D-031); the
+    confidence OCR call (D-046) renders at a higher ``scale`` so
+    small print stays legible to the recognizer.
+    """
     images = []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         for page in doc:
-            pix = page.get_pixmap()
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
             images.append(pix.tobytes("png"))
     finally:
         doc.close()
@@ -259,6 +267,22 @@ def _glm_ocr_pacer() -> _RequestPacer:
     return _RequestPacer(max(0.0, settings.glm_ocr_min_request_interval))
 
 
+@lru_cache(maxsize=1)
+def _hand_write_semaphore() -> asyncio.Semaphore:
+    """Concurrency cap for the /files/ocr confidence calls (D-046).
+
+    Independent from layout_parsing's: a different endpoint, so its own
+    quota and its own pressure."""
+    return asyncio.Semaphore(max(1, get_settings().glm_hand_write_max_concurrency))
+
+
+@lru_cache(maxsize=1)
+def _hand_write_pacer() -> _RequestPacer:
+    """Request-start pacer for /files/ocr, separate from layout_parsing's
+    so a 429 on one endpoint never slows the other (D-046)."""
+    return _RequestPacer(max(0.0, get_settings().glm_hand_write_min_request_interval))
+
+
 def _backoff_delay(response: httpx.Response, attempt: int) -> float:
     """Wait before the next 429 retry: a numeric Retry-After header wins,
     otherwise exponential backoff (1s, 2s, 4s, ...)."""
@@ -274,11 +298,20 @@ def _backoff_delay(response: httpx.Response, attempt: int) -> float:
 async def _post_with_retries(
     client: httpx.AsyncClient,
     url: str,
-    payload: dict[str, Any],
+    payload: dict[str, Any] | None,
     headers: dict[str, str],
+    *,
+    files: dict[str, Any] | None = None,
+    data: dict[str, str] | None = None,
+    pacer: _RequestPacer | None = None,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> dict[str, Any]:
-    """One layout_parsing POST, paced, concurrency-capped, and retried
+    """One OCR-endpoint POST, paced, concurrency-capped, and retried
     with backoff on 429 (issue #13).
+
+    Defaults to layout_parsing's JSON body, pacer and semaphore; the
+    /files/ocr call (D-046) passes multipart ``files``/``data`` plus its
+    own pacer and semaphore.
 
     Every attempt (retries included) first waits for its paced start time
     — the account's rate limit counts all requests, not just fresh ones —
@@ -291,13 +324,18 @@ async def _post_with_retries(
     """
     settings = get_settings()
     max_retries = max(0, settings.glm_ocr_max_retries)
-    semaphore = _glm_ocr_semaphore()
-    pacer = _glm_ocr_pacer()
+    semaphore = semaphore or _glm_ocr_semaphore()
+    pacer = pacer or _glm_ocr_pacer()
     response: httpx.Response | None = None
     for attempt in range(max_retries + 1):
         await pacer.acquire()
         async with semaphore:
-            response = await client.post(url, json=payload, headers=headers)
+            if files is not None:
+                response = await client.post(
+                    url, data=data, files=files, headers=headers
+                )
+            else:
+                response = await client.post(url, json=payload, headers=headers)
         if response.status_code != _RETRYABLE_STATUS_CODE:
             pacer.on_success()
             break
@@ -306,7 +344,8 @@ async def _post_with_retries(
             break  # retries exhausted: the raise below surfaces the 429
         delay = _with_jitter(_backoff_delay(response, attempt))
         logger.warning(
-            "glm-ocr layout_parsing rate limited (429), retry %d/%d in %.1fs",
+            "glm-ocr rate limited (429) on %s, retry %d/%d in %.1fs",
+            url.rsplit("/", 1)[-1],
             attempt + 1,
             max_retries,
             delay,
@@ -385,7 +424,116 @@ def _extract_text_blocks(
     ]
 
 
-def _build_result(data: dict[str, Any], images: list[bytes] | None) -> dict[str, Any]:
+def _image_size(image_bytes: bytes) -> tuple[int, int] | None:
+    try:
+        with Image.open(BytesIO(image_bytes)) as img:
+            return img.size
+    except Exception:
+        return None
+
+
+async def _call_hand_write(
+    image_bytes: bytes,
+    *,
+    media_type: str,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """POST one image to Zhipu's /files/ocr (hand_write) for row-level
+    recognition probabilities (D-046). Multipart upload; raises on
+    errors — callers treat this call as best-effort."""
+    settings = get_settings()
+    url = settings.glm_base_url.rstrip("/") + "/files/ocr"
+    headers = {"Authorization": f"Bearer {settings.glm_api_key}"}
+    form = {"tool_type": "hand_write", "probability": "true"}
+    extension = "jpg" if media_type in ("image/jpeg", "image/jpg") else "png"
+    files = {"file": (f"page.{extension}", image_bytes, media_type)}
+    kwargs: dict[str, Any] = {
+        "files": files,
+        "data": form,
+        "pacer": _hand_write_pacer(),
+        "semaphore": _hand_write_semaphore(),
+    }
+    if http_client is None:
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_SECONDS) as client:
+            return await _post_with_retries(client, url, None, headers, **kwargs)
+    return await _post_with_retries(http_client, url, None, headers, **kwargs)
+
+
+def _hand_write_lines(
+    data: Any, *, page: int, width: int, height: int
+) -> list[dict[str, Any]]:
+    """/files/ocr words_result -> ocr_lines with 0-100 boxes.
+
+    Rows lacking text, location or probability are skipped.
+    ``min_prob`` is ``probability.min`` (the weakest character, so one
+    smudged glyph is not averaged away), falling back to ``average``.
+    """
+    rows = data.get("words_result") if isinstance(data, dict) else None
+    if not isinstance(rows, list) or width <= 0 or height <= 0:
+        return []
+    lines: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text, loc, prob = row.get("words"), row.get("location"), row.get("probability")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if not isinstance(loc, dict) or not isinstance(prob, dict):
+            continue
+        try:
+            left, top = float(loc["left"]), float(loc["top"])
+            right, bottom = left + float(loc["width"]), top + float(loc["height"])
+            raw = prob.get("min")
+            min_prob = float(raw if raw is not None else prob["average"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        def pct(value: float, size: int) -> float:
+            return round(min(100.0, max(0.0, value / size * 100.0)), 2)
+
+        box = [pct(left, width), pct(top, height), pct(right, width), pct(bottom, height)]
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
+        lines.append({"page": page, "text": text, "box": box, "min_prob": min_prob})
+    return lines
+
+
+async def _collect_ocr_lines(
+    images: list[bytes],
+    *,
+    media_type: str,
+    http_client: httpx.AsyncClient | None,
+) -> list[dict[str, Any]]:
+    """Row-level confidence lines for every page image (D-046).
+
+    Best-effort by design: any failure (network, non-2xx, malformed
+    payload) on a page is logged and that page contributes no lines, so
+    the document still parses and its fields fall back to the LLM's
+    self-assessed confidence. Never raises.
+    """
+
+    async def one(page: int, image: bytes) -> list[dict[str, Any]]:
+        try:
+            size = _image_size(image)
+            if size is None:
+                return []
+            data = await _call_hand_write(
+                image, media_type=media_type, http_client=http_client
+            )
+            return _hand_write_lines(data, page=page, width=size[0], height=size[1])
+        except Exception as exc:
+            logger.warning("hand_write confidence OCR failed for page %d: %s", page, exc)
+            return []
+
+    per_page = await asyncio.gather(*(one(i, img) for i, img in enumerate(images)))
+    return [line for lines in per_page for line in lines]
+
+
+def _build_result(
+    data: dict[str, Any],
+    images: list[bytes] | None,
+    ocr_lines: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Assemble the shared parse result dict from a layout_parsing response.
 
     ``layout_details[i]`` maps 1:1 to ``pages[i]``/``pages_blocks[i]``
@@ -424,6 +572,7 @@ def _build_result(data: dict[str, Any], images: list[bytes] | None) -> dict[str,
         "pages": pages,
         "pages_blocks": pages_blocks,
         "pages_failed": pages_failed,
+        "ocr_lines": ocr_lines,
         "pages_images": (
             [base64.b64encode(img).decode("ascii") for img in images]
             if images is not None
@@ -446,12 +595,25 @@ async def parse_pdf(
 
     The whole PDF is sent in one call (D-031 decision 4); the locally
     rendered per-page PNGs ride along in ``pages_images`` for the
-    review-pane preview (D-027), aligned with ``pages``.
+    review-pane preview (D-027), aligned with ``pages``. When row-level
+    confidence is enabled (D-046) the pages are also rendered at 2x and
+    OCR'd concurrently with layout parsing for ``ocr_lines``.
     """
-    data = await _call_glm_ocr(
-        pdf_bytes, media_type="application/pdf", http_client=http_client
+    settings = get_settings()
+    if not settings.glm_ocr_confidence_enabled:
+        data = await _call_glm_ocr(
+            pdf_bytes, media_type="application/pdf", http_client=http_client
+        )
+        return _build_result(data, pdf_to_images(pdf_bytes))
+    data, ocr_lines = await asyncio.gather(
+        _call_glm_ocr(pdf_bytes, media_type="application/pdf", http_client=http_client),
+        _collect_ocr_lines(
+            pdf_to_images(pdf_bytes, scale=_OCR_RENDER_SCALE),
+            media_type="image/png",
+            http_client=http_client,
+        ),
     )
-    return _build_result(data, pdf_to_images(pdf_bytes))
+    return _build_result(data, pdf_to_images(pdf_bytes), ocr_lines)
 
 
 async def parse_image(
@@ -471,8 +633,18 @@ async def parse_image(
     original image bytes).
     """
     image_bytes = _normalize_image_orientation(image_bytes, media_type)
-    data = await _call_glm_ocr(image_bytes, media_type=media_type, http_client=http_client)
-    return _build_result(data, None)
+    if not get_settings().glm_ocr_confidence_enabled:
+        data = await _call_glm_ocr(
+            image_bytes, media_type=media_type, http_client=http_client
+        )
+        return _build_result(data, None)
+    data, ocr_lines = await asyncio.gather(
+        _call_glm_ocr(image_bytes, media_type=media_type, http_client=http_client),
+        _collect_ocr_lines(
+            [image_bytes], media_type=media_type, http_client=http_client
+        ),
+    )
+    return _build_result(data, None, ocr_lines)
 
 
 def calculate_glm_ocr_cost(usage: dict[str, Any]) -> float:

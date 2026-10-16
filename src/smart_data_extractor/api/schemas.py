@@ -52,8 +52,46 @@ class ExtractRequest(_ExtractionTarget):
     text: str = Field(min_length=1)
 
 
+class OcrBlock(BaseModel):
+    """One OCR grounding block (issue #4, D-028): a line/phrase of text
+    and its bounding box [x1, y1, x2, y2] normalized to 0-100 (percentages
+    of the page image). The review pane matches extracted field values
+    against these blocks locally to overlay highlight boxes."""
+
+    text: str
+    box: list[float] = Field(min_length=4, max_length=4)
+
+
+class OcrLine(BaseModel):
+    """One recognized row from the hand_write OCR interface (D-046): its
+    0-based page, text, 0-100 box, and the weakest character's
+    probability. Fed back by the client to fuse into field confidence."""
+
+    page: int = Field(ge=0)
+    text: str
+    box: list[float] = Field(min_length=4, max_length=4)
+    min_prob: float = Field(ge=0.0, le=1.0)
+
+
+class OcrInput(BaseModel):
+    """Per-text OCR evidence for /batch_extract confidence fusion (D-046)."""
+
+    pages_blocks: list[list[OcrBlock] | None]
+    ocr_lines: list[OcrLine]
+
+
 class BatchExtractRequest(_ExtractionTarget):
     texts: list[str] = Field(min_length=1)
+    # D-046: optional OCR evidence aligned 1:1 with ``texts`` (None entries
+    # = no evidence for that text). Used to fuse row-level OCR confidence
+    # into each field's confidence after extraction.
+    ocr_inputs: list[OcrInput | None] | None = None
+
+    @model_validator(mode="after")
+    def _check_ocr_inputs_aligned(self):
+        if self.ocr_inputs is not None and len(self.ocr_inputs) != len(self.texts):
+            raise ValueError("ocr_inputs must have the same length as texts")
+        return self
 
 
 class TokensUsed(BaseModel):
@@ -77,6 +115,9 @@ class BatchResultItem(BaseModel):
     cost_usd: float
     cost_cny: float
     error: str | None
+    # D-046: per-field OCR fusion evidence ({"ocr_signal": bool, ...});
+    # None when no OCR evidence was supplied for this text.
+    confidence_signals: dict[str, dict[str, Any]] | None = None
 
 
 class BatchExtractResponse(BaseModel):
@@ -152,16 +193,6 @@ class SchemaResolveResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class OcrBlock(BaseModel):
-    """One OCR grounding block (issue #4, D-028): a line/phrase of text
-    and its bounding box [x1, y1, x2, y2] normalized to 0-100 (percentages
-    of the page image). The review pane matches extracted field values
-    against these blocks locally to overlay highlight boxes."""
-
-    text: str
-    box: list[float] = Field(min_length=4, max_length=4)
-
-
 class ParsePdfResponse(BaseModel):
     text: str
     """Per-page OCR text aligned to the original page order; None marks a failed page."""
@@ -171,6 +202,10 @@ class ParsePdfResponse(BaseModel):
     # unparseable grounding output).
     pages_blocks: list[list[OcrBlock] | None] | None = None
     pages_failed: list[int]
+    # D-046: row-level recognition confidence. None = not attempted
+    # (feature off); [] = attempted but nothing usable (failure degrades
+    # to the LLM's self-assessed confidence).
+    ocr_lines: list[OcrLine] | None = None
     # Issue #4 (D-027): per-page rendered PNGs (base64), aligned with `pages`
     # — the review pane previews PDF pages as images so grounding boxes can
     # be overlaid (an iframe embed cannot host overlays). None/absent when the

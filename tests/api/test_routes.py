@@ -664,6 +664,56 @@ async def test_parse_image_happy_path(app, client):
     assert calls[0]["media_type"] == "image/png"
 
 
+_OCR_LINE = {"page": 0, "text": "Tel 138", "box": [0, 0, 50, 10], "min_prob": 0.65}
+
+
+async def test_parse_image_passes_through_ocr_lines(app, client):
+    async def fake(image_bytes, *, media_type, model=None, model_ref=None):
+        return {
+            "text": "t",
+            "pages": ["t"],
+            "pages_failed": [],
+            "tokens_used": {"input": 1, "output": 1},
+            "cost_usd": 0.0,
+            "ocr_lines": [_OCR_LINE],
+        }
+
+    app.dependency_overrides[get_parse_image_fn] = lambda: fake
+    resp = await client.post(
+        "/parse_image", files={"file": ("a.png", b"png", "image/png")}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ocr_lines"] == [_OCR_LINE]
+
+
+async def test_parse_image_without_ocr_lines_returns_null(app, client):
+    fake, _ = _make_fake_parse_image()
+    app.dependency_overrides[get_parse_image_fn] = lambda: fake
+    resp = await client.post(
+        "/parse_image", files={"file": ("a.png", b"png", "image/png")}
+    )
+    assert resp.json()["ocr_lines"] is None
+
+
+async def test_parse_pdf_passes_through_ocr_lines(app, client):
+    async def fake(pdf_bytes, *, model=None, model_ref=None):
+        return {
+            "text": "t",
+            "pages": ["t"],
+            "pages_failed": [],
+            "tokens_used": {"input": 1, "output": 1},
+            "cost_usd": 0.0,
+            "ocr_lines": [_OCR_LINE],
+        }
+
+    app.dependency_overrides[get_parse_pdf_fn] = lambda: fake
+    resp = await client.post(
+        "/parse_pdf", files={"file": ("d.pdf", b"%PDF-1.4", "application/pdf")}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ocr_lines"] == [_OCR_LINE]
+
+
 async def test_parse_image_accepts_jpeg(app, client):
     fake, calls = _make_fake_parse_image()
     app.dependency_overrides[get_parse_image_fn] = lambda: fake
@@ -795,3 +845,125 @@ async def test_parse_pdf_grounding_blocks_default_to_none_for_old_parsers(app, c
     assert resp.status_code == 200
     assert resp.json().get("pages_blocks") is None
 
+
+
+# --- /batch_extract OCR confidence fusion (D-046) ---
+
+
+def _make_confidence_batch():
+    """Fake batch whose data carries an LLM self-rated confidence."""
+
+    async def fake_batch(
+        texts, preset=None, schema_dict=None, *, model=None, instructions=None,
+        return_exceptions=False, lang=None
+    ):
+        results = []
+        for t in texts:
+            if t == "bad":
+                results.append(
+                    {
+                        "data": None,
+                        "tokens_used": {"input": 0, "output": 0},
+                        "cost_usd": 0.0,
+                        "error": "RuntimeError: boom",
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "data": {"phone": "13800001111", "phone_confidence": 0.95},
+                        "tokens_used": {"input": 1, "output": 1},
+                        "cost_usd": 0.001,
+                        "error": None,
+                    }
+                )
+        return {
+            "results": results,
+            "total_cost_usd": 0.001 * len(results),
+            "total_tokens": {"input": len(results), "output": len(results)},
+        }
+
+    return fake_batch
+
+
+_BLURRY_INPUT = {
+    "pages_blocks": [[{"text": "13800001111", "box": [10, 10, 60, 20]}]],
+    "ocr_lines": [
+        {"page": 0, "text": "13800001111", "box": [10, 10, 60, 20], "min_prob": 0.4}
+    ],
+}
+
+
+async def test_batch_extract_fuses_ocr_confidence(app, client, test_db):
+    app.dependency_overrides[get_batch_fn] = lambda: _make_confidence_batch()
+
+    resp = await client.post(
+        "/batch_extract",
+        json={
+            "texts": ["card"],
+            "preset": "contact",
+            "ocr_inputs": [_BLURRY_INPUT],
+        },
+    )
+
+    assert resp.status_code == 200
+    item = resp.json()["results"][0]
+    assert item["data"]["phone"] == "13800001111"
+    assert item["data"]["phone_confidence"] == pytest.approx(0.4)
+    sig = item["confidence_signals"]["phone"]
+    assert sig["ocr_signal"] is True
+    assert sig["ocr_confidence"] == pytest.approx(0.4)
+
+
+async def test_batch_extract_without_ocr_inputs_keeps_llm_confidence(
+    app, client, test_db
+):
+    app.dependency_overrides[get_batch_fn] = lambda: _make_confidence_batch()
+
+    resp = await client.post(
+        "/batch_extract", json={"texts": ["card"], "preset": "contact"}
+    )
+
+    item = resp.json()["results"][0]
+    assert item["data"]["phone_confidence"] == 0.95
+    assert item["confidence_signals"] is None
+
+
+async def test_batch_extract_ocr_inputs_none_entry_and_error_item(
+    app, client, test_db
+):
+    app.dependency_overrides[get_batch_fn] = lambda: _make_confidence_batch()
+
+    resp = await client.post(
+        "/batch_extract",
+        json={
+            "texts": ["card", "bad", "card"],
+            "preset": "contact",
+            "ocr_inputs": [None, _BLURRY_INPUT, _BLURRY_INPUT],
+        },
+    )
+
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert results[0]["data"]["phone_confidence"] == 0.95
+    assert results[0]["confidence_signals"] is None
+    assert results[1]["data"] is None
+    assert results[1]["confidence_signals"] is None
+    assert results[2]["data"]["phone_confidence"] == pytest.approx(0.4)
+
+
+async def test_batch_extract_ocr_inputs_length_mismatch_is_422(
+    app, client, test_db
+):
+    app.dependency_overrides[get_batch_fn] = lambda: _make_confidence_batch()
+
+    resp = await client.post(
+        "/batch_extract",
+        json={
+            "texts": ["a", "b"],
+            "preset": "contact",
+            "ocr_inputs": [_BLURRY_INPUT],
+        },
+    )
+
+    assert resp.status_code == 422

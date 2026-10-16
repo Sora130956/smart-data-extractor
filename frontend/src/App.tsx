@@ -24,7 +24,7 @@ import {
   nextPendingItem,
   reviewState,
 } from '@/utils/review';
-import type { ExtractionResult, ExtractionSource, OcrBlock, SchemaField } from '@/types/extraction';
+import type { ExtractionResult, ExtractionSource, OcrBlock, OcrLine, SchemaField } from '@/types/extraction';
 
 const queryClient = new QueryClient();
 
@@ -99,10 +99,11 @@ function AppShell() {
     fileType?: 'pdf' | 'image',
     pageImages?: string[],
     pagesBlocks?: Array<OcrBlock[] | null>,
+    ocrLines?: OcrLine[],
   ) {
     setStaged((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), name, text, fileUrl, fileType, pageImages, pagesBlocks },
+      { id: crypto.randomUUID(), name, text, fileUrl, fileType, pageImages, pagesBlocks, ocrLines },
     ]);
   }
 
@@ -318,6 +319,9 @@ function AppShell() {
         // Per-text OCR grounding blocks (D-028): the review pane matches
         // extracted values against them locally.
         pagesBlocks: staged.map((item) => item.pagesBlocks),
+        // D-046: hand_write row confidence, fused into field confidence by
+        // the backend.
+        ocrLines: staged.map((item) => item.ocrLines),
         ...target,
         instructions: instructions || undefined,
         // UI language: preset field descriptions sent to the LLM follow it.

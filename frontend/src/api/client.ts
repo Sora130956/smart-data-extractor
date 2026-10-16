@@ -17,6 +17,7 @@ import {
   type PresetSchemaResponse,
   type SchemaResolveResponse,
 } from './schemas';
+import type { OcrBlock, OcrLine } from '@/types/extraction';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -61,6 +62,8 @@ export interface BatchExtractParams {
   instructions?: string;
   /** UI language tag: preset field descriptions sent to the LLM follow it. */
   lang?: string;
+  /** D-046: per-text OCR evidence aligned with `texts` (undefined = none). */
+  ocrInputs?: Array<{ pagesBlocks: Array<OcrBlock[] | null>; ocrLines: OcrLine[] } | undefined>;
 }
 
 export async function batchExtract(
@@ -74,6 +77,11 @@ export async function batchExtract(
   }
   if (params.instructions) body.instructions = params.instructions;
   if (params.lang) body.lang = params.lang;
+  if (params.ocrInputs?.some((o) => o !== undefined)) {
+    body.ocr_inputs = params.ocrInputs.map((o) =>
+      o ? { pages_blocks: o.pagesBlocks, ocr_lines: o.ocrLines } : null,
+    );
+  }
 
   const res = await fetch('/api/batch_extract', {
     method: 'POST',

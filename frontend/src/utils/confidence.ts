@@ -29,6 +29,14 @@ export function confidenceLevel(value: number): ConfidenceLevel {
   return 'low';
 }
 
+/** Per-field display band. A field that misses its own minimum confidence
+ * (e.g. 0.92 against a strict 0.95) is never shown green: it is capped at
+ * medium. Lower bands are unaffected. */
+export function fieldConfidenceLevel(value: number, threshold: number): ConfidenceLevel {
+  const level = confidenceLevel(value);
+  return level === 'high' && value < threshold ? 'medium' : level;
+}
+
 /** An extraction value that counts as "empty": null, missing, or an empty
  * string. Numbers and booleans (0 / false) are real values, never empty. */
 export function isEmptyValue(value: unknown): boolean {

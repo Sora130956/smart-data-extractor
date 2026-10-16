@@ -85,6 +85,36 @@ describe('batchExtract', () => {
     expect('lang' in withoutLang).toBe(false);
   });
 
+  it('sends ocr_inputs (null for entries without OCR data) only when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [],
+        total_cost_usd: 0, total_cost_cny: 0, cost_cny: 0,
+        total_tokens: { input: 0, output: 0 },
+        succeeded: 0,
+        failed: 0,
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const line = { page: 0, text: 'Tel', box: [0, 0, 10, 5] as [number, number, number, number], min_prob: 0.6 };
+    await batchExtract({
+      texts: ['a', 'b'],
+      preset: 'invoice',
+      ocrInputs: [{ pagesBlocks: [[{ text: 'Tel', box: [0, 0, 10, 5] }]], ocrLines: [line] }, undefined],
+    });
+    await batchExtract({ texts: ['a'], preset: 'invoice', ocrInputs: [undefined] });
+
+    const withOcr = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const withoutOcr = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(withOcr.ocr_inputs).toEqual([
+      { pages_blocks: [[{ text: 'Tel', box: [0, 0, 10, 5] }]], ocr_lines: [line] },
+      null,
+    ]);
+    expect('ocr_inputs' in withoutOcr).toBe(false);
+  });
+
   it('throws ApiError with status on a non-ok response', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

@@ -11,6 +11,16 @@ export interface OcrBlock {
   box: [number, number, number, number];
 }
 
+/** One recognized row from the hand_write OCR interface (D-046): 0-based
+ * page, text, 0-100 box and the weakest character's probability. Sent back
+ * to /batch_extract so the backend can fuse it into field confidence. */
+export interface OcrLine {
+  page: number;
+  text: string;
+  box: [number, number, number, number];
+  min_prob: number;
+}
+
 /** Where an extracted value sits in the original file: a normalized 0-100
  * bounding box plus the 0-based page index it was matched on. Computed at
  * render time from the source's OCR grounding blocks (D-028) — never

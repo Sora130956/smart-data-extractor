@@ -5,7 +5,8 @@ import { useUiStore } from '@/store/uiStore';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import {
   CONFIDENCE_LOW,
-  confidenceLevel,
+  fieldConfidenceLevel,
+  fieldThreshold,
   formatConfidence,
   type ConfidenceLevel,
 } from '@/utils/confidence';
@@ -327,7 +328,10 @@ export function ResultDetailModal({
         <div className="mx-4.5 mt-3.5 overflow-hidden rounded-card border border-border">
           {entries.map(([key, value]) => {
             const confidence = result.confidence[key];
-            const level = confidence === undefined ? null : confidenceLevel(confidence);
+            const level =
+              confidence === undefined
+                ? null
+                : fieldConfidenceLevel(confidence, fieldThreshold(key, source.reviewThresholds));
             const fieldLabel = source.fieldLabels?.[key] ?? key;
             const reviewed = result.reviewedFields?.[key] === true;
             // Issue #1: reviewed fields keep showing what the LLM originally

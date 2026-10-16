@@ -3,7 +3,7 @@ import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
-import type { OcrBlock } from '@/types/extraction';
+import type { OcrBlock, OcrLine } from '@/types/extraction';
 import { friendlyErrorKey, isOcrAutoRetryable } from '@/utils/errors';
 import { withOcrAutoRetry } from '@/utils/parseRetry';
 
@@ -31,6 +31,9 @@ export interface StagedText {
   /** Per-page OCR grounding blocks (D-028), aligned with the source's
    * pages — the review pane matches extracted values against them locally. */
   pagesBlocks?: Array<OcrBlock[] | null>;
+  /** hand_write row-level OCR confidence (D-046), page indices relative to
+   * this source — sent back to /batch_extract for confidence fusion. */
+  ocrLines?: OcrLine[];
 }
 
 interface PasteTextInputProps {
@@ -42,6 +45,7 @@ interface PasteTextInputProps {
     fileType?: 'pdf' | 'image',
     pageImages?: string[],
     pagesBlocks?: Array<OcrBlock[] | null>,
+    ocrLines?: OcrLine[],
   ) => void;
   onRemove: (id: string) => void;
 }
@@ -98,7 +102,11 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
                 const pageImages = render ? [render] : undefined;
                 const blocks = result.pages_blocks?.[i];
                 const pagesBlocks = blocks ? [blocks] : undefined;
-                onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages, pagesBlocks);
+                // Keep only this page's rows and re-index them to page 0.
+                const pageLines = result.ocr_lines
+                  ?.filter((l) => l.page === i)
+                  .map((l) => ({ ...l, page: 0 }));
+                onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages, pagesBlocks, pageLines);
               });
             } else {
               onAdd(
@@ -108,6 +116,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
                 'pdf',
                 result.pages_images ?? undefined,
                 result.pages_blocks ?? undefined,
+                result.ocr_lines ?? undefined,
               );
             }
           } catch (err) {
@@ -138,6 +147,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               'image',
               undefined,
               result.pages_blocks ?? undefined,
+              result.ocr_lines ?? undefined,
             );
           } catch (err) {
             const key = friendlyErrorKey(err);

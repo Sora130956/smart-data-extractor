@@ -100,6 +100,40 @@ describe('ResultDetailModal', () => {
     expect(screen.getByText(/Needs review/)).toBeInTheDocument();
   });
 
+  it('never paints a field green when it misses its strict threshold (0.92 vs 0.95)', () => {
+    const strictSource = { ...source, reviewThresholds: { invoice_number: 0.95 } };
+    const result: ExtractionResult = {
+      ...highConfidenceResult,
+      confidence: { invoice_number: 0.92, vendor: 0.9, notes: 0.9 },
+    };
+    render(
+      <ResultDetailModal source={strictSource} result={result} label="Text 1" onClose={() => {}} />,
+    );
+    // 0.92 may also appear as the aggregate figure; the field badge is the
+    // one carrying a band colour.
+    const badges = screen.getAllByText('0.92').filter((el) => /text-(success|warning|error)/.test(el.className));
+    expect(badges.length).toBeGreaterThan(0);
+    for (const badge of badges) {
+      expect(badge.className).toContain('text-warning');
+      expect(badge.className).not.toContain('text-success');
+    }
+    // Fields on the default threshold keep their green band.
+    expect(screen.getAllByText('0.90')[0].className).toContain('text-success');
+  });
+
+  it('keeps a strict-threshold field green once it clears the threshold', () => {
+    const strictSource = { ...source, reviewThresholds: { invoice_number: 0.95 } };
+    render(
+      <ResultDetailModal
+        source={strictSource}
+        result={highConfidenceResult}
+        label="Text 1"
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('0.95').className).toContain('text-success');
+  });
+
   it("judges the warning against the source's per-field thresholds and names them (issue #2)", () => {
     // invoice_number sits at 0.95 — above the 0.70 default, but strictly
     // under a configured 0.99 threshold.

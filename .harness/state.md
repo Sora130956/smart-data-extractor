@@ -165,6 +165,7 @@
 - [x] Issue-13 再追问（2026-10-15，D-043，请求频率限流 pacer + AIMD）：用户反馈 20 张名片并发仍触发 429（retry 2/3 在吸收）。根因：D-035 信号量只限并发数，智谱 1302/429 是请求**频率**限制，小图 1-2s 完成时 2 并发稳态 ~60-120 req/min 超账号 RPM。修复：`ocr.py` 新增进程级 `_RequestPacer`（每次请求含重试发起前按间隔排队，首请求立即；429 时间隔 ×2 至上限 10s，成功 ×0.75 衰减回地板，AIMD 自动收敛到账号真实额度），新配置 `glm_ocr_min_request_interval`（默认 1.0s，0=禁用）；`_pace_sleep` 独立测试缝；conftest fixture 清 pacer 缓存防跨测试真实等待（55s→0.6s）。TDD 先红（7）后绿；全量 304 passed / 2 skipped；突变自证两连（不推进 next_start→2 红、429 不增长→1 红）。浏览器打开 API 链接报 1001 为红鲱鱼（GET 不带鉴权头，429 即证明鉴权通过）
 - [x] Issue-13 官方文档核验（2026-10-15，D-044，退避补 jitter）：用户提供官方限流文档（docs.bigmodel.cn/cn/api/rate-limit）。核验：智谱限额本质是并发数但 1302 含"短时间密集"频率成分、高峰动态收紧、1305 同为 429 已覆盖；唯一偏离官方建议"避免固定间隔的高频重试"的点是退避无抖动——补 `_with_jitter`（+0~25% 只上浮，安全值为硬下界）接入 `_post_with_retries`。测试：新增 jitter 边界+非退化单测、3 个 429 集成断言改范围；全量 305 passed / 2 skipped；突变自证（jitter 恒等→1 红）。经验文档新增 4.4 官方核验小节与控制台查额度入口
 - [x] Issue-13 前端自愈（2026-10-15，D-045，前端自动重试 ocr_rate_limited）：后端三层防御后 429 仍可能耗尽重试抛到前端，用户拍板前端自动重试而非报错。实现：`utils/parseRetry.ts`（`withOcrAutoRetry` 固定阶梯 8s/15s/30s，耗尽重抛、不可重试立即抛，sleep 可注入）+ `errors.ts#isOcrAutoRetryable`（仅 ocr_rate_limited，upstream/network 立即报错走 D-036 友好提示）+ `PasteTextInput` pdf/image 两处包裹（retryingCount 计数显示"正在自动重试"muted 提示，finally 减计数防残留）+ i18n `paste.retrying`。TDD 先红后绿；全量 vitest 407 passed（27 files）+ tsc 0；突变自证（isOcrAutoRetryable 恒 false → 3 红）抓红后还原
+- [x] OCR 置信度融合（2026-10-16，D-046）：原置信度仅来自文本模型自评，看不到图像模糊。新增 glm hand_write OCR 接口（`/files/ocr`，`probability=true`）行级 `min` 置信度，与 glm-ocr 主文本并用。后端：`ocr.py` 调用+降级+独立 pacer/semaphore+PDF 2x 逐页渲染，parse 响应返回 `ocr_lines`；`confidence_fusion.fuse_confidence`（`min(LLM自评, OCR行min)×一致性惩罚0.7`，无对应行仅用自评并 `ocr_signal:false`）；`/batch_extract` 接收 `ocr_inputs` 融合并返回 `confidence_signals`。前端：PasteTextInput→App→useBatchExtract→client 回传 `ocr_lines`（pages 模式按页过滤并重索引），zod schema 同步。TDD 先红后绿；后端 332 passed / 2 skipped，前端 vitest 411 passed；tsc 仅既有 parseRetry.test.ts 错误；突变自证（去 min→8 红；去惩罚→2 红）还原
 
 ## 可视化约定（docs/view/）
 
@@ -341,3 +342,17 @@
 - 决策：`withOcrAutoRetry` 固定阶梯 8s/15s/30s 重试（耗尽重抛、不可重试立即抛）；`isOcrAutoRetryable` 仅认 `ocr_rate_limited`（upstream/network 真实故障立即报错）；PasteTextInput 两处 parse 包裹 + retryingCount"正在自动重试"提示
 - 理由：限流是暂时性状态（后端 AIMD pacer 正在退避），前端隔时重发大概率成功且零用户成本；后端无限重试会挂死请求、假成功是欺骗
 - 详见 `.harness/decisions.md`（验证：TDD 先红后绿；全量 vitest 407 passed + tsc 0；突变自证 3 红后还原）
+
+### D-046: OCR 置信度融合（hand_write 行级置信度 + 文本模型自评）
+- 决策：parse 响应返回 `ocr_lines`，前端回传 `ocr_inputs`，后端按字段 `min(LLM 自评, 对应 OCR 行 min)×一致性惩罚(0.7)`；无对应行仅用自评并标 `ocr_signal:false`；图片与 PDF（逐页 2x 渲染）同做；hand_write 失败降级不影响主流程，独立 pacer/semaphore
+- 理由：文本模型看不到图像质量，自评置信度对模糊图失真；OCR 行 min 概率直接反映识别可靠度；无状态回传避免服务端缓存
+- 未校准：惩罚 0.7、0.5 重叠阈值；`confidence_signals` UI 尚未展示
+- 详见 `.harness/decisions.md`（验证：后端 332 passed/2 skipped；前端 411 passed；突变自证 8 红/2 红后还原）
+
+### D-047: 严格阈值字段详情页最高黄色 + 一致性判定忽略标点
+- 决策：新增 ieldConfidenceLevel（未达字段自身阈值的 high 降为 medium），ResultDetailModal 徽章使用；confidence_fusion 一致性/相关行判定改为仅比字母数字；惩罚 0.7 暂不动，待真实 confidence_signals 样例校准
+- 详见 .harness/decisions.md（验证：后端 334 passed/2 skipped；前端 417 passed；突变自证 2 红后还原）
+
+### D-048: 移除一致性比较与 0.7 惩罚
+- 决策：OCR 服务只贡献置信度，最终 = min(LLM 自评, OCR 相关行 min_prob)；删除 ocr_consistency_penalty 配置与 signals.consistent
+- 详见 .harness/decisions.md（验证：后端 333 passed/2 skipped；突变自证 7 红后还原）

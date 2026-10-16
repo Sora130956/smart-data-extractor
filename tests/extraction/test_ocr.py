@@ -726,3 +726,205 @@ async def test_parse_pdf_429_grows_pacing_interval(monkeypatch, fake_openai_env)
         assert pacer.interval == pytest.approx(1.5)
     finally:
         ocr_module._glm_ocr_pacer.cache_clear()
+
+
+# --- row-level confidence via hand_write OCR (D-046) ---
+
+
+def _hw_row(text, left, top, width, height, *, min_p=0.95, avg=0.97):
+    """One /files/ocr words_result row (pixel location, probability)."""
+    return {
+        "words": text,
+        "location": {"left": left, "top": top, "width": width, "height": height},
+        "probability": {"average": avg, "variance": 0.001, "min": min_p},
+    }
+
+
+def _hw_payload(rows):
+    return {"task_id": "t1", "message": "ok", "status": "succeeded",
+            "words_result_num": len(rows), "words_result": rows}
+
+
+def _enable_confidence(monkeypatch):
+    monkeypatch.setenv("GLM_OCR_CONFIDENCE_ENABLED", "true")
+    monkeypatch.setenv("GLM_API_KEY", "glm-key")
+    monkeypatch.setenv("GLM_OCR_MIN_REQUEST_INTERVAL", "0")
+    monkeypatch.setenv("GLM_HAND_WRITE_MIN_REQUEST_INTERVAL", "0")
+    get_settings.cache_clear()
+    ocr_module._glm_ocr_pacer.cache_clear()
+    ocr_module._hand_write_pacer.cache_clear()
+    ocr_module._hand_write_semaphore.cache_clear()
+
+
+def _routed_client(layout_payload, hw_response, requests):
+    """Mock transport routing /layout_parsing and /files/ocr separately.
+
+    ``hw_response`` is a payload dict, or a callable(request) -> Response.
+    """
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/layout_parsing"):
+            return httpx.Response(200, json=layout_payload)
+        assert request.url.path.endswith("/files/ocr"), request.url
+        if callable(hw_response):
+            return hw_response(request)
+        return httpx.Response(200, json=hw_response)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(transport))
+
+
+_LAYOUT_ONE = _glm_ocr_payload([[_element("text", "Tel 123", [0.1, 0.1, 0.5, 0.2])]])
+
+
+async def test_parse_image_returns_ocr_lines_from_hand_write(monkeypatch, fake_openai_env):
+    """The image is also sent to /files/ocr (multipart, hand_write,
+    probability=true); each row becomes an ocr_line with its pixel
+    location rescaled to 0-100 and probability.min as min_prob."""
+    _enable_confidence(monkeypatch)
+    image = _image_bytes("PNG", 200, 100, None)
+    requests: list[httpx.Request] = []
+    client = _routed_client(
+        _LAYOUT_ONE, _hw_payload([_hw_row("Tel 123", 20, 10, 100, 20, min_p=0.65)]), requests
+    )
+
+    result = await parse_image(image, media_type="image/png", http_client=client)
+
+    assert result["ocr_lines"] == [
+        {"page": 0, "text": "Tel 123", "box": [10.0, 10.0, 60.0, 30.0], "min_prob": 0.65}
+    ]
+    hw = [r for r in requests if r.url.path.endswith("/files/ocr")]
+    assert len(hw) == 1
+    assert str(hw[0].url).startswith("https://open.bigmodel.cn/api/paas/v4/files/ocr")
+    assert hw[0].headers["Authorization"] == "Bearer glm-key"
+    assert hw[0].headers["Content-Type"].startswith("multipart/form-data")
+    body = hw[0].content
+    assert b'name="tool_type"' in body and b"hand_write" in body
+    assert b'name="probability"' in body and b"true" in body
+    assert b'name="file"' in body and image in body
+
+
+async def test_parse_pdf_ocr_lines_per_page_rendered_at_2x(monkeypatch, fake_openai_env):
+    """PDF pages are rendered at 2x for the OCR call and rows carry their
+    0-based page index; the box is normalized by that page's own pixels."""
+    _enable_confidence(monkeypatch)
+    scales: list[float] = []
+    pngs = {1.0: [_image_bytes("PNG", 50, 50, None)] * 2,
+            2.0: [_image_bytes("PNG", 400, 200, None), _image_bytes("PNG", 100, 100, None)]}
+
+    def fake_render(b, scale=1.0):
+        scales.append(scale)
+        return pngs[scale]
+
+    monkeypatch.setattr(ocr_module, "pdf_to_images", fake_render)
+    layout = _glm_ocr_payload([[_element("text", "a", [0.1, 0.1, 0.5, 0.2])]] * 2)
+
+    def hw(request):
+        # Page order of arrival is not guaranteed; key off the uploaded PNG.
+        width = 400 if b"\x00\x00\x01\x90" in request.content else 100
+        if width == 400:
+            rows = [_hw_row("p0", 40, 20, 80, 40)]
+        else:
+            rows = [_hw_row("p1", 10, 10, 50, 50)]
+        return httpx.Response(200, json=_hw_payload(rows))
+
+    requests: list[httpx.Request] = []
+    result = await parse_pdf(b"pdf", http_client=_routed_client(layout, hw, requests))
+
+    assert 2.0 in scales
+    by_page = {line["page"]: line for line in result["ocr_lines"]}
+    assert by_page[0]["box"] == [10.0, 10.0, 30.0, 30.0]
+    assert by_page[1]["box"] == [10.0, 10.0, 60.0, 60.0]
+    assert len(result["pages_images"]) == 2
+
+
+async def test_hand_write_http_error_degrades_to_empty_lines(monkeypatch, fake_openai_env):
+    """A failing confidence call must never fail the parse itself."""
+    _enable_confidence(monkeypatch)
+    requests: list[httpx.Request] = []
+    client = _routed_client(
+        _LAYOUT_ONE, lambda r: httpx.Response(500, json={"error": "boom"}), requests
+    )
+
+    result = await parse_image(_image_bytes("PNG", 20, 20, None), http_client=client)
+
+    assert result["pages"] == ["Tel 123"]
+    assert result["ocr_lines"] == []
+
+
+async def test_hand_write_malformed_response_degrades(monkeypatch, fake_openai_env):
+    """Missing words_result / garbage rows are skipped, not raised."""
+    _enable_confidence(monkeypatch)
+    rows = [
+        {"words": "no location", "probability": {"min": 0.9}},
+        {"words": "no prob", "location": {"left": 1, "top": 1, "width": 5, "height": 5}},
+        _hw_row("good", 2, 2, 10, 10, min_p=0.8),
+    ]
+    client = _routed_client(_LAYOUT_ONE, _hw_payload(rows), [])
+    result = await parse_image(_image_bytes("PNG", 100, 100, None), http_client=client)
+    assert [l["text"] for l in result["ocr_lines"]] == ["good"]
+
+    client = _routed_client(_LAYOUT_ONE, {"unexpected": True}, [])
+    result = await parse_image(_image_bytes("PNG", 100, 100, None), http_client=client)
+    assert result["ocr_lines"] == []
+
+
+async def test_layout_failure_still_raises_with_confidence_enabled(monkeypatch, fake_openai_env):
+    """Only the confidence call is best-effort; layout_parsing errors
+    still fail the document (D-031 decision 7)."""
+    _enable_confidence(monkeypatch)
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/layout_parsing"):
+            return httpx.Response(400, json={"error": "bad"})
+        return httpx.Response(200, json=_hw_payload([]))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    with pytest.raises(httpx.HTTPStatusError):
+        await parse_image(_image_bytes("PNG", 20, 20, None), http_client=client)
+
+
+async def test_confidence_disabled_makes_no_hand_write_call(fake_openai_env):
+    """With the feature off (fixture default) there is no extra request
+    and ocr_lines is None (= 'not attempted', distinct from [])."""
+    requests: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=_LAYOUT_ONE)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    result = await parse_image(_image_bytes("PNG", 20, 20, None), http_client=client)
+    assert len(requests) == 1
+    assert result["ocr_lines"] is None
+
+
+async def test_hand_write_429_retried_with_independent_pacer(monkeypatch, fake_openai_env):
+    """hand_write 429s are retried with backoff and grow ONLY the
+    hand_write pacer — layout_parsing's pacer is a separate instance."""
+    _enable_confidence(monkeypatch)
+    monkeypatch.setenv("GLM_HAND_WRITE_MIN_REQUEST_INTERVAL", "1.0")
+    get_settings.cache_clear()
+    ocr_module._hand_write_pacer.cache_clear()
+    _patch_pace(monkeypatch)
+    sleeps = _patch_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    def hw(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, json={"error": {"code": "1302"}})
+        return httpx.Response(200, json=_hw_payload([_hw_row("ok", 1, 1, 5, 5)]))
+
+    hw_pacer = ocr_module._hand_write_pacer()
+    layout_pacer = ocr_module._glm_ocr_pacer()
+    assert hw_pacer is not layout_pacer
+
+    result = await parse_image(
+        _image_bytes("PNG", 50, 50, None), http_client=_routed_client(_LAYOUT_ONE, hw, [])
+    )
+
+    assert [l["text"] for l in result["ocr_lines"]] == ["ok"]
+    assert len(sleeps) == 1 and 1.0 <= sleeps[0] <= 1.25
+    assert hw_pacer.interval == pytest.approx(1.5)  # 1.0 -> 2.0 -> 1.5
+    assert layout_pacer.interval == pytest.approx(0.0)

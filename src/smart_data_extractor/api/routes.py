@@ -39,6 +39,7 @@ from smart_data_extractor.extraction import (
     parse_pdf,
     resolve_schema,
 )
+from smart_data_extractor.extraction.confidence_fusion import fuse_confidence
 from smart_data_extractor.presets import get_preset_fields, list_presets
 
 router = APIRouter()
@@ -278,8 +279,17 @@ async def batch(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     items = result["results"]
-    for item in items:
+    for i, item in enumerate(items):
         item["cost_cny"] = _to_cny(item["cost_usd"])
+        # D-046: fuse row-level OCR confidence into the LLM's self-rating.
+        ocr = req.ocr_inputs[i] if req.ocr_inputs is not None else None
+        if ocr is not None and item.get("data") is not None:
+            dumped = ocr.model_dump()
+            item["data"], item["confidence_signals"] = fuse_confidence(
+                item["data"],
+                dumped["pages_blocks"],
+                dumped["ocr_lines"],
+            )
     failed = sum(1 for i in items if i["error"] is not None)
     return BatchExtractResponse(
         results=items,

@@ -6,11 +6,35 @@ import {
   belowThresholdFields,
   confidenceLevel,
   emptyViolatingFields,
+  fieldConfidenceLevel,
   fieldThreshold,
   formatConfidence,
   isEmptyValue,
   needsReview,
 } from './confidence';
+
+describe('fieldConfidenceLevel', () => {
+  it('caps a field below its own (strict) threshold at medium, never green', () => {
+    expect(fieldConfidenceLevel(0.92, 0.95)).toBe('medium');
+    expect(fieldConfidenceLevel(0.85, 0.95)).toBe('medium');
+  });
+
+  it('keeps green once the field clears its threshold (inclusive)', () => {
+    expect(fieldConfidenceLevel(0.95, 0.95)).toBe('high');
+    expect(fieldConfidenceLevel(0.97, 0.95)).toBe('high');
+  });
+
+  it('matches confidenceLevel when the threshold is at or below the High band', () => {
+    expect(fieldConfidenceLevel(0.9, DEFAULT_MIN_CONFIDENCE)).toBe('high');
+    expect(fieldConfidenceLevel(0.9, 0.5)).toBe('high');
+    expect(fieldConfidenceLevel(0.75, 0.95)).toBe('medium');
+  });
+
+  it('never lifts a low value and leaves red untouched', () => {
+    expect(fieldConfidenceLevel(0.6, 0.95)).toBe('low');
+    expect(fieldConfidenceLevel(0.6, 0.5)).toBe('low');
+  });
+});
 
 describe('confidenceLevel', () => {
   it('bands on the DESIGN.md §4 thresholds, inclusive at the boundary', () => {

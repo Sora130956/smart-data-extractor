@@ -118,7 +118,7 @@ describe('PasteTextInput', () => {
     const file = makeFile('scan.pdf', 'ignored', 'application/pdf');
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', undefined, undefined));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', undefined, undefined, undefined));
     expect(parsePdf).toHaveBeenCalledWith(file);
   });
 
@@ -148,8 +148,83 @@ describe('PasteTextInput', () => {
         'pdf',
         ['aGk=', 'Ynk='],
         [[{ text: 'OCR extracted text', box: [0, 0, 100, 10] }], null],
+        undefined,
       ),
     );
+  });
+
+  it('passes ocr_lines to onAdd for a whole-document pdf', async () => {
+    useUiStore.setState({ pdfSplitMode: 'whole' });
+    const lines = [
+      { page: 0, text: 'Tel 123', box: [0, 0, 50, 5] as [number, number, number, number], min_prob: 0.65 },
+      { page: 1, text: 'Addr', box: [0, 10, 50, 15] as [number, number, number, number], min_prob: 0.9 },
+    ];
+    vi.mocked(parsePdf).mockResolvedValue({
+      text: 'x',
+      pages: ['x', 'y'],
+      pages_failed: [],
+      ocr_lines: lines,
+      tokens_used: { input: 1, output: 1 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile('scan.pdf', 'ignored', 'application/pdf')] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
+    expect(onAdd.mock.calls[0][6]).toEqual(lines);
+  });
+
+  it('passes ocr_lines to onAdd for an image', async () => {
+    const lines = [
+      { page: 0, text: 'Tel 123', box: [0, 0, 50, 5] as [number, number, number, number], min_prob: 0.65 },
+    ];
+    vi.mocked(parseImage).mockResolvedValue({
+      text: 'x',
+      pages: ['x'],
+      pages_failed: [],
+      ocr_lines: lines,
+      tokens_used: { input: 1, output: 1 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile('card.jpg', 'ignored', 'image/jpeg')] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
+    expect(onAdd.mock.calls[0][6]).toEqual(lines);
+  });
+
+  it('filters ocr_lines per page and re-indexes them to page 0 in pages split mode', async () => {
+    useUiStore.setState({ pdfSplitMode: 'pages' });
+    vi.mocked(parsePdf).mockResolvedValue({
+      text: 'a\n\nb',
+      pages: ['a', 'b'],
+      pages_failed: [],
+      ocr_lines: [
+        { page: 0, text: 'a1', box: [0, 0, 10, 5], min_prob: 0.9 },
+        { page: 1, text: 'b1', box: [0, 0, 10, 5], min_prob: 0.5 },
+        { page: 1, text: 'b2', box: [0, 6, 10, 9], min_prob: 0.7 },
+      ],
+      tokens_used: { input: 1, output: 1 },
+      cost_usd: 0,
+      cost_cny: 0,
+    });
+    const onAdd = vi.fn();
+    const { container } = render(<PasteTextInput staged={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile('r.pdf', 'ignored', 'application/pdf')] } });
+
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
+    expect(onAdd.mock.calls[0][6]).toEqual([{ page: 0, text: 'a1', box: [0, 0, 10, 5], min_prob: 0.9 }]);
+    expect(onAdd.mock.calls[1][6]).toEqual([
+      { page: 0, text: 'b1', box: [0, 0, 10, 5], min_prob: 0.5 },
+      { page: 0, text: 'b2', box: [0, 6, 10, 9], min_prob: 0.7 },
+    ]);
   });
 
   it('adds one source per pdf page when pdfSplitMode is pages', async () => {
@@ -170,8 +245,8 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(2));
-    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url', 'pdf', undefined, undefined);
-    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url', 'pdf', undefined, undefined);
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P1', 'page one', 'blob:mock-url', 'pdf', undefined, undefined, undefined);
+    expect(onAdd).toHaveBeenCalledWith('records.pdf · P3', 'page three', 'blob:mock-url', 'pdf', undefined, undefined, undefined);
     expect(onAdd).not.toHaveBeenCalledWith(expect.stringContaining('P2'), expect.anything());
   });
 
@@ -203,10 +278,12 @@ describe('PasteTextInput', () => {
     expect(onAdd).toHaveBeenCalledWith(
       'records.pdf · P1', 'page one', 'blob:mock-url', 'pdf', ['aGk='],
       [[{ text: 'page one', box: [0, 0, 50, 10] }]],
+      undefined,
     );
     expect(onAdd).toHaveBeenCalledWith(
       'records.pdf · P3', 'page three', 'blob:mock-url', 'pdf', ['Y3k='],
       [[{ text: 'page three', box: [0, 0, 50, 10] }]],
+      undefined,
     );
   });
 
@@ -274,7 +351,7 @@ describe('PasteTextInput', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(8000);
       });
-      expect(onAdd).toHaveBeenCalledWith('card.jpg', 'image OCR text', 'blob:mock-url', 'image', undefined, undefined);
+      expect(onAdd).toHaveBeenCalledWith('card.jpg', 'image OCR text', 'blob:mock-url', 'image', undefined, undefined, undefined);
       expect(screen.queryByText(/retrying automatically/i)).not.toBeInTheDocument();
       expect(screen.queryByText(/busy right now/i)).not.toBeInTheDocument();
     } finally {
@@ -324,7 +401,7 @@ describe('PasteTextInput', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
-    expect(onAdd).toHaveBeenCalledWith('scan.jpg', 'image OCR text', 'blob:mock-url', 'image', undefined, undefined);
+    expect(onAdd).toHaveBeenCalledWith('scan.jpg', 'image OCR text', 'blob:mock-url', 'image', undefined, undefined, undefined);
     expect(parseImage).toHaveBeenCalledWith(file);
     expect(parsePdf).not.toHaveBeenCalled();
   });
@@ -370,7 +447,7 @@ describe('PasteTextInput', () => {
     expect(status.querySelector('.animate-spin')).not.toBeNull();
 
     resolvePdf();
-    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', undefined, undefined));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith('scan.pdf', 'OCR extracted text', 'blob:mock-url', 'pdf', undefined, undefined, undefined));
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     glm_ocr_max_concurrency: int = 2
     glm_ocr_max_retries: int = 3
     glm_ocr_min_request_interval: float = 1.0
+    # Row-level OCR confidence (D-046): glm-ocr returns no confidence, so
+    # each image / rendered PDF page is also sent to Zhipu's
+    # POST /files/ocr (tool_type=hand_write, probability=true). Its
+    # per-row min probability is fused with the LLM self-rating at
+    # extraction time. Has its own concurrency cap and request pacer
+    # (a different endpoint with its own account limits). A failed call
+    # degrades to "no OCR signal" — it never fails a parse.
+    glm_ocr_confidence_enabled: bool = True
+    glm_hand_write_max_concurrency: int = 2
+    glm_hand_write_min_request_interval: float = 1.0
     # DEMO-STAGE quota guard (D-019): caps the daily LLM bill before any
     # public promotion. A limit <= 0 disables that layer. Replace with
     # per-user quotas when the tool goes public.

@@ -7,7 +7,11 @@ from smart_data_extractor.extraction.agent import (
     get_preset_agent,
     shared_concurrency_limiter,
 )
-from smart_data_extractor.extraction.ocr import _glm_ocr_pacer
+from smart_data_extractor.extraction.ocr import (
+    _glm_ocr_pacer,
+    _hand_write_pacer,
+    _hand_write_semaphore,
+)
 from smart_data_extractor.api.routes import get_feedback_quota, get_quota
 
 
@@ -22,12 +26,17 @@ def fake_openai_env(monkeypatch):
     window for real.
     """
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    # The hand_write confidence call (D-046) is a second HTTP request per
+    # parse; off by default so legacy mock transports see one request.
+    monkeypatch.setenv("GLM_OCR_CONFIDENCE_ENABLED", "false")
     get_settings.cache_clear()
     get_preset_agent.cache_clear()
     shared_concurrency_limiter.cache_clear()
     get_quota.cache_clear()
     get_feedback_quota.cache_clear()
     _glm_ocr_pacer.cache_clear()
+    _hand_write_pacer.cache_clear()
+    _hand_write_semaphore.cache_clear()
     yield
     get_preset_agent.cache_clear()
     shared_concurrency_limiter.cache_clear()
@@ -35,6 +44,8 @@ def fake_openai_env(monkeypatch):
     get_quota.cache_clear()
     get_feedback_quota.cache_clear()
     _glm_ocr_pacer.cache_clear()
+    _hand_write_pacer.cache_clear()
+    _hand_write_semaphore.cache_clear()
 
 
 @pytest.fixture
