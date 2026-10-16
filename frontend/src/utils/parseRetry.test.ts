@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OCR_AUTO_RETRY_DELAYS_MS, withOcrAutoRetry } from './parseRetry';
 
-const noSleep = async () => {};
+const noSleep = async (_ms: number) => {};
 
 describe('withOcrAutoRetry', () => {
   it('returns the first success without waiting', async () => {
