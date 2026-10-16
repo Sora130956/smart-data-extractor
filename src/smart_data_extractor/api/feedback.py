@@ -1,27 +1,31 @@
 """User-feedback delivery (POST /feedback): send the visitor's message to
-the owner's mailbox over QQ SMTP using stdlib smtplib — no new dependency.
+the owner's mailbox through the Resend HTTP API (port 443).
 
-The production sender is synchronous (smtplib is blocking); the route runs
-it in a threadpool. Tests inject fakes through ``get_deliver_feedback_fn``
-or fake ``smtplib.SMTP_SSL`` at this module's boundary — the message
-content is never logged (sender privacy; only its length is).
+SMTP is deliberately not used: Render's free tier blocks outbound SMTP
+ports 25/465/587. The production sender is synchronous (httpx.post); the
+route runs it in a threadpool. Tests inject fakes through
+``get_deliver_feedback_fn`` or fake ``httpx.post`` at this module's
+boundary — the message content is never logged (sender privacy; only its
+length is).
 """
 
 import logging
-import smtplib
 from datetime import datetime, timezone
-from email.message import EmailMessage
+
+import httpx
 
 from smart_data_extractor.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+RESEND_API_URL = "https://api.resend.com/emails"
+
 
 class FeedbackError(Exception):
     """Delivery failure mapped to a structured HTTP error by the route.
 
-    code: "feedback_not_configured" (missing SMTP env, -> 503) or
-    "feedback_send_failed" (SMTP rejected / network issue, -> 502).
+    code: "feedback_not_configured" (missing RESEND_API_KEY, -> 503) or
+    "feedback_send_failed" (provider rejected / network issue, -> 502).
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -41,46 +45,52 @@ def deliver_feedback(
         requester_ip: best-effort client IP, included for owner context.
 
     Raises:
-        FeedbackError: SMTP credentials missing, or the send failed.
+        FeedbackError: Resend API key missing, or the send failed.
     """
     settings = get_settings()
-    if not settings.feedback_smtp_user or not settings.feedback_smtp_password:
+    if not settings.resend_api_key:
         raise FeedbackError(
             "feedback_not_configured",
             "Feedback email is not configured on the server.",
         )
-    to_email = settings.feedback_to_email or settings.feedback_smtp_user
     received_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    email = EmailMessage()
-    email["Subject"] = "[Smart Data Extractor] User Feedback"
-    email["From"] = settings.feedback_smtp_user
-    email["To"] = to_email
     contact_line = (
         f"Contact: {contact}\n" if contact else "Contact: (not provided)\n"
     )
-    email.set_content(
-        f"A visitor submitted feedback through the demo site.\n"
-        f"\n"
-        f"{contact_line}"
-        f"Time: {received_at}\n"
-        f"IP: {requester_ip}\n"
-        f"\n"
-        f"--- Feedback ---\n"
-        f"{message}\n"
-    )
+    payload = {
+        "from": settings.feedback_from_email,
+        "to": [settings.feedback_to_email],
+        "subject": "[Smart Data Extractor] User Feedback",
+        "text": (
+            f"A visitor submitted feedback through the demo site.\n"
+            f"\n"
+            f"{contact_line}"
+            f"Time: {received_at}\n"
+            f"IP: {requester_ip}\n"
+            f"\n"
+            f"--- Feedback ---\n"
+            f"{message}\n"
+        ),
+    }
 
     try:
-        with smtplib.SMTP_SSL(
-            settings.feedback_smtp_host,
-            settings.feedback_smtp_port,
+        response = httpx.post(
+            RESEND_API_URL,
+            headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+            json=payload,
             timeout=15,
-        ) as smtp:
-            smtp.login(settings.feedback_smtp_user, settings.feedback_smtp_password)
-            smtp.send_message(email)
-    except (smtplib.SMTPException, TimeoutError, OSError) as exc:
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        # Provider error bodies (e.g. "can only send to your own address")
+        # are useful for the owner and never echo the visitor's message.
+        detail = (
+            exc.response.text[:200]
+            if isinstance(exc, httpx.HTTPStatusError)
+            else exc
+        )
         logger.warning(
-            "FEEDBACK_SEND_FAILED ip=%s error=%s", requester_ip, exc
+            "FEEDBACK_SEND_FAILED ip=%s error=%s", requester_ip, detail
         )
         raise FeedbackError(
             "feedback_send_failed",

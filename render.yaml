@@ -36,11 +36,11 @@ services:
       - key: ADMIN_STATS_TOKEN
         sync: false
       # POST /feedback: delivers visitor feedback to the owner's QQ mailbox
-      # via smtp.qq.com. FEEDBACK_SMTP_USER is the QQ mail address and
-      # FEEDBACK_SMTP_PASSWORD its SMTP *authorization code* (QQ mail:
-      # 设置 -> 账户 -> 开启 SMTP 服务), not the account password. Recipient
+      # via the Resend HTTP API (Render free tier blocks SMTP ports).
+      # RESEND_API_KEY is the Resend API key. Sender defaults to
+      # onboarding@resend.dev (override: FEEDBACK_FROM_EMAIL); recipient
       # defaults to feedback_to_email in config.py (override: FEEDBACK_TO_EMAIL).
-      - key: FEEDBACK_SMTP_USER
-        sync: false
-      - key: FEEDBACK_SMTP_PASSWORD
+      # Without a verified domain Resend only delivers to the Resend
+      # account's own email address.
+      - key: RESEND_API_KEY
         sync: false

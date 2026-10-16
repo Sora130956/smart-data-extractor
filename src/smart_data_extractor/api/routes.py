@@ -361,7 +361,7 @@ async def feedback(
     Anti-abuse: the dedicated feedback quota runs first (rejections get a
     feedback-specific code so the UI can word them differently from the
     extraction guard), and receipt is logged with the message length only —
-    never its content. Delivery runs in a threadpool (blocking smtplib).
+    never its content. Delivery runs in a threadpool (blocking httpx call).
     """
     try:
         quota.spend(request)

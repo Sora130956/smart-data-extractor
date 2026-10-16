@@ -53,13 +53,14 @@ class Settings(BaseSettings):
     # Set to enable GET /stats (today's traffic report); unset hides it.
     admin_stats_token: str | None = None
     # User-feedback email channel (POST /feedback): messages from the demo
-    # site are delivered to the owner's mailbox via QQ SMTP. SMTP user +
-    # password (the QQ mail *authorization code*, not the login password)
-    # must be set in the environment or the endpoint answers 503.
-    feedback_smtp_host: str = "smtp.qq.com"
-    feedback_smtp_port: int = 465
-    feedback_smtp_user: str | None = None
-    feedback_smtp_password: str | None = None
+    # site are delivered to the owner's mailbox via the Resend HTTP API
+    # (SMTP ports are blocked on Render's free tier). RESEND_API_KEY must be
+    # set in the environment or the endpoint answers 503. The default
+    # sender is Resend's shared test address, which can only deliver to the
+    # Resend account's own email; set FEEDBACK_FROM_EMAIL to an address on a
+    # verified domain to lift that restriction.
+    resend_api_key: str | None = None
+    feedback_from_email: str = "onboarding@resend.dev"
     feedback_to_email: str = "1309564814@qq.com"
     # Anti-abuse caps for the unauthenticated feedback endpoint; separate
     # from the extraction guard so feedback can't eat extraction budget.

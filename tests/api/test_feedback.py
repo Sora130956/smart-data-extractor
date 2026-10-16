@@ -2,7 +2,7 @@
 
 Offline: delivery is injected via dependency_overrides (workspace testing
 discipline — never mock the object under test, never hit the network).
-The real SMTP path is covered by monkeypatching smtplib.SMTP_SSL at the
+The real Resend HTTP path is covered by monkeypatching httpx.post at the
 module boundary, which is never invoked in these tests otherwise.
 """
 
@@ -118,9 +118,8 @@ async def test_feedback_is_rate_limited_per_ip(client, app):
     assert second.json()["detail"]["code"] == "feedback_quota"
 
 
-async def test_feedback_503_when_smtp_not_configured(client, app, monkeypatch):
-    monkeypatch.delenv("FEEDBACK_SMTP_USER", raising=False)
-    monkeypatch.delenv("FEEDBACK_SMTP_PASSWORD", raising=False)
+async def test_feedback_503_when_resend_not_configured(client, app, monkeypatch):
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
     get_settings.cache_clear()
 
     resp = await client.post("/api/feedback", json={"message": "hi"})
@@ -132,7 +131,7 @@ async def test_feedback_503_when_smtp_not_configured(client, app, monkeypatch):
 async def test_feedback_502_when_delivery_fails(client, app):
     fn, _ = make_fake_deliver(
         fail_with=FeedbackError(
-            "feedback_send_failed", "SMTP upstream rejected the message"
+            "feedback_send_failed", "Mail provider rejected the message"
         )
     )
     app.dependency_overrides[get_deliver_feedback_fn] = lambda: fn
@@ -144,123 +143,105 @@ async def test_feedback_502_when_delivery_fails(client, app):
 
 
 class TestDeliverFeedbackUnit:
-    """The real sender, with smtplib faked at the module boundary."""
+    """The real sender, with httpx.post faked at the module boundary."""
 
     @pytest.fixture
-    def smtp_env(self, fake_openai_env, monkeypatch):
-        monkeypatch.setenv("FEEDBACK_SMTP_USER", "owner@qq.com")
-        monkeypatch.setenv("FEEDBACK_SMTP_PASSWORD", "auth-code")
-        monkeypatch.setenv("FEEDBACK_TO_EMAIL", "1309564814@qq.com")
+    def resend_env(self, fake_openai_env, monkeypatch):
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("FEEDBACK_TO_EMAIL", "owner@example.com")
+        monkeypatch.delenv("FEEDBACK_FROM_EMAIL", raising=False)
         get_settings.cache_clear()
         yield
         get_settings.cache_clear()
 
-    def test_sends_email_via_qq_smtp_ssl(self, smtp_env, monkeypatch):
+    @staticmethod
+    def fake_post(calls, status_code=200, body=None):
+        def post(url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            return httpx.Response(
+                status_code,
+                json=body if body is not None else {"id": "email-id"},
+                request=httpx.Request("POST", url),
+            )
+
+        return post
+
+    def test_sends_email_via_resend_http_api(self, resend_env, monkeypatch):
         import smart_data_extractor.api.feedback as feedback_module
 
-        sessions = []
-
-        class FakeSMTP:
-            def __init__(self, host, port, timeout=None):
-                sessions.append({"host": host, "port": port, "logins": [], "sent": []})
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def login(self, user, password):
-                sessions[-1]["logins"].append((user, password))
-
-            def send_message(self, email):
-                sessions[-1]["sent"].append(email)
-
-        monkeypatch.setattr(feedback_module.smtplib, "SMTP_SSL", FakeSMTP)
+        calls = []
+        monkeypatch.setattr(feedback_module.httpx, "post", self.fake_post(calls))
 
         result = deliver_feedback(
             "the OCR misses tables", "reporter@example.com", "5.6.7.8"
         )
 
         assert result == {"ok": True}
-        assert len(sessions) == 1
-        assert sessions[0]["host"] == "smtp.qq.com"
-        assert sessions[0]["port"] == 465
-        # Login uses the SMTP user + authorization code from settings.
-        assert sessions[0]["logins"] == [("owner@qq.com", "auth-code")]
-        (email,) = sessions[0]["sent"]
-        assert email["From"] == "owner@qq.com"
-        assert email["To"] == "1309564814@qq.com"
-        body = email.get_content()
-        assert "the OCR misses tables" in body
-        assert "reporter@example.com" in body
-        assert "5.6.7.8" in body
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["url"] == "https://api.resend.com/emails"
+        assert call["headers"]["Authorization"] == "Bearer re_test_key"
+        payload = call["json"]
+        assert payload["from"] == "onboarding@resend.dev"
+        assert payload["to"] == ["owner@example.com"]
+        assert payload["subject"] == "[Smart Data Extractor] User Feedback"
+        assert "the OCR misses tables" in payload["text"]
+        assert "reporter@example.com" in payload["text"]
+        assert "5.6.7.8" in payload["text"]
+        assert call["timeout"] == 15
 
-    def test_raises_not_configured_before_any_network(self, fake_openai_env, monkeypatch):
-        monkeypatch.delenv("FEEDBACK_SMTP_USER", raising=False)
-        monkeypatch.delenv("FEEDBACK_SMTP_PASSWORD", raising=False)
+    def test_raises_not_configured_before_any_network(
+        self, fake_openai_env, monkeypatch
+    ):
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
         get_settings.cache_clear()
 
         def explode(*args, **kwargs):
-            raise AssertionError("must not open an SMTP connection")
+            raise AssertionError("must not open a network connection")
 
         import smart_data_extractor.api.feedback as feedback_module
 
-        monkeypatch.setattr(feedback_module.smtplib, "SMTP_SSL", explode)
+        monkeypatch.setattr(feedback_module.httpx, "post", explode)
 
         with pytest.raises(FeedbackError) as exc_info:
             deliver_feedback("hi", None, "1.1.1.1")
         assert exc_info.value.code == "feedback_not_configured"
 
-    def test_wraps_smtp_failures_as_feedback_error(self, smtp_env, monkeypatch):
-        import smtplib
-
+    def test_wraps_provider_rejection_as_feedback_error(
+        self, resend_env, monkeypatch
+    ):
         import smart_data_extractor.api.feedback as feedback_module
 
-        class BrokenSMTP:
-            def __init__(self, host, port, timeout=None):
-                pass
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def login(self, user, password):
-                raise smtplib.SMTPAuthenticationError(535, b"bad auth code")
-
-            def send_message(self, email):
-                raise AssertionError("login failed first")
-
-        monkeypatch.setattr(feedback_module.smtplib, "SMTP_SSL", BrokenSMTP)
+        calls = []
+        monkeypatch.setattr(
+            feedback_module.httpx,
+            "post",
+            self.fake_post(calls, status_code=403, body={"message": "bad key"}),
+        )
 
         with pytest.raises(FeedbackError) as exc_info:
             deliver_feedback("hi", None, "1.1.1.1")
         assert exc_info.value.code == "feedback_send_failed"
 
-    def test_failure_logs_no_message_content(self, smtp_env, monkeypatch, caplog):
-        import smtplib
-
+    def test_wraps_network_errors_as_feedback_error(self, resend_env, monkeypatch):
         import smart_data_extractor.api.feedback as feedback_module
 
-        class BrokenSMTP:
-            def __init__(self, host, port, timeout=None):
-                pass
+        def broken_post(url, **kwargs):
+            raise httpx.ConnectError("unreachable")
 
-            def __enter__(self):
-                return self
+        monkeypatch.setattr(feedback_module.httpx, "post", broken_post)
 
-            def __exit__(self, *exc):
-                return False
+        with pytest.raises(FeedbackError) as exc_info:
+            deliver_feedback("hi", None, "1.1.1.1")
+        assert exc_info.value.code == "feedback_send_failed"
 
-            def login(self, user, password):
-                raise smtplib.SMTPException("boom")
+    def test_failure_logs_no_message_content(self, resend_env, monkeypatch, caplog):
+        import smart_data_extractor.api.feedback as feedback_module
 
-            def send_message(self, email):
-                raise AssertionError("login failed first")
+        def broken_post(url, **kwargs):
+            raise httpx.ConnectError("boom")
 
-        monkeypatch.setattr(feedback_module.smtplib, "SMTP_SSL", BrokenSMTP)
+        monkeypatch.setattr(feedback_module.httpx, "post", broken_post)
 
         with caplog.at_level(logging.WARNING, logger="smart_data_extractor.api.feedback"):
             with pytest.raises(FeedbackError):
