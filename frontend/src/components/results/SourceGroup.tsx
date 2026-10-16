@@ -1,6 +1,11 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@/components/ui/Button';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
 import { ResultRow } from './ResultRow';
+
+/** Issue #14: results rendered per page inside one source card. */
+export const PAGE_SIZE = 20;
 
 const TYPE_ICON: Record<ExtractionSource['type'], string> = {
   pdf: '📄',
@@ -19,7 +24,14 @@ export function SourceGroup({
   onRetry?: (resultIndex: number) => void;
 }) {
   const { t } = useTranslation();
+  const [page, setPage] = useState(0);
 
+  const totalPages = Math.max(1, Math.ceil(source.results.length / PAGE_SIZE));
+  // Clamp so a shrinking list (filter change, retry) never strands the user
+  // on a page that no longer exists.
+  const currentPage = Math.min(page, totalPages - 1);
+  const start = currentPage * PAGE_SIZE;
+  const pageResults = source.results.slice(start, start + PAGE_SIZE);
   return (
     <div className="mx-5 mb-3 overflow-hidden rounded-card border border-border">
       <div className="flex items-center gap-2.5 bg-surface-muted px-3.5 py-2.5">
@@ -45,16 +57,44 @@ export function SourceGroup({
         ) : null}
       </div>
 
-      {source.results.map((result, i) => (
-        <ResultRow
-          key={`${result.sourceId}-${i}`}
-          result={result}
-          label={t('paste.itemLabel', { index: i + 1 })}
-          fieldLabels={source.fieldLabels}
-          onView={onView ? () => onView(result, i) : undefined}
-          onRetry={onRetry ? () => onRetry(i) : undefined}
-        />
-      ))}
+      {pageResults.map((result, offset) => {
+        const i = start + offset;
+        return (
+          <ResultRow
+            key={`${result.sourceId}-${i}`}
+            result={result}
+            label={t('paste.itemLabel', { index: i + 1 })}
+            fieldLabels={source.fieldLabels}
+            onView={onView ? () => onView(result, i) : undefined}
+            onRetry={onRetry ? () => onRetry(i) : undefined}
+          />
+        );
+      })}
+
+      {totalPages > 1 ? (
+        <nav
+          aria-label={t('pagination.label')}
+          className="flex items-center justify-end gap-2.5 border-t border-border px-3.5 py-2"
+        >
+          <Button
+            size="sm"
+            disabled={currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            {t('pagination.prev')}
+          </Button>
+          <span className="text-caption text-text-muted">
+            {currentPage + 1} / {totalPages}
+          </span>
+          <Button
+            size="sm"
+            disabled={currentPage === totalPages - 1}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            {t('pagination.next')}
+          </Button>
+        </nav>
+      ) : null}
     </div>
   );
 }

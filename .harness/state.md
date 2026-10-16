@@ -356,3 +356,8 @@
 ### D-048: 移除一致性比较与 0.7 惩罚
 - 决策：OCR 服务只贡献置信度，最终 = min(LLM 自评, OCR 相关行 min_prob)；删除 ocr_consistency_penalty 配置与 signals.consistent
 - 详见 .harness/decisions.md（验证：后端 333 passed/2 skipped；突变自证 7 红后还原）
+
+### D-049: 结果页分页（issue #14）
+- 决策：SourceGroup 每页 20 条分页，保持绝对下标；新增 pagination i18n
+- 详见 .harness/decisions.md（验证：前端 423 passed；突变自证 2 红后还原）
+

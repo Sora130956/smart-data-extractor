@@ -1031,3 +1031,11 @@
   3. 删除 config.ocr_consistency_penalty 及 routes 中的传参。取代 D-046 决策 2 的"×一致性惩罚"与 D-047 第 2/3 条的一致性相关内容
 - **取舍**：OCR 漏字/错字不再被惩罚（probability 看不到丢字），仅靠置信度数值与 LLM 自评
 - **验证**：TDD 先红后绿；后端 333 passed/2 skipped；突变自证（min 改为只取 llm → 7 红后还原）
+
+## D-049：结果页分页（issue #14）
+
+- **背景**：单个来源（如多条记录的 PDF）结果超过 20 条后，结果页无法完整查看
+- **决策**：SourceGroup 内按 PAGE_SIZE=20 分页（上一页/下一页 + "页码/总页数"），仅结果数 > 20 时显示；onView/onRetry/序号仍用全量数组的绝对下标，保证详情弹窗、Ctrl+S 下一条、字段编辑不受影响；结果缩短时页码自动夹紧；新增 pagination.* 中英文 i18n
+- **未处理**：过滤（high/review/reviewed）后 visibleSources 的下标为过滤后下标，属既有行为，未改动
+- **验证**：TDD 先红后绿；前端 423 passed；tsc 仅既有 parseRetry 错误；突变自证（绝对下标改为页内下标 → 2 红后还原）
+

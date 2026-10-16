@@ -190,6 +190,11 @@
     "collapse": "Collapse",
     "expand": "Expand"
   },
+  "pagination": {
+    "label": "Result pages",
+    "prev": "Previous page",
+    "next": "Next page"
+  },
   "excel": {
     "sheetResults": "Results",
     "sheetConfidence": "Field Confidence",
