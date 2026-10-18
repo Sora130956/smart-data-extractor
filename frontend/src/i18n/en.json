@@ -18,6 +18,7 @@
     "close": "Close",
     "clear": "Clear All",
     "empty": "No history yet — completed extraction batches are saved in this browser automatically.",
+    "tableLabel": "Table recognition",
     "sourcesCount": "{{count}} sources"
   },
   "settings": {
@@ -68,7 +69,22 @@
     "uploaded": "Uploaded",
     "remove": "Remove"
   },
+  "table": {
+    "edited": "Edited",
+    "noConfidence": "No confidence",
+    "noConfidenceHint": "This cell could not be matched to an OCR line, so no confidence is available. Please review it manually.",
+    "editCell": "Edit cell",
+    "tab": "Table {{index}}",
+    "interactionHint": "Click to locate in image · Double-click to review and edit",
+    "needsReviewWarning": "{{count}} cell(s) need review",
+    "summary": "{{tables}} table(s) · {{total}} cells · {{pending}} to review",
+    "summaryDone": "{{tables}} table(s) · {{total}} cells · all reviewed"
+  },
   "paste": {
+    "tableMode": "Table recognition",
+    "fieldMode": "Field extraction",
+    "useTable": "Recognize as table",
+    "useFields": "Use field extraction",
     "title": "Drop a .txt, .pdf or image file here, or click to browse",
     "hint": "Supports .txt, .pdf and png/jpg/jpeg/bmp images (OCR) · multiple files allowed",
     "dropActive": "Release to add these files",
@@ -198,6 +214,7 @@
   "excel": {
     "sheetResults": "Results",
     "sheetConfidence": "Field Confidence",
+    "sheetTable": "Table {{index}}",
     "source": "Source",
     "item": "Item",
     "status": "Status",

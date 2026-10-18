@@ -7,6 +7,7 @@
 
 import type { ExtractionResult, ExtractionSource, SchemaField } from '@/types/extraction';
 import { belowThresholdFields, emptyViolatingFields, needsReview } from './confidence';
+import { tableReviewSummary } from './table';
 
 /** Issue #3 per-result review status, see `reviewState`. */
 export type ReviewState = 'none' | 'pending' | 'reviewed';
@@ -127,9 +128,16 @@ export function reviewState(
     ExtractionResult,
     'status' | 'avgConfidence' | 'confidence' | 'data' | 'reviewedFields'
   >,
-  source: Pick<ExtractionSource, 'reviewThresholds' | 'allowEmptyFields'>,
+  source: Pick<ExtractionSource, 'reviewThresholds' | 'allowEmptyFields' | 'mode' | 'tables'>,
 ): ReviewState {
   if (result.status === 'failed') return 'pending';
+  // Table mode: judged per cell (non-empty cell flagged by the backend or
+  // not yet confirmed); no field-level thresholds apply.
+  if (source.mode === 'table') {
+    const summary = tableReviewSummary(source.tables);
+    if (summary.pending > 0) return 'pending';
+    return summary.edited > 0 ? 'reviewed' : 'none';
+  }
   if (
     !needsReview({
       avgConfidence: result.avgConfidence,

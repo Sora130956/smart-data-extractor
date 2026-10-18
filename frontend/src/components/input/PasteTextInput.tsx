@@ -3,9 +3,10 @@ import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { parseImage, parsePdf } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
-import type { OcrBlock, OcrLine } from '@/types/extraction';
+import type { OcrBlock, OcrLine, OcrTable } from '@/types/extraction';
 import { friendlyErrorKey, isOcrAutoRetryable } from '@/utils/errors';
 import { withOcrAutoRetry } from '@/utils/parseRetry';
+import { pickPageTables } from '@/utils/table';
 
 const ACCEPT = '.txt,.pdf,.png,.jpg,.jpeg,.bmp';
 // Extensions the backend /parse_image endpoint accepts (GLM vision formats).
@@ -34,6 +35,10 @@ export interface StagedText {
   /** hand_write row-level OCR confidence (D-046), page indices relative to
    * this source — sent back to /batch_extract for confidence fusion. */
   ocrLines?: OcrLine[];
+  /** Recognized tables when the document was judged a table (table mode);
+   * `useTableMode` lets the user fall back to normal field extraction. */
+  tables?: OcrTable[];
+  useTableMode?: boolean;
 }
 
 interface PasteTextInputProps {
@@ -46,11 +51,14 @@ interface PasteTextInputProps {
     pageImages?: string[],
     pagesBlocks?: Array<OcrBlock[] | null>,
     ocrLines?: OcrLine[],
+    tables?: OcrTable[],
   ) => void;
   onRemove: (id: string) => void;
+  /** Toggle a table-detected item between table mode and field extraction. */
+  onToggleTableMode?: (id: string) => void;
 }
 
-export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps) {
+export function PasteTextInput({ staged, onAdd, onRemove, onToggleTableMode }: PasteTextInputProps) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -93,6 +101,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
           try {
             const fileUrl = URL.createObjectURL(file);
             const result = await withOcrAutoRetry(() => parsePdf(file), isOcrAutoRetryable, markRetrying);
+            const tableMode = result.mode === 'table' && (result.tables?.length ?? 0) > 0;
             if (pdfSplitMode === 'pages') {
               // Failed pages come back as null; index+1 is the original page number.
               result.pages.forEach((page, i) => {
@@ -106,8 +115,24 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
                 const pageLines = result.ocr_lines
                   ?.filter((l) => l.page === i)
                   .map((l) => ({ ...l, page: 0 }));
-                onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages, pagesBlocks, pageLines);
+                const pageTables = tableMode ? pickPageTables(result.tables ?? [], i) : [];
+                if (pageTables.length > 0) {
+                  onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages, pagesBlocks, pageLines, pageTables);
+                } else {
+                  onAdd(`${file.name} · P${i + 1}`, page, fileUrl, 'pdf', pageImages, pagesBlocks, pageLines);
+                }
               });
+            } else if (tableMode) {
+              onAdd(
+                file.name,
+                result.text,
+                fileUrl,
+                'pdf',
+                result.pages_images ?? undefined,
+                result.pages_blocks ?? undefined,
+                result.ocr_lines ?? undefined,
+                result.tables ?? undefined,
+              );
             } else {
               onAdd(
                 file.name,
@@ -140,6 +165,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
           try {
             const fileUrl = URL.createObjectURL(file);
             const result = await withOcrAutoRetry(() => parseImage(file), isOcrAutoRetryable, markRetrying);
+            const imageTables = result.mode === 'table' && (result.tables?.length ?? 0) > 0 ? result.tables : null;
             onAdd(
               file.name,
               result.text,
@@ -148,6 +174,7 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
               undefined,
               result.pages_blocks ?? undefined,
               result.ocr_lines ?? undefined,
+              ...(imageTables ? [imageTables] : []),
             );
           } catch (err) {
             const key = friendlyErrorKey(err);
@@ -251,6 +278,20 @@ export function PasteTextInput({ staged, onAdd, onRemove }: PasteTextInputProps)
                   {t('paste.itemLabel', { index: i + 1 })}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                {item.tables && item.tables.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleTableMode?.(item.id)}
+                    title={item.useTableMode ? t('paste.useFields') : t('paste.useTable')}
+                    className={`flex-none rounded-token border px-1.5 py-0.5 text-caption ${
+                      item.useTableMode
+                        ? 'border-brand/40 bg-brand/5 text-brand'
+                        : 'border-border text-text-muted hover:text-text'
+                    }`}
+                  >
+                    {item.useTableMode ? t('paste.tableMode') : t('paste.fieldMode')}
+                  </button>
+                )}
                 <span className="tnum flex-none text-caption text-text-muted">
                   {t('paste.itemChars', { count: item.text.length })}
                 </span>

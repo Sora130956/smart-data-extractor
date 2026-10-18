@@ -91,7 +91,38 @@ export const ocrLineSchema = z.object({
   min_prob: z.number(),
 });
 
+const ocrCellBoxSchema = z.object({
+  page: z.number(),
+  box: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+});
+
+// One table cell (table mode): top-left position + spans, matched OCR row
+// confidence (null = no signal) and bounding box.
+export const ocrTableCellSchema = z.object({
+  row: z.number(),
+  col: z.number(),
+  rowspan: z.number(),
+  colspan: z.number(),
+  text: z.string(),
+  is_header: z.boolean(),
+  confidence: z.number().nullable(),
+  bbox: ocrCellBoxSchema.nullable(),
+  needs_review: z.boolean(),
+  edited: z.boolean(),
+});
+
+export const ocrTableSchema = z.object({
+  page: z.number(),
+  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+  rows: z.number(),
+  cols: z.number(),
+  cells: z.array(ocrTableCellSchema),
+});
+
 export const parsePdfResponseSchema = z.object({
+  // 'table' when the page is mostly a table; tables then carries the cells.
+  mode: z.enum(['table', 'fields']).optional(),
+  tables: z.array(ocrTableSchema).nullish(),
   text: z.string(),
   // D-046: row-level OCR confidence (hand_write interface). Echoed back to
   // /batch_extract for confidence fusion; null/absent when disabled/failed.

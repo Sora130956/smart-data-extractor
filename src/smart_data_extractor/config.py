@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     glm_ocr_confidence_enabled: bool = True
     glm_hand_write_max_concurrency: int = 2
     glm_hand_write_min_request_interval: float = 1.0
+    # Table mode: a page whose layout analysis has a `table` block covering
+    # at least this share of the page switches the result to table mode
+    # (uncalibrated initial value).
+    table_mode_min_area: float = 0.3
     # DEMO-STAGE quota guard (D-019): caps the daily LLM bill before any
     # public promotion. A limit <= 0 disables that layer. Replace with
     # per-user quotas when the tool goes public.

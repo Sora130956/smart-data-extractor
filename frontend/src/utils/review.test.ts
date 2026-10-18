@@ -225,6 +225,21 @@ describe('problemFields (issue #3 review triggers)', () => {
 });
 
 describe('reviewState (issue #3 three-state review status)', () => {
+  it('judges table-mode sources per cell', () => {
+    const cell = (needs: boolean, edited = false) => ({
+      row: 0, col: 0, rowspan: 1, colspan: 1, text: 'x', is_header: false,
+      confidence: 0.5, bbox: null, needs_review: needs, edited,
+    });
+    const table = (cells: ReturnType<typeof cell>[]) => ({
+      page: 0, bbox: [0, 0, 100, 100] as [number, number, number, number], rows: 1, cols: 1, cells,
+    });
+    const result = makeResult({ data: {}, confidence: {}, avgConfidence: 0 });
+    const src = (cells: ReturnType<typeof cell>[]) => ({ mode: 'table' as const, tables: [table(cells)] });
+    expect(reviewState(result, src([cell(true)]))).toBe('pending');
+    expect(reviewState(result, src([cell(false, true)]))).toBe('reviewed');
+    expect(reviewState(result, src([cell(false)]))).toBe('none');
+  });
+
   it('is none for a healthy success result', () => {
     expect(reviewState(makeResult(), makeSource())).toBe('none');
   });

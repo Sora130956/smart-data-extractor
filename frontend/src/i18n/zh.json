@@ -18,6 +18,7 @@
     "close": "关闭",
     "clear": "清空全部",
     "empty": "还没有历史记录 — 提取成功的批次会自动保存在本浏览器中。",
+    "tableLabel": "表格识别",
     "sourcesCount": "{{count}} 个来源"
   },
   "settings": {
@@ -68,7 +69,22 @@
     "uploaded": "已上传",
     "remove": "移除"
   },
+  "table": {
+    "edited": "已修改",
+    "noConfidence": "无置信度",
+    "noConfidenceHint": "该单元格未匹配到 OCR 行，无法给出置信度，请人工复核",
+    "editCell": "编辑单元格",
+    "tab": "表格 {{index}}",
+    "interactionHint": "单击定位原图 · 双击复核并编辑",
+    "needsReviewWarning": "有 {{count}} 个单元格需要复核",
+    "summary": "{{tables}} 个表格 · 共 {{total}} 格 · {{pending}} 格待复核",
+    "summaryDone": "{{tables}} 个表格 · 共 {{total}} 格 · 已全部复核"
+  },
   "paste": {
+    "tableMode": "表格识别",
+    "fieldMode": "字段提取",
+    "useTable": "按表格识别",
+    "useFields": "改用字段提取",
     "title": "拖拽 txt、pdf 或图片文件到此处，或点击选择",
     "hint": "支持 .txt、.pdf 和图片 png/jpg/jpeg/bmp（自动 OCR） · 可多选",
     "dropActive": "松开即可添加文件",
@@ -198,6 +214,7 @@
   "excel": {
     "sheetResults": "提取结果",
     "sheetConfidence": "字段置信度",
+    "sheetTable": "表格 {{index}}",
     "source": "来源",
     "item": "项",
     "status": "状态",

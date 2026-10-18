@@ -323,6 +323,68 @@ describe('autoColumnWidths (issue #12)', () => {
   });
 });
 
+describe('table mode export', () => {
+  const cell = (row: number, col: number, text: string, extra: Record<string, unknown> = {}) => ({
+    row,
+    col,
+    rowspan: 1,
+    colspan: 1,
+    text,
+    is_header: false,
+    confidence: 0.9,
+    needs_review: false,
+    page: 0,
+    box: null,
+    edited: false,
+    ...extra,
+  });
+  const tableSource = makeSource({
+    id: 'table-1',
+    name: 'scan.png',
+    mode: 'table',
+    tables: [
+      {
+        page: 0,
+        rows: 3,
+        cols: 2,
+        edited: false,
+        cells: [
+          cell(0, 0, 'Header', { colspan: 2, is_header: true }),
+          cell(1, 0, 'a'),
+          cell(1, 1, 'b'),
+          cell(2, 0, 'c', { rowspan: 1 }),
+          cell(2, 1, 'd'),
+        ],
+      },
+    ],
+    results: [makeResult({ sourceId: 'table-1' })],
+  } as unknown as Parameters<typeof makeSource>[0]);
+
+  it('emits one sheet per table with merges and keeps table sources out of field sheets', () => {
+    const model = buildExportModel([tableSource, bareSource], t, 'en');
+    expect(model.tables).toHaveLength(1);
+    expect(model.tables[0].name).toBe('Table 1');
+    expect(model.tables[0].rows).toEqual([
+      ['Header', ''],
+      ['a', 'b'],
+      ['c', 'd'],
+    ]);
+    expect(model.tables[0].merges).toEqual([[1, 1, 1, 2]]);
+    expect(model.results.rows).toHaveLength(1);
+    expect(model.results.rows[0][0]).toBe('Lead B');
+  });
+
+  it('writes table sheets and merge ranges into the workbook', { timeout: 20000 }, async () => {
+    const model = buildExportModel([tableSource], t, 'en');
+    const workbook = await buildWorkbook(model);
+    expect(workbook.worksheets.map((ws) => ws.name)).toEqual(['Table 1']);
+    const ws = workbook.getWorksheet('Table 1')!;
+    expect(ws.getCell(1, 1).value).toBe('Header');
+    expect(ws.getCell(2, 2).value).toBe('b');
+    expect(ws.getCell(1, 2).isMerged).toBe(true);
+  });
+});
+
 describe('buildWorkbook', () => {
   // exceljs buffer writes occasionally exceed the 5s default when the whole
   // suite runs in parallel (known flake, D-019) — give it headroom.

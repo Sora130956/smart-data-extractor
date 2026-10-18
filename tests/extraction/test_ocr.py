@@ -928,3 +928,41 @@ async def test_hand_write_429_retried_with_independent_pacer(monkeypatch, fake_o
     assert len(sleeps) == 1 and 1.0 <= sleeps[0] <= 1.25
     assert hw_pacer.interval == pytest.approx(1.5)  # 1.0 -> 2.0 -> 1.5
     assert layout_pacer.interval == pytest.approx(0.0)
+
+
+# --- table mode ---
+
+_TABLE_HTML = "<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr></table>"
+
+
+async def test_parse_image_table_mode_returns_cells_with_hand_write_confidence(
+    monkeypatch, fake_openai_env
+):
+    """A large table block switches the result to table mode; cell
+    confidence is the matching /files/ocr row's min_prob."""
+    _enable_confidence(monkeypatch)
+    layout = _glm_ocr_payload([[_element("table", _TABLE_HTML, [0.0, 0.0, 1.0, 1.0])]])
+    rows = [
+        _hw_row("Name", 0, 0, 80, 20),
+        _hw_row("Age", 100, 0, 80, 20),
+        _hw_row("Alice", 0, 40, 80, 20, min_p=0.6),
+        _hw_row("30", 100, 40, 80, 20, min_p=0.99),
+    ]
+    requests: list[httpx.Request] = []
+    client = _routed_client(layout, _hw_payload(rows), requests)
+
+    result = await parse_image(_image_bytes("PNG", 200, 100, None), http_client=client)
+
+    assert result["mode"] == "table"
+    cells = {(c["row"], c["col"]): c for c in result["tables"][0]["cells"]}
+    assert cells[(1, 0)]["confidence"] == 0.6 and cells[(1, 0)]["needs_review"] is True
+    assert cells[(1, 1)]["confidence"] == 0.99 and cells[(1, 1)]["needs_review"] is False
+    # text pipeline unchanged: table content still flattened to plain text
+    assert result["pages"] == ["NameAgeAlice30"]
+
+
+async def test_parse_image_without_table_stays_in_fields_mode(monkeypatch, fake_openai_env):
+    _enable_confidence(monkeypatch)
+    client = _routed_client(_LAYOUT_ONE, _hw_payload([]), [])
+    result = await parse_image(_image_bytes("PNG", 20, 20, None), http_client=client)
+    assert result["mode"] == "fields" and result["tables"] == []

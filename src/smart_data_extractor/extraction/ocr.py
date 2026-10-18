@@ -54,6 +54,7 @@ from PIL import Image, ImageOps
 
 from smart_data_extractor.config import get_settings
 from smart_data_extractor.extraction.locate import _is_valid_box, normalize_boxes
+from smart_data_extractor.extraction.table import extract_tables
 
 logger = logging.getLogger(__name__)
 
@@ -566,8 +567,17 @@ def _build_result(
         pages.append("\n".join(block["text"] for block in blocks))
         pages_blocks.append(blocks)
 
+    tables = extract_tables(
+        layout_details,
+        pages_info,
+        ocr_lines,
+        min_area=get_settings().table_mode_min_area,
+    )
+
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
     return {
+        "mode": "table" if tables else "fields",
+        "tables": tables,
         "text": "\n\n".join(t for t in pages if t is not None),
         "pages": pages,
         "pages_blocks": pages_blocks,

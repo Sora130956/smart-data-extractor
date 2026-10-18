@@ -24,7 +24,15 @@ import {
   nextPendingItem,
   reviewState,
 } from '@/utils/review';
-import type { ExtractionResult, ExtractionSource, OcrBlock, OcrLine, SchemaField } from '@/types/extraction';
+import { applyCellEdit, buildTableSource } from '@/utils/table';
+import type {
+  ExtractionResult,
+  ExtractionSource,
+  OcrBlock,
+  OcrLine,
+  OcrTable,
+  SchemaField,
+} from '@/types/extraction';
 
 const queryClient = new QueryClient();
 
@@ -68,6 +76,7 @@ function AppShell() {
   const [isHistoryOpen, setHistoryOpen] = useState(false);
   const addHistoryEntry = useHistoryStore((s) => s.addEntry);
   const updateResultField = useHistoryStore((s) => s.updateResultField);
+  const updateTableCell = useHistoryStore((s) => s.updateTableCell);
   // Same cached query as ConfigBar: gives the preset's display name for the
   // history entry label snapshot.
   const { data: presets } = useQuery({ queryKey: ['presets'], queryFn: getPresets });
@@ -100,11 +109,28 @@ function AppShell() {
     pageImages?: string[],
     pagesBlocks?: Array<OcrBlock[] | null>,
     ocrLines?: OcrLine[],
+    tables?: OcrTable[],
   ) {
     setStaged((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), name, text, fileUrl, fileType, pageImages, pagesBlocks, ocrLines },
+      {
+        id: crypto.randomUUID(),
+        name,
+        text,
+        fileUrl,
+        fileType,
+        pageImages,
+        pagesBlocks,
+        ocrLines,
+        ...(tables && tables.length > 0 ? { tables, useTableMode: true } : {}),
+      },
     ]);
+  }
+
+  function handleToggleTableMode(id: string) {
+    setStaged((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, useTableMode: !item.useTableMode } : item)),
+    );
   }
 
   function handleRemove(id: string) {
@@ -114,6 +140,22 @@ function AppShell() {
   function handleRestoreHistory(entry: HistoryEntry) {
     setSources((prev) => [...withFreshIds(entry.sources), ...prev]);
     setHistoryOpen(false);
+  }
+
+  /** Table mode: apply an inline cell correction to the on-screen state, the
+   * open modal, and the persisted history entry. */
+  function handleCellUpdate(tableIndex: number, cellIndex: number, text: string) {
+    if (!selected) return;
+    const sourceId = selected.source.id;
+    const applyEdit = (source: ExtractionSource): ExtractionSource =>
+      source.tables
+        ? { ...source, tables: applyCellEdit(source.tables, tableIndex, cellIndex, text) }
+        : source;
+    setSources((prev) => prev.map((source) => (source.id !== sourceId ? source : applyEdit(source))));
+    setSelected((prev) =>
+      prev && prev.source.id === sourceId ? { ...prev, source: applyEdit(prev.source) } : prev,
+    );
+    updateTableCell(sourceId, tableIndex, cellIndex, text);
   }
 
   /** Review flow: apply an inline field correction to the on-screen state,
@@ -154,6 +196,33 @@ function AppShell() {
   async function handleStart() {
     setResolveError(null);
 
+    // Table-mode items skip schema resolution and /batch_extract entirely:
+    // their cells come straight from the OCR response.
+    const tableStaged = staged.filter((item) => item.useTableMode && item.tables?.length);
+    const fieldStaged = staged.filter((item) => !(item.useTableMode && item.tables?.length));
+    const tableBatchId = crypto.randomUUID().slice(0, 8);
+    const tableSources: ExtractionSource[] = tableStaged.map((item, index) =>
+      buildTableSource(
+        {
+          name: item.name,
+          text: item.text,
+          fileUrl: item.fileUrl,
+          fileType: item.fileType,
+          pageImages: item.pageImages,
+          pagesBlocks: item.pagesBlocks,
+          tables: item.tables ?? [],
+        },
+        tableBatchId,
+        index,
+      ),
+    );
+    if (fieldStaged.length === 0) {
+      setSources((prev) => [...tableSources, ...prev]);
+      addHistoryEntry(tableSources, t('history.tableLabel'));
+      setStaged([]);
+      return;
+    }
+
     // Issue #9: user-edited JSON keys must be valid and unique before any
     // LLM work — mirror the backend's _validate_identifier rules inline.
     const duplicateNames = findDuplicateFieldNames(customFields);
@@ -188,7 +257,7 @@ function AppShell() {
     if (preset === SMART_PRESET_ID) {
       setIsResolving(true);
       try {
-        const inferred = await inferSchema(staged[0].text);
+        const inferred = await inferSchema(fieldStaged[0].text);
         // Field labels follow the UI language, not the input text's language.
         const isZh = (i18n.resolvedLanguage ?? 'en').startsWith('zh');
         const pickLabel = (
@@ -307,21 +376,21 @@ function AppShell() {
 
     mutate(
       {
-        texts: staged.map((item) => item.text),
+        texts: fieldStaged.map((item) => item.text),
         // Blob urls of the original uploads, aligned with texts by index;
         // only pdf/image sources have one (PasteTextInput creates it there).
-        fileUrls: staged.map((item) => item.fileUrl),
+        fileUrls: fieldStaged.map((item) => item.fileUrl),
         // Upload kind per blob url (issue #4 review pane).
-        fileTypes: staged.map((item) => item.fileType),
+        fileTypes: fieldStaged.map((item) => item.fileType),
         // Per-text base64 page renders for pdf uploads (D-027): the review
         // pane overlays grounding boxes on these page images.
-        pageImages: staged.map((item) => item.pageImages),
+        pageImages: fieldStaged.map((item) => item.pageImages),
         // Per-text OCR grounding blocks (D-028): the review pane matches
         // extracted values against them locally.
-        pagesBlocks: staged.map((item) => item.pagesBlocks),
+        pagesBlocks: fieldStaged.map((item) => item.pagesBlocks),
         // D-046: hand_write row confidence, fused into field confidence by
         // the backend.
-        ocrLines: staged.map((item) => item.ocrLines),
+        ocrLines: fieldStaged.map((item) => item.ocrLines),
         ...target,
         instructions: instructions || undefined,
         // UI language: preset field descriptions sent to the LLM follow it.
@@ -334,8 +403,9 @@ function AppShell() {
       },
       {
         onSuccess: (newSources) => {
-          setSources((prev) => [...newSources, ...prev]);
-          addHistoryEntry(newSources, presetLabel);
+          const merged = [...tableSources, ...newSources];
+          setSources((prev) => [...merged, ...prev]);
+          addHistoryEntry(merged, presetLabel);
           setStaged([]);
         },
       },
@@ -411,7 +481,12 @@ function AppShell() {
         <Header onOpenHistory={() => setHistoryOpen(true)} />
 
         <section className="border-b border-border p-5">
-          <PasteTextInput staged={staged} onAdd={handleAdd} onRemove={handleRemove} />
+          <PasteTextInput
+            staged={staged}
+            onAdd={handleAdd}
+            onRemove={handleRemove}
+            onToggleTableMode={handleToggleTableMode}
+          />
           <ConfigBar
             canStart={staged.length > 0}
             isLoading={isPending || isResolving}
@@ -457,6 +532,7 @@ function AppShell() {
           label={t('paste.itemLabel', { index: selected.resultIndex + 1 })}
           onClose={() => setSelected(null)}
           onFieldUpdate={handleFieldUpdate}
+          onCellUpdate={handleCellUpdate}
           onNextItem={handleNextItem}
         />
       ) : null}

@@ -6,7 +6,7 @@ LLM; these are HTTP request/response contracts. All request-shape problems
 with pydantic ValidationError, which FastAPI turns into HTTP 422.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -71,6 +71,36 @@ class OcrLine(BaseModel):
     text: str
     box: list[float] = Field(min_length=4, max_length=4)
     min_prob: float = Field(ge=0.0, le=1.0)
+
+
+class OcrCellBox(BaseModel):
+    page: int = Field(ge=0)
+    box: list[float] = Field(min_length=4, max_length=4)
+
+
+class OcrTableCell(BaseModel):
+    """One table cell (top-left position; spans cover the rest). The
+    confidence is the matched hand_write row's min_prob; None = no signal
+    (then needs_review is True for a non-empty cell)."""
+
+    row: int
+    col: int
+    rowspan: int = 1
+    colspan: int = 1
+    text: str
+    is_header: bool = False
+    confidence: float | None = None
+    bbox: OcrCellBox | None = None
+    needs_review: bool = False
+    edited: bool = False
+
+
+class OcrTable(BaseModel):
+    page: int = Field(ge=0)
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    rows: int
+    cols: int
+    cells: list[OcrTableCell]
 
 
 class OcrInput(BaseModel):
@@ -194,6 +224,11 @@ class SchemaResolveResponse(BaseModel):
 
 
 class ParsePdfResponse(BaseModel):
+    # "table": a table covers most of the page, so `tables` carries the
+    # structure + per-cell confidence and the client skips field
+    # extraction; "fields": the usual OCR text -> LLM extraction flow.
+    mode: Literal["table", "fields"] = "fields"
+    tables: list[OcrTable] = Field(default_factory=list)
     text: str
     """Per-page OCR text aligned to the original page order; None marks a failed page."""
     pages: list[str | None]

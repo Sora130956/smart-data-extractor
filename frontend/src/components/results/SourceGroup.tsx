@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import type { ExtractionResult, ExtractionSource } from '@/types/extraction';
+import { tableReviewSummary } from '@/utils/table';
 import { ResultRow } from './ResultRow';
 
 /** Issue #14: results rendered per page inside one source card. */
@@ -32,6 +33,14 @@ export function SourceGroup({
   const currentPage = Math.min(page, totalPages - 1);
   const start = currentPage * PAGE_SIZE;
   const pageResults = source.results.slice(start, start + PAGE_SIZE);
+  let tableSummary: string | undefined;
+  if (source.mode === 'table') {
+    const s = tableReviewSummary(source.tables);
+    tableSummary =
+      s.pending > 0
+        ? t('table.summary', { tables: s.tables, total: s.cells, pending: s.pending })
+        : t('table.summaryDone', { tables: s.tables, total: s.cells });
+  }
   return (
     <div className="mx-5 mb-3 overflow-hidden rounded-card border border-border">
       <div className="flex items-center gap-2.5 bg-surface-muted px-3.5 py-2.5">
@@ -63,8 +72,9 @@ export function SourceGroup({
           <ResultRow
             key={`${result.sourceId}-${i}`}
             result={result}
-            label={t('paste.itemLabel', { index: i + 1 })}
+            label={source.mode === 'table' ? t('paste.tableMode') : t('paste.itemLabel', { index: i + 1 })}
             fieldLabels={source.fieldLabels}
+            summary={tableSummary}
             onView={onView ? () => onView(result, i) : undefined}
             onRetry={onRetry ? () => onRetry(i) : undefined}
           />

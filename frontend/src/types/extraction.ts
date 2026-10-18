@@ -30,6 +30,30 @@ export interface FieldBox {
   box: [number, number, number, number];
 }
 
+/** One cell of a recognized table (table mode). `row`/`col` is the top-left
+ * position; spans cover the rest. `confidence` is the matched OCR row's
+ * min_prob (null = no signal). `bbox` locates it on the original page. */
+export interface OcrTableCell {
+  row: number;
+  col: number;
+  rowspan: number;
+  colspan: number;
+  text: string;
+  is_header: boolean;
+  confidence: number | null;
+  bbox: FieldBox | null;
+  needs_review: boolean;
+  edited: boolean;
+}
+
+export interface OcrTable {
+  page: number;
+  bbox: [number, number, number, number];
+  rows: number;
+  cols: number;
+  cells: OcrTableCell[];
+}
+
 export interface ExtractionResult {
   sourceId: string;
   /** Human-facing position inside the source: "Page 1" | "Item 2". */
@@ -97,6 +121,11 @@ export interface ExtractionSource {
    * the history entry (lightweight: text + 4 numbers per block); null
    * marks a page without coordinate info. */
   pagesBlocks?: Array<OcrBlock[] | null>;
+  /** 'table' = the image is mostly a table: the GLM-OCR HTML tables are shown
+   * as-is (no field extraction, no LLM). Absent/'fields' = normal flow. */
+  mode?: 'table' | 'fields';
+  /** Recognized tables for mode === 'table' (persisted with history). */
+  tables?: OcrTable[];
   results: ExtractionResult[];
   stats: {
     succeeded: number;

@@ -4,6 +4,7 @@
 import type { useTranslation } from 'react-i18next';
 import type { Workbook } from 'exceljs';
 import type { ExtractionSource } from '@/types/extraction';
+import { tablesToMatrix } from '@/utils/table';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
 
@@ -15,9 +16,45 @@ export interface ExportSheet {
   rows: CellValue[][];
 }
 
+/** A recognized table, laid out on its own worksheet. `merges` are 1-based
+ * [top, left, bottom, right] ranges for cells spanning several rows/cols. */
+export interface TableSheet {
+  name: string;
+  rows: string[][];
+  merges: Array<[number, number, number, number]>;
+}
+
 export interface ExportModel {
   results: ExportSheet;
   confidence: ExportSheet;
+  /** Table-mode sources: one sheet per table, in source order. */
+  tables: TableSheet[];
+}
+
+function buildTableSheets(sources: ExtractionSource[], t: TFunction): TableSheet[] {
+  const sheets: TableSheet[] = [];
+  for (const source of sources) {
+    if (source.mode !== 'table') continue;
+    for (const table of source.tables ?? []) {
+      const merges: TableSheet['merges'] = [];
+      for (const cell of table.cells) {
+        if (cell.rowspan > 1 || cell.colspan > 1) {
+          merges.push([
+            cell.row + 1,
+            cell.col + 1,
+            cell.row + cell.rowspan,
+            cell.col + cell.colspan,
+          ]);
+        }
+      }
+      sheets.push({
+        name: t('excel.sheetTable', { index: sheets.length + 1 }),
+        rows: tablesToMatrix(table),
+        merges,
+      });
+    }
+  }
+  return sheets;
 }
 
 /** Mirrors ResultDetailModal's formatFieldValue, but keeps primitives native
@@ -67,10 +104,13 @@ function useCny(language: string): boolean {
 }
 
 export function buildExportModel(
-  sources: ExtractionSource[],
+  allSources: ExtractionSource[],
   t: TFunction,
   language: string,
 ): ExportModel {
+  const tableSheets = buildTableSheets(allSources, t);
+  // Table-mode sources have no field data; they export as table sheets only.
+  const sources = allSources.filter((s) => s.mode !== 'table');
   const keys = fieldKeys(sources);
   const fields = columnHeaders(sources, keys);
   const cny = useCny(language);
@@ -120,6 +160,7 @@ export function buildExportModel(
       columns: [t('excel.source'), t('excel.item'), ...fields, t('excel.avgConfidence')],
       rows: confidenceRows,
     },
+    tables: tableSheets,
   };
 }
 
@@ -157,7 +198,20 @@ export function autoColumnWidths(sheet: ExportSheet): number[] {
 export async function buildWorkbook(model: ExportModel): Promise<Workbook> {
   const { Workbook } = await import('exceljs');
   const workbook = new Workbook();
-  for (const sheet of [model.results, model.confidence]) {
+  // Pure table exports skip the (empty) field sheets.
+  const fieldSheets =
+    model.results.rows.length === 0 && model.tables.length > 0
+      ? []
+      : [model.results, model.confidence];
+  for (const table of model.tables) {
+    const ws = workbook.addWorksheet(table.name);
+    for (const row of table.rows) ws.addRow(row);
+    for (const [top, left, bottom, right] of table.merges) ws.mergeCells(top, left, bottom, right);
+    ws.columns.forEach((column) => {
+      column.width = 18;
+    });
+  }
+  for (const sheet of fieldSheets) {
     const ws = workbook.addWorksheet(sheet.name);
     ws.addRow(sheet.columns).font = { bold: true };
     for (const row of sheet.rows) ws.addRow(row);

@@ -178,6 +178,43 @@ describe('historyStore actions', () => {
     expect(useHistoryStore.getState().entries).toEqual(before);
   });
 
+  it('updateTableCell edits the cell, marks it edited and persists, keeping tables on addEntry', () => {
+    const { addEntry, updateTableCell } = useHistoryStore.getState();
+    const source: ExtractionSource = {
+      ...makeSource('s1'),
+      mode: 'table',
+      tables: [
+        {
+          page: 0,
+          bbox: [0, 0, 100, 100],
+          rows: 1,
+          cols: 1,
+          cells: [
+            {
+              row: 0,
+              col: 0,
+              rowspan: 1,
+              colspan: 1,
+              text: 'Acme',
+              is_header: false,
+              confidence: 0.5,
+              bbox: null,
+              needs_review: true,
+              edited: false,
+            },
+          ],
+        },
+      ],
+    };
+    addEntry([source], 'Table');
+
+    updateTableCell('s1', 0, 0, 'Globex');
+
+    const cell = useHistoryStore.getState().entries[0].sources[0].tables?.[0].cells[0];
+    expect(cell).toMatchObject({ text: 'Globex', edited: true, needs_review: false, confidence: 0.5 });
+    expect(readStored()[0].sources[0].tables?.[0].cells[0].text).toBe('Globex');
+  });
+
   it('addEntry strips session-scoped file data (blob url, page images) before persisting', () => {
     const { addEntry } = useHistoryStore.getState();
     const source: ExtractionSource = {

@@ -15,8 +15,11 @@ import { exportToExcel } from '@/utils/excelExport';
 import { buildExportFilename } from '@/utils/exportFilename';
 import { problemFields, reviewState } from '@/utils/review';
 import { matchesCombo } from '@/utils/shortcuts';
+import { cellKey, isCellEmpty, tableReviewSummary, tablesToJson } from '@/utils/table';
 import { findFieldRanges, matchFieldBoxes } from '@/utils/textHighlight';
+import type { FieldBox } from '@/types/extraction';
 import { SourcePreviewPane } from './SourcePreviewPane';
+import { TableView } from './TableView';
 
 type TFunction = ReturnType<typeof useTranslation>['t'];
 
@@ -58,6 +61,17 @@ export interface ResultDetailModalProps {
   /** Issue #5 Ctrl+S: bring up the next document that still needs review
    * (the caller owns the results list); a no-op closes nothing. */
   onNextItem?: () => void;
+  /** Table mode: reports an inline cell edit (marks the cell reviewed). */
+  onCellUpdate?: (tableIndex: number, cellIndex: number, text: string) => void;
+}
+
+const EMPTY_BOXES: Record<string, FieldBox> = {};
+const EMPTY_SET = new Set<string>();
+
+/** Parses a key produced by cellKey(); null when it is not a cell key. */
+function parseCellKey(key: string): [number, number] | null {
+  const m = /^t(\d+)c(\d+)$/.exec(key);
+  return m ? [Number(m[1]), Number(m[2])] : null;
 }
 
 export function ResultDetailModal({
@@ -67,7 +81,12 @@ export function ResultDetailModal({
   onClose,
   onFieldUpdate,
   onNextItem,
+  onCellUpdate,
 }: ResultDetailModalProps) {
+  const isTable = source.mode === 'table';
+  const tables = useMemo(() => source.tables ?? [], [source.tables]);
+  const [activeTable, setActiveTable] = useState(0);
+  const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const { t, i18n } = useTranslation();
   const shortcuts = useUiStore((s) => s.shortcuts);
   const [copied, setCopied] = useState(false);
@@ -127,40 +146,73 @@ export function ResultDetailModal({
   // Issue #4: where each field value came from in the source text, plus the
   // per-field review/reviewed state that colors the pane's highlights.
   const ranges = useMemo(
-    () => findFieldRanges(source.sourceText ?? '', result.data),
-    [source.sourceText, result.data],
+    () => (isTable ? {} : findFieldRanges(source.sourceText ?? '', result.data)),
+    [isTable, source.sourceText, result.data],
   );
-  const reviewFieldSet = useMemo(
-    () => new Set([...problems.belowThreshold.map(({ field }) => field), ...problems.empty]),
-    [problems],
-  );
-  const reviewedFieldSet = useMemo(
-    () =>
-      new Set(
-        Object.entries(result.reviewedFields ?? {})
-          .filter(([, reviewed]) => reviewed)
-          .map(([field]) => field),
-      ),
-    [result.reviewedFields],
-  );
+  const reviewFieldSet = useMemo(() => {
+    if (isTable) return EMPTY_SET;
+    return new Set([...problems.belowThreshold.map(({ field }) => field), ...problems.empty]);
+  }, [isTable, problems]);
+  const reviewedFieldSet = useMemo(() => {
+    if (isTable) return EMPTY_SET;
+    return new Set(
+      Object.entries(result.reviewedFields ?? {})
+        .filter(([, reviewed]) => reviewed)
+        .map(([field]) => field),
+    );
+  }, [isTable, result.reviewedFields]);
   // D-028: grounding boxes are matched locally against the OCR blocks that
   // arrived with the parse response — no extra model call, recomputed from
   // the persisted pagesBlocks on every open.
-  const boxes = useMemo(
-    () => matchFieldBoxes(result.data, source.pagesBlocks),
-    [result.data, source.pagesBlocks],
+  const fieldBoxes = useMemo(
+    () => (isTable ? EMPTY_BOXES : matchFieldBoxes(result.data, source.pagesBlocks)),
+    [isTable, result.data, source.pagesBlocks],
   );
+  // Table mode: every cell with a matched OCR line gets its own box; the
+  // pending / edited cells color the highlight like fields do.
+  const tableBoxes = useMemo(() => {
+    const out: Record<string, FieldBox> = {};
+    if (!isTable) return out;
+    tables.forEach((table, ti) =>
+      table.cells.forEach((cell, ci) => {
+        if (cell.bbox) out[cellKey(ti, ci)] = cell.bbox;
+      }),
+    );
+    return out;
+  }, [isTable, tables]);
+  const tablePendingSet = useMemo(() => {
+    const out = new Set<string>();
+    if (!isTable) return out;
+    tables.forEach((table, ti) =>
+      table.cells.forEach((cell, ci) => {
+        if (cell.needs_review && !isCellEmpty(cell)) out.add(cellKey(ti, ci));
+      }),
+    );
+    return out;
+  }, [isTable, tables]);
+  const tableEditedSet = useMemo(() => {
+    const out = new Set<string>();
+    if (!isTable) return out;
+    tables.forEach((table, ti) =>
+      table.cells.forEach((cell, ci) => {
+        if (cell.edited) out.add(cellKey(ti, ci));
+      }),
+    );
+    return out;
+  }, [isTable, tables]);
+  const tableSummary = useMemo(() => tableReviewSummary(tables), [tables]);
+  const boxes = isTable ? tableBoxes : fieldBoxes;
   // Issue #5: keyboard navigation order — the problem fields (below their
   // threshold ∪ empty-violating) in display order. Already-reviewed fields
   // stay in the list so Shift+Tab can go back and fix a bad correction;
   // non-editable values (arrays/objects) have no inline editor and are
   // skipped. Empty while the modal is view-only.
   const reviewOrder = useMemo(() => {
-    if (!onFieldUpdate) return [];
+    if (!onFieldUpdate || isTable) return [];
     return Object.entries(result.data ?? {})
       .filter(([key, value]) => reviewFieldSet.has(key) && isEditableValue(value))
       .map(([key]) => key);
-  }, [reviewFieldSet, result.data, onFieldUpdate]);
+  }, [reviewFieldSet, result.data, onFieldUpdate, isTable]);
 
   function startEdit(key: string, value: unknown) {
     setEditing(key);
@@ -169,6 +221,30 @@ export function ResultDetailModal({
     // lands on the clicked field so Tab continues from there.
     const idx = reviewOrder.indexOf(key);
     if (idx >= 0) setCursor(idx);
+  }
+
+  /** Table mode: single click selects the cell and locates it on the image. */
+  function selectCell(tableIndex: number, cellIndex: number) {
+    const key = cellKey(tableIndex, cellIndex);
+    setSelectedCell(key);
+    if (tableBoxes[key]) setFocus({ field: key, nonce: (focus?.nonce ?? 0) + 1 });
+  }
+
+  /** Table mode: double click opens the cell editor. */
+  function startCellEdit(tableIndex: number, cellIndex: number) {
+    const key = cellKey(tableIndex, cellIndex);
+    setSelectedCell(key);
+    setEditing(key);
+    setDraft(tables[tableIndex]?.cells[cellIndex]?.text ?? '');
+    if (tableBoxes[key]) setFocus({ field: key, nonce: (focus?.nonce ?? 0) + 1 });
+  }
+
+  function commitCellEdit(tableIndex: number, cellIndex: number) {
+    if (!onCellUpdate) return;
+    const original = tables[tableIndex]?.cells[cellIndex];
+    // Unchanged text still counts as reviewed: the user looked and confirmed.
+    if (original) onCellUpdate(tableIndex, cellIndex, draft);
+    setEditing(null);
   }
 
   /** Saves the draft: empty means null; numbers stay numeric. */
@@ -188,6 +264,11 @@ export function ResultDetailModal({
    * edit mode. (issue #5: shared by Tab and Ctrl+S.) */
   function commitOpenEdit() {
     if (editing === null) return;
+    const cell = parseCellKey(editing);
+    if (cell) {
+      commitCellEdit(cell[0], cell[1]);
+      return;
+    }
     const raw = result.data?.[editing];
     if (typeof raw === 'boolean') {
       setEditing(null);
@@ -212,9 +293,11 @@ export function ResultDetailModal({
     return true;
   }
 
+  const exportPayload = () => (isTable ? tablesToJson(tables) : result);
+
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(result, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify(exportPayload(), null, 2));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -223,7 +306,7 @@ export function ResultDetailModal({
   }
 
   function handleExport() {
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(exportPayload(), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -289,7 +372,19 @@ export function ResultDetailModal({
             pending → per-field attribution, or the aggregate-average warning
             when no single field is to blame; reviewed → success banner so a
             fully reviewed item never claims to still need review. */}
-        {state === 'pending' ? (
+        {isTable ? (
+          tableSummary.pending > 0 ? (
+            <div className="mx-4.5 mt-3.5 flex items-start gap-2 rounded-token border border-warning bg-warning/12 px-3 py-2.5 text-caption">
+              <span>⚠️</span>
+              <span>{t('table.needsReviewWarning', { count: tableSummary.pending })}</span>
+            </div>
+          ) : tableSummary.edited > 0 ? (
+            <div className="mx-4.5 mt-3.5 flex items-start gap-2 rounded-token border border-success bg-success/12 px-3 py-2.5 text-caption">
+              <span>✅</span>
+              <span>{t('resultDetail.allReviewed')}</span>
+            </div>
+          ) : null
+        ) : state === 'pending' ? (
           <div className="mx-4.5 mt-3.5 flex items-start gap-2 rounded-token border border-warning bg-warning/12 px-3 py-2.5 text-caption">
             <span>⚠️</span>
             <div className="flex flex-col gap-0.5">
@@ -325,6 +420,25 @@ export function ResultDetailModal({
           </div>
         ) : null}
 
+        {isTable ? (
+          <div className="mx-4.5 mt-3.5">
+            <TableView
+              tables={tables}
+              activeTable={Math.min(activeTable, Math.max(tables.length - 1, 0))}
+              onActiveTableChange={setActiveTable}
+              selected={selectedCell}
+              editing={editing}
+              draft={draft}
+              onDraftChange={setDraft}
+              onSelect={selectCell}
+              onStartEdit={onCellUpdate ? startCellEdit : undefined}
+              onCommit={commitCellEdit}
+            />
+          </div>
+        ) : null}
+
+        {!isTable ? (
+        <>
         <div className="mx-4.5 mt-3.5 overflow-hidden rounded-card border border-border">
           {entries.map(([key, value]) => {
             const confidence = result.confidence[key];
@@ -453,11 +567,13 @@ export function ResultDetailModal({
             {JSON.stringify(result, null, 2)}
           </pre>
         </div>
+        </>
+        ) : null}
 
         <div className="mt-3.5 flex items-center gap-2 border-t border-border px-4.5 py-3.5">
           {/* Issue #5: discoverability for the review shortcuts, showing the
               currently configured combos. */}
-          {onFieldUpdate ? (
+          {onFieldUpdate && !isTable ? (
             <div className="min-w-0 flex-1 truncate text-caption text-text-muted">
               {t('resultDetail.shortcutHint', {
                 next: shortcuts.nextField,
@@ -481,8 +597,8 @@ export function ResultDetailModal({
           <SourcePreviewPane
             source={source}
             ranges={ranges}
-            reviewFields={reviewFieldSet}
-            reviewedFields={reviewedFieldSet}
+            reviewFields={isTable ? tablePendingSet : reviewFieldSet}
+            reviewedFields={isTable ? tableEditedSet : reviewedFieldSet}
             focus={focus}
             editingField={editing}
             boxes={boxes}

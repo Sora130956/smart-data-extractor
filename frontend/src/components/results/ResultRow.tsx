@@ -38,6 +38,7 @@ export function ResultRow({
   result,
   label,
   fieldLabels,
+  summary,
   onView,
   onRetry,
 }: {
@@ -45,6 +46,8 @@ export function ResultRow({
   label: string;
   /** field_name -> display label snapshot from the source. */
   fieldLabels?: Record<string, string>;
+  /** Table-mode sources show one summary chip instead of field chips. */
+  summary?: string;
   onView?: () => void;
   onRetry?: () => void;
 }) {
@@ -77,14 +80,20 @@ export function ResultRow({
     <div className="flex items-center gap-3 border-t border-border px-3.5 py-2.5">
       <span className="w-[62px] flex-none text-caption text-text-muted">{label}</span>
       <span className="flex flex-1 flex-wrap gap-1.5 overflow-hidden">
-        {entries.map(([key, value]) => (
-          <span
-            key={key}
-            className="whitespace-nowrap rounded-token border border-border bg-surface-muted px-2 py-0.5 text-caption"
-          >
-            {fieldChip(key, value, fieldLabels, t)}
+        {summary !== undefined ? (
+          <span className="whitespace-nowrap rounded-token border border-border bg-surface-muted px-2 py-0.5 text-caption">
+            {summary}
           </span>
-        ))}
+        ) : (
+          entries.map(([key, value]) => (
+            <span
+              key={key}
+              className="whitespace-nowrap rounded-token border border-border bg-surface-muted px-2 py-0.5 text-caption"
+            >
+              {fieldChip(key, value, fieldLabels, t)}
+            </span>
+          ))
+        )}
       </span>
       <ConfidenceBar value={result.avgConfidence} />
       <span className="tnum w-[62px] flex-none text-right text-caption text-text-muted">

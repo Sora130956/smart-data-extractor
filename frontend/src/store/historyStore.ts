@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import type { ExtractionSource } from '@/types/extraction';
 import { applyFieldEdit } from '@/utils/review';
+import { applyCellEdit } from '@/utils/table';
 
 export const HISTORY_STORAGE_KEY = 'sde.history';
 export const HISTORY_LIMIT = 20;
@@ -40,6 +41,7 @@ interface HistoryState {
   removeEntry: (id: string) => void;
   clear: () => void;
   updateResultField: (sourceId: string, fieldKey: string, newValue: unknown) => void;
+  updateTableCell: (sourceId: string, tableIndex: number, cellIndex: number, text: string) => void;
 }
 
 export const useHistoryStore = create<HistoryState>((set) => ({
@@ -89,6 +91,20 @@ export const useHistoryStore = create<HistoryState>((set) => ({
             ),
           };
         }),
+      }));
+      persist(entries);
+      return { entries };
+    }),
+
+  updateTableCell: (sourceId, tableIndex, cellIndex, text) =>
+    set((state) => {
+      const entries = state.entries.map((entry) => ({
+        ...entry,
+        sources: entry.sources.map((source) =>
+          source.id !== sourceId || !source.tables
+            ? source
+            : { ...source, tables: applyCellEdit(source.tables, tableIndex, cellIndex, text) },
+        ),
       }));
       persist(entries);
       return { entries };
